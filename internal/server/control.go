@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/hashicorp/yamux"
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/auth"
-	"github.com/nfr-tunnel/nfr/internal/proto"
-	"github.com/nfr-tunnel/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/proto"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 // hub fan-outs change events to console subscribers.

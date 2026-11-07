@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/auth"
 )
 
 // SchemaVersion is bumped when the on-disk shape changes.

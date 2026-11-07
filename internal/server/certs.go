@@ -12,8 +12,8 @@ import (
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 
-	"github.com/nfr-tunnel/nfr/internal/config"
-	"github.com/nfr-tunnel/nfr/internal/transport"
+	"github.com/solitudeit/nfr/internal/config"
+	"github.com/solitudeit/nfr/internal/transport"
 )
 
 // certMode describes how peers should verify this node's certificate.

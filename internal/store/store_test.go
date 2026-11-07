@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/auth"
 )
 
 func TestOpenCreatesState(t *testing.T) {

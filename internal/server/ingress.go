@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/metrics"
-	"github.com/nfr-tunnel/nfr/internal/proto"
-	"github.com/nfr-tunnel/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/metrics"
+	"github.com/solitudeit/nfr/internal/proto"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 // hopHeaders are connection scoped and must not cross the tunnel.

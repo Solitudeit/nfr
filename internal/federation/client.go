@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/transport"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/transport"
 )
 
 // Client manages one remote instance.

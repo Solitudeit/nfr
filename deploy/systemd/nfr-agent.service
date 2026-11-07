@@ -1,6 +1,6 @@
 [Unit]
 Description=NFR agent (reverse tunnel client)
-Documentation=https://github.com/nfr-tunnel/nfr
+Documentation=https://github.com/Solitudeit/nfr
 After=network-online.target
 Wants=network-online.target
 

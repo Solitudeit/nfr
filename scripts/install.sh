@@ -1,14 +1,14 @@
 #!/bin/sh
 # Install the latest nfr release for this machine.
 #
-#   curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sh
 #
 # Environment:
 #   NFR_VERSION  pin a release (e.g. v0.1.0), default: latest
 #   NFR_PREFIX   install directory, default: /usr/local/bin
 set -eu
 
-repo="nfr-tunnel/nfr"
+repo="Solitudeit/nfr"
 prefix="${NFR_PREFIX:-/usr/local/bin}"
 version="${NFR_VERSION:-latest}"
 

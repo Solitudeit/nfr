@@ -5,9 +5,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/auth"
-	"github.com/nfr-tunnel/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 // leaseTTL is how long a reserved port survives while a form is filled in.

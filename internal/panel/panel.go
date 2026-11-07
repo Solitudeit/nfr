@@ -22,9 +22,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/config"
-	"github.com/nfr-tunnel/nfr/internal/server"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/config"
+	"github.com/solitudeit/nfr/internal/server"
 )
 
 //go:embed templates/*.html

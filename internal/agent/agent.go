@@ -17,10 +17,10 @@ import (
 
 	"github.com/hashicorp/yamux"
 
-	"github.com/nfr-tunnel/nfr/internal/auth"
-	"github.com/nfr-tunnel/nfr/internal/proto"
-	"github.com/nfr-tunnel/nfr/internal/transport"
-	"github.com/nfr-tunnel/nfr/internal/version"
+	"github.com/solitudeit/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/proto"
+	"github.com/solitudeit/nfr/internal/transport"
+	"github.com/solitudeit/nfr/internal/version"
 )
 
 // Options describes one server this agent connects to.

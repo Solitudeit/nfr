@@ -5,7 +5,7 @@ RUN go mod download
 COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath \
-      -ldflags "-s -w -X github.com/nfr-tunnel/nfr/internal/version.Version=${VERSION}" \
+      -ldflags "-s -w -X github.com/solitudeit/nfr/internal/version.Version=${VERSION}" \
       -o /out/nfr ./cmd/nfr
 
 FROM alpine:3.21

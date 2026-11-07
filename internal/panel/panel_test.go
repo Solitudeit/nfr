@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nfr-tunnel/nfr/internal/config"
-	"github.com/nfr-tunnel/nfr/internal/log"
-	"github.com/nfr-tunnel/nfr/internal/server"
-	"github.com/nfr-tunnel/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/config"
+	"github.com/solitudeit/nfr/internal/log"
+	"github.com/solitudeit/nfr/internal/server"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 func newPanel(t *testing.T) (*Panel, string) {

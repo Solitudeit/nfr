@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 // Settings is a read-only view of instance behaviour for the console.
