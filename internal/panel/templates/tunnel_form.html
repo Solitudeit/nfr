@@ -1,0 +1,71 @@
+<h1>{{if .Edit}}Edit tunnel{{else}}New tunnel{{end}}</h1>
+<p class="sub">{{.CurName}} · <a href="/_nfr/tunnels?server={{.Current}}">back to tunnels</a></p>
+<form id="tform" method="post" action="/_nfr/tunnels/save" class="rowform">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <input type="hidden" name="server" value="{{.Current}}">
+  {{if .Edit}}<input type="hidden" name="id" value="{{.Edit.ID}}">{{end}}
+  <input type="hidden" name="lease_id" id="lease" value="">
+
+  <div><label for="name">Name</label>
+    <input id="name" name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" placeholder="nas-web" required></div>
+
+  <div><label for="node_id">Node</label>
+    <select id="node_id" name="node_id" required>
+      {{$edit := .Edit}}{{range .Nodes}}
+      <option value="{{.ID}}" {{if $edit}}{{if eq $edit.NodeID .ID}}selected{{end}}{{end}}>{{.Name}}{{if .Online}} (online){{else}} (offline){{end}}</option>
+      {{end}}
+    </select></div>
+
+  <div><label for="type">Kind</label>
+    <select id="type" name="type" onchange="sync()">
+      <option value="tcp" {{if .Edit}}{{if eq .Edit.Type "tcp"}}selected{{end}}{{end}}>TCP port</option>
+      <option value="http" {{if .Edit}}{{if eq .Edit.Type "http"}}selected{{end}}{{end}}>HTTP hostname</option>
+    </select></div>
+
+  <div><label for="local">Local service</label>
+    <input id="local" name="local" value="{{if .Edit}}{{.Edit.Local}}{{end}}" placeholder="127.0.0.1:8080" required></div>
+
+  <div id="portrow"><label for="port">Public port <span class="muted">({{index .PortRange 0}}–{{index .PortRange 1}})</span></label>
+    <div class="inline">
+      <input id="port" name="remote_port" type="number" value="{{if .Edit}}{{if .Edit.RemotePort}}{{.Edit.RemotePort}}{{end}}{{end}}" placeholder="auto">
+      <button type="button" class="ghost" onclick="grab()">Get a port</button>
+    </div>
+    <p class="muted" id="leasehint" style="font-size:12px;margin:6px 0 0">Leave empty to pick a free port automatically.</p>
+  </div>
+
+  <div id="hostrow" style="display:none"><label for="hosts">Hostnames</label>
+    <textarea id="hosts" name="hosts" placeholder="app.example.com">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
+    <p class="muted" style="font-size:12px;margin:6px 0 0">One per line or comma separated. HTTP traffic on 80/443 is routed by Host / SNI.</p>
+  </div>
+
+  <div class="inline"><input type="checkbox" id="enabled" name="enabled" value="1" style="width:auto" {{if .Edit}}{{if .Edit.Enabled}}checked{{end}}{{else}}checked{{end}}>
+    <label for="enabled" style="margin:0">Enabled</label></div>
+
+  <div class="inline"><button type="submit">{{if .Edit}}Save changes{{else}}Create tunnel{{end}}</button>
+    <a class="btn ghost" href="/_nfr/tunnels?server={{.Current}}">Cancel</a></div>
+</form>
+<script>
+function sync(){
+  const t=document.getElementById('type').value;
+  document.getElementById('portrow').style.display = t==='tcp' ? '' : 'none';
+  document.getElementById('hostrow').style.display = t==='http' ? '' : 'none';
+}
+sync();
+async function grab(){
+  const f=document.getElementById('tform');
+  const body=new FormData(f);
+  const server=body.get('server')||'local';
+  try{
+    const res=await fetch('/_nfr/api/allocate?server='+encodeURIComponent(server),{
+      method:'POST',
+      headers:{'X-CSRF':'{{.CSRF}}','Content-Type':'application/x-www-form-urlencoded'},
+      body:'tunnel_id='+encodeURIComponent(body.get('id')||'')
+    });
+    const j=await res.json();
+    if(!res.ok){alert(j.error||'could not reserve a port');return}
+    document.getElementById('port').value=j.port;
+    document.getElementById('lease').value=j.lease_id;
+    document.getElementById('leasehint').textContent='Reserved until '+new Date(j.expires_at).toLocaleTimeString()+' — save to keep it.';
+  }catch(e){alert('request failed: '+e)}
+}
+</script>

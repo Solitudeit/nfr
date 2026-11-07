@@ -1,0 +1,43 @@
+<h1>Settings</h1>
+<p class="sub">{{.PanelURL}}</p>
+<div class="split">
+  <div>
+    <h2 style="margin-top:0">General</h2>
+    <form method="post" action="/_nfr/settings" class="rowform">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div><label for="name">Instance name</label><input id="name" name="name" value="{{.Name}}"></div>
+      <div><label for="domain">Public domain <span class="muted">(used to build hostnames)</span></label>
+        <input id="domain" name="domain" value="{{.Domain}}" placeholder="example.com"></div>
+      <div><label>Port range</label>
+        <div class="inline">
+          <input name="port_low" type="number" value="{{.PortLow}}">
+          <span class="muted">to</span>
+          <input name="port_high" type="number" value="{{.PortHigh}}">
+        </div></div>
+      <div><label for="email">ACME email <span class="muted">(optional)</span></label>
+        <input id="email" name="email" value="{{.Email}}" placeholder="you@example.com"></div>
+      <div class="inline"><input type="checkbox" id="api" name="api_enabled" value="1" style="width:auto" {{if .APIEnabled}}checked{{end}}>
+        <label for="api" style="margin:0">Expose the REST API (needed to manage this node from another console)</label></div>
+      <div><button>Save</button></div>
+    </form>
+  </div>
+  <div>
+    <h2 style="margin-top:0">Security</h2>
+    <div class="card" style="margin-bottom:14px">
+      <div class="k">Certificate ({{.CertSource}}{{if .CertExpiry}} · valid until {{.CertExpiry}}{{end}})</div>
+      {{if eq .CertMode "ca"}}
+      <div style="margin-top:6px">Issued by a public CA — peers verify it with the system trust store.</div>
+      {{else}}
+      <div class="mono" style="margin-top:6px">{{.Pin}}</div>
+      <div class="c">Verify this when joining or adding this server elsewhere.</div>
+      {{end}}
+    </div>
+    <form method="post" action="/_nfr/settings" class="rowform">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="action" value="password">
+      <div><label for="old">Current password</label><input id="old" name="old_password" type="password" required></div>
+      <div><label for="new">New password</label><input id="new" name="new_password" type="password" required></div>
+      <div><button>Change password</button></div>
+    </form>
+  </div>
+</div>

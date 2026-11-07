@@ -1,0 +1,45 @@
+<h1>Servers</h1>
+<p class="sub">Instances this console can manage. They stay independent — this node only talks to their API.</p>
+<div class="split">
+  <div>
+    <h2 style="margin-top:0">Add a server</h2>
+    <form method="post" action="/_nfr/servers" class="rowform">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div><label for="url">Address</label>
+        <input id="url" name="url" placeholder="https://hk.example.com:8443" required></div>
+      <div><label for="api_key">API key</label>
+        <input id="api_key" name="api_key" placeholder="nfr_..." required></div>
+      <div><label for="name">Label</label>
+        <input id="name" name="name" placeholder="Hong Kong"></div>
+      <div><label for="pin">Certificate fingerprint <span class="muted">(optional)</span></label>
+        <input id="pin" name="pin" placeholder="AA:BB:...">
+        <p class="muted" style="font-size:12px;margin:6px 0 0">Leave empty to trust on first use; the fingerprint is stored and must not change later.</p></div>
+      <div><button>Add server</button></div>
+    </form>
+    <p class="foot">On the other machine: Settings → enable the API, then API → create a key with the <span class="mono">admin</span> scope.</p>
+  </div>
+  <div>
+    <h2 style="margin-top:0">Managed</h2>
+    {{if .Cards}}
+    <div class="grid">
+    {{range .Cards}}
+      <div class="pick" style="cursor:default">
+        <div class="t">{{.Name}} {{if .Reachable}}<span class="badge on">online</span>{{else}}<span class="badge err">unreachable</span>{{end}}</div>
+        <div class="u">{{.URL}}</div>
+        <div class="inline">
+          <a class="btn ghost sm" href="/_nfr/tunnels?server={{.ID}}">Tunnels</a>
+          <form method="post" action="/_nfr/servers" onsubmit="return confirm('Remove this server?')">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button class="danger sm">Remove</button>
+          </form>
+        </div>
+      </div>
+    {{end}}
+    </div>
+    {{else}}
+    <p class="muted">Nothing managed yet.</p>
+    {{end}}
+  </div>
+</div>

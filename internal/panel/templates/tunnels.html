@@ -1,0 +1,58 @@
+{{if not .Current}}
+<h1>Choose a server</h1>
+<p class="sub">Every NFR instance manages its own tunnels. Pick the machine the service should become reachable from.</p>
+<div class="grid">
+{{range .Cards}}
+  <a class="pick" href="/_nfr/tunnels?server={{.ID}}">
+    <div class="t">{{.Name}} {{if .Local}}<span class="badge">this node</span>{{else}}{{if .Reachable}}<span class="badge on">online</span>{{else}}<span class="badge err">unreachable</span>{{end}}{{end}}</div>
+    <div class="u">{{.URL}}</div>
+    <div class="c muted">{{.Nodes}} nodes · {{.Tunnels}} tunnels</div>
+  </a>
+{{end}}
+</div>
+<p class="foot">Add more machines under <a href="/_nfr/servers">Servers</a>.</p>
+{{else}}
+<h1>Tunnels on {{.CurName}}</h1>
+<p class="sub"><span class="mono">{{.CurURL}}</span> · <a href="/_nfr/tunnels">switch server</a></p>
+{{if .RemoteErr}}<div class="msg err">Cannot reach this server: {{.RemoteErr}}</div>{{end}}
+{{if not .RemoteErr}}
+<div class="inline" style="margin-bottom:12px">
+  <a class="btn" href="/_nfr/tunnels/new?server={{.Current}}">New tunnel</a>
+</div>
+{{if .Tunnels}}
+<div class="scroll"><table>
+<thead><tr><th>Name</th><th>Node</th><th>Public</th><th>Local</th><th>Status</th><th>Traffic</th><th></th></tr></thead>
+<tbody>
+{{range .Tunnels}}
+<tr>
+  <td><a href="/_nfr/tunnels/edit?id={{.ID}}&server={{$.Current}}">{{.Name}}</a></td>
+  <td class="muted">{{.NodeName}}{{if not .Online}} <span class="badge off">offline</span>{{end}}</td>
+  <td class="mono">{{if eq .Type "http"}}{{join .Hosts ", "}}{{else}}:{{port .RemotePort}}{{end}}</td>
+  <td class="mono muted">{{.Local}}</td>
+  <td>{{if .Enabled}}<span class="badge on">enabled</span>{{else}}<span class="badge off">disabled</span>{{end}}</td>
+  <td class="muted">{{bytes .In}} / {{bytes .Out}}</td>
+  <td>
+    <div class="inline">
+      <form method="post" action="/_nfr/tunnels/toggle">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="server" value="{{$.Current}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
+        <button class="ghost sm">{{if .Enabled}}Disable{{else}}Enable{{end}}</button>
+      </form>
+      <form method="post" action="/_nfr/tunnels/delete" onsubmit="return confirm('Delete this tunnel?')">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="server" value="{{$.Current}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button class="danger sm">Delete</button>
+      </form>
+    </div>
+  </td>
+</tr>
+{{end}}
+</tbody></table></div>
+{{else}}
+<p class="muted">No tunnels on this server yet.</p>
+{{end}}
+{{end}}
+{{end}}

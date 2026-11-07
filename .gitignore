@@ -1,0 +1,6 @@
+/bin/
+/dist/
+*.test
+*.log
+/nfr
+.DS_Store
