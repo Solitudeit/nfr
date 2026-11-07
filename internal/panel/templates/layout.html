@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>{{.Title}} · NFR</title>
-<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzRmNDZlNSIvPjxwYXRoIGQ9Ik0xMSAxMFYyMmgydi03LjJsNSA3LjJoMnYtMTJoLTJ2Ny4yTDEzIDEweiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzE2MTYxNiIvPjxwYXRoIGQ9Ik0xMCA5LjV2MTNoMi4ydi04LjZsNi4xIDguNmgxLjJ2LTEzaC0yLjJ2OC42TDEyLjIgOS41SDEweiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==">
 <link rel="stylesheet" href="/_nfr/static/app.css?v={{.Ver}}">
 <script>try{var t=localStorage.getItem("nfr-theme");if(!t){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 </head>
@@ -35,9 +35,9 @@
     {{if .Notice}}<div class="flash ok" role="status">{{.Notice}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
     {{template "content" .}}
     <footer class="foot">
-      <span>{{.Info.Name}} · {{.Info.Version}}</span>
+      <span>{{.Info.Name}} {{.Info.Version}}</span>
       <span class="dim">rev {{.Info.Revision}}</span>
-      <span class="right dim">NFR 反向隧道控制台</span>
+      <span class="right dim">{{if .Info.Domain}}{{.Info.Domain}}{{end}}</span>
     </footer>
   </main>
 </div>

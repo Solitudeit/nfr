@@ -199,42 +199,27 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 
 	switch typ {
 	case store.TunnelTCP:
-		lo, hi := st.Settings.PortRange[0], st.Settings.PortRange[1]
-		if lo == 0 {
-			lo, hi = 20000, 29999
-		}
-		if port == 0 {
-			p, err := pickPort(st, idOf(existing))
-			if err != nil {
-				return nil, err
-			}
-			port = p
-		}
-		if port < lo || port > hi {
-			return nil, errBad("remote_port", fmt.Sprintf("port must be between %d and %d", lo, hi))
-		}
-		for _, o := range st.Tunnels {
-			if existing != nil && o.ID == existing.ID {
-				continue
-			}
-			if o.Type == store.TunnelTCP && o.RemotePort == port {
-				return nil, errConflict("port_taken", fmt.Sprintf("port %d is already used by %s", port, o.Name))
-			}
-		}
-		samePort := existing != nil && existing.RemotePort == port
-		if !samePort && !canListen(port) {
-			return nil, errConflict("port_busy", fmt.Sprintf("port %d is already in use on this host", port))
-		}
-		if err := consumeLease(st, req.LeaseID, port, idOf(existing)); err != nil {
+		p, err := bindPort(st, port, existing, req.LeaseID)
+		if err != nil {
 			return nil, err
 		}
-		t.RemotePort = port
+		t.RemotePort = p
 		t.Hosts = nil
 	case store.TunnelHTTP:
 		norm := normalizeHosts(hosts)
+		if port > 0 {
+			// Port based HTTP: reachable as http://<server-ip>:<port>/ .
+			p, err := bindPort(st, port, existing, req.LeaseID)
+			if err != nil {
+				return nil, err
+			}
+			t.RemotePort = p
+			t.Hosts = norm
+			break
+		}
 		if len(norm) == 0 {
 			if domain == "" {
-				return nil, errBad("hosts", "set a domain in settings or list the hostnames to match")
+				return nil, errBad("hosts", "set a domain in settings, list hostnames, or give the tunnel a public port")
 			}
 			norm = []string{strings.ToLower(name) + "." + strings.ToLower(domain)}
 		}
@@ -261,10 +246,46 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 		t.Hosts = norm
 		t.RemotePort = 0
 		if req.LeaseID != "" {
-			return nil, errBad("lease", "http tunnels do not need a port reservation")
+			return nil, errBad("lease", "domain tunnels do not need a port reservation")
 		}
 	}
 	return t, nil
+}
+
+// bindPort validates and reserves a public port for either TCP or port based
+// HTTP tunnels: it must be inside the configured range, free in the store, not
+// already bound on this host, and match any lease handed out earlier.
+func bindPort(st *store.State, port int, existing *store.Tunnel, leaseID string) (int, error) {
+	lo, hi := st.Settings.PortRange[0], st.Settings.PortRange[1]
+	if lo == 0 {
+		lo, hi = 20000, 29999
+	}
+	if port == 0 {
+		p, err := pickPort(st, idOf(existing))
+		if err != nil {
+			return 0, err
+		}
+		port = p
+	}
+	if port < lo || port > hi {
+		return 0, errBad("remote_port", fmt.Sprintf("port must be between %d and %d", lo, hi))
+	}
+	for _, o := range st.Tunnels {
+		if existing != nil && o.ID == existing.ID {
+			continue
+		}
+		if o.RemotePort == port {
+			return 0, errConflict("port_taken", fmt.Sprintf("port %d is already used by %s", port, o.Name))
+		}
+	}
+	samePort := existing != nil && existing.RemotePort == port
+	if !samePort && !canListen(port) {
+		return 0, errConflict("port_busy", fmt.Sprintf("port %d is already in use on this host", port))
+	}
+	if err := consumeLease(st, leaseID, port, idOf(existing)); err != nil {
+		return 0, err
+	}
+	return port, nil
 }
 
 func idOf(t *store.Tunnel) string {

@@ -35,8 +35,10 @@ agent ──TCP──▶ server:8443
 
 ## 数据面
 
-- **HTTP 隧道**：server 在 80/443 上按 `Host`（TLS 下优先看 SNI）匹配隧道，
-  重写请求头后写进一条 yamux 流；agent 转发给内网服务，响应原路返回。
+- **HTTP 隧道**有两种入口：分配了公网端口的，server 在那个端口上跑一个
+  HTTP 服务，所有请求都送给这条隧道（访客用 `http://服务器IP:端口`）；
+  没分配端口的，server 在 80/443 上按 `Host`（TLS 下优先看 SNI）匹配域名。
+  两种都重写请求头后写进一条 yamux 流；agent 转发给内网服务，响应原路返回。
   WebSocket/Upgrade 走 `proxyUpgrade`：接管连接后双向裸拷。
 - **TCP 隧道**：server 在端口池里 listen，来一个连接开一条流，agent 拨
   `local` 后双向拷贝。

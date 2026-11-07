@@ -248,8 +248,8 @@
     var svg = el("svg", { viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none", "aria-hidden": "true" });
     var defs = el("defs", {});
     var grad = el("linearGradient", { id: "nfr-fill", x1: 0, y1: 0, x2: 0, y2: 1 });
-    grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--accent)", "stop-opacity": "0.26" }));
-    grad.appendChild(el("stop", { offset: "100%", "stop-color": "var(--accent)", "stop-opacity": "0" }));
+    grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--text)", "stop-opacity": "0.10" }));
+    grad.appendChild(el("stop", { offset: "100%", "stop-color": "var(--text)", "stop-opacity": "0" }));
     defs.appendChild(grad);
     svg.appendChild(defs);
     [0.25, 0.5, 0.75].forEach(function (f) {

@@ -95,6 +95,37 @@ func TestCreateTunnelHTTP(t *testing.T) {
 	}
 }
 
+func TestCreateTunnelHTTPOnPort(t *testing.T) {
+	s, st := newTestServer(t, nil)
+	addNode(t, st, "n1")
+	port := 0
+	for p := 25000; p < 25100; p++ {
+		if canListen(p) {
+			port = p
+			break
+		}
+	}
+	if port == 0 {
+		t.Skip("no free port in the default range")
+	}
+
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "webui", NodeID: "n1", Type: "http", Local: "8080", RemotePort: port})
+	if err != nil {
+		t.Fatalf("create http tunnel on a port: %v", err)
+	}
+	if tun.RemotePort != port {
+		t.Fatalf("remote port = %d, want %d", tun.RemotePort, port)
+	}
+	if len(tun.Hosts) != 0 {
+		t.Fatalf("hosts = %v, want none", tun.Hosts)
+	}
+
+	// The same port cannot be reused by another tunnel, whatever its type.
+	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "dup", NodeID: "n1", Type: "tcp", Local: "8081", RemotePort: port}); err == nil {
+		t.Fatal("duplicate public port accepted")
+	}
+}
+
 func TestCreateTunnelRequiresDomainForHTTP(t *testing.T) {
 	s, st := newTestServer(t, func(c *config.Server) { c.Domain = "" })
 	addNode(t, st, "n1")
