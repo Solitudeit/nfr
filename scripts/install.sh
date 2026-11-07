@@ -37,12 +37,22 @@ if [ "$os" = windows ]; then url="$url.exe"; fi
 
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
+
+fetch() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$2" "$1"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' "$1" "$2"
+  else
+    echo "need curl, wget or python3 to download the release" >&2
+    exit 1
+  fi
+}
+
 echo "downloading $url"
-if command -v curl >/dev/null 2>&1; then
-  curl -fL "$url" -o "$tmp"
-else
-  wget -qO "$tmp" "$url"
-fi
+fetch "$url" "$tmp"
 chmod +x "$tmp"
 mkdir -p "$prefix"
 mv "$tmp" "$prefix/nfr"
