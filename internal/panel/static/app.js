@@ -248,8 +248,8 @@
     var svg = el("svg", { viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none", "aria-hidden": "true" });
     var defs = el("defs", {});
     var grad = el("linearGradient", { id: "nfr-fill", x1: 0, y1: 0, x2: 0, y2: 1 });
-    grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--mint)", "stop-opacity": "0.26" }));
-    grad.appendChild(el("stop", { offset: "100%", "stop-color": "var(--mint)", "stop-opacity": "0" }));
+    grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--accent)", "stop-opacity": "0.26" }));
+    grad.appendChild(el("stop", { offset: "100%", "stop-color": "var(--accent)", "stop-opacity": "0" }));
     defs.appendChild(grad);
     svg.appendChild(defs);
     [0.25, 0.5, 0.75].forEach(function (f) {
@@ -259,7 +259,9 @@
     svg.appendChild(el("line", { class: "axis", x1: 0, y1: h - padB, x2: w, y2: h - padB }));
     if (shown.in.length > 1) {
       svg.appendChild(el("path", { class: "area-in", d: path(shown.in, true) }));
-      svg.appendChild(el("path", { class: "line-out", d: path(shown.out, false), "vector-effect": "non-scaling-stroke" }));
+      if (shown.out.some(function (v) { return v > 0; })) {
+        svg.appendChild(el("path", { class: "line-out", d: path(shown.out, false), "vector-effect": "non-scaling-stroke" }));
+      }
       svg.appendChild(el("path", { class: "line-in", d: path(shown.in, false), "vector-effect": "non-scaling-stroke" }));
     } else {
       var lastY = h - padB - (shown.in[0] / max) * (h - padT - padB);
