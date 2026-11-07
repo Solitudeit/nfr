@@ -19,7 +19,7 @@ sudo systemctl enable --now nfr-server
 journalctl -u nfr-server -f
 ```
 
-第一次的密码只会打印一次；忘了就在面板 Settings 里改，或者删掉
+第一次的密码只会打印一次；忘了就在面板「设置」里改，或者删掉
 `state.json` 里的 `panel_password` 字段再重启（会重新生成）。
 
 ### 防火墙
@@ -87,7 +87,7 @@ NFR 自己要占 80/443，和 nginx 直接抢端口。三种选择：
 ## 内网机器
 
 ```bash
-nfr join example.com ABC123                  # 加入码在面板 Nodes 页生成
+nfr join example.com ABC123                  # 加入码在面板「节点」页生成
 sudo cp deploy/systemd/nfr-agent.service /etc/systemd/system/
 sudo systemctl enable --now nfr-agent
 ```

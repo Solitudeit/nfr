@@ -1,71 +1,125 @@
-<h1>{{if .Edit}}Edit tunnel{{else}}New tunnel{{end}}</h1>
-<p class="sub">{{.CurName}} · <a href="/_nfr/tunnels?server={{.Current}}">back to tunnels</a></p>
-<form id="tform" method="post" action="/_nfr/tunnels/save" class="rowform">
+<div class="page-head">
+  <div>
+    <h1>{{if .Edit}}编辑隧道{{else}}新建隧道{{end}}</h1>
+    <p class="lead">{{if .Edit}}编辑「{{.Edit.Name}}」· 目标实例 {{.CurName}}{{else}}为 {{.CurName}} 上的内网服务建一条公网入口。{{end}}</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn ghost" href="/_nfr/tunnels?server={{.Current}}">{{template "i-arrow-left"}}返回</a>
+  </div>
+</div>
+
+<form id="tform" method="post" action="/_nfr/tunnels/save" class="form">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="server" value="{{.Current}}">
   {{if .Edit}}<input type="hidden" name="id" value="{{.Edit.ID}}">{{end}}
   <input type="hidden" name="lease_id" id="lease" value="">
 
-  <div><label for="name">Name</label>
-    <input id="name" name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" placeholder="nas-web" required></div>
-
-  <div><label for="node_id">Node</label>
-    <select id="node_id" name="node_id" required>
-      {{$edit := .Edit}}{{range .Nodes}}
-      <option value="{{.ID}}" {{if $edit}}{{if eq $edit.NodeID .ID}}selected{{end}}{{end}}>{{.Name}}{{if .Online}} (online){{else}} (offline){{end}}</option>
-      {{end}}
-    </select></div>
-
-  <div><label for="type">Kind</label>
-    <select id="type" name="type" onchange="sync()">
-      <option value="tcp" {{if .Edit}}{{if eq .Edit.Type "tcp"}}selected{{end}}{{end}}>TCP port</option>
-      <option value="http" {{if .Edit}}{{if eq .Edit.Type "http"}}selected{{end}}{{end}}>HTTP hostname</option>
-    </select></div>
-
-  <div><label for="local">Local service</label>
-    <input id="local" name="local" value="{{if .Edit}}{{.Edit.Local}}{{end}}" placeholder="127.0.0.1:8080" required></div>
-
-  <div id="portrow"><label for="port">Public port <span class="muted">({{index .PortRange 0}}–{{index .PortRange 1}})</span></label>
-    <div class="inline">
-      <input id="port" name="remote_port" type="number" value="{{if .Edit}}{{if .Edit.RemotePort}}{{.Edit.RemotePort}}{{end}}{{end}}" placeholder="auto">
-      <button type="button" class="ghost" onclick="grab()">Get a port</button>
+  <div class="card stack">
+    <div class="field">
+      <label for="name">名称</label>
+      <input id="name" name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" placeholder="nas-web" required>
+      <span class="hint">只用于在面板里识别，不会出现在公网地址中。</span>
     </div>
-    <p class="muted" id="leasehint" style="font-size:12px;margin:6px 0 0">Leave empty to pick a free port automatically.</p>
+    <div class="field">
+      <label for="node_id">接入节点</label>
+      {{if .Nodes}}
+      <select id="node_id" name="node_id" required>
+        {{$edit := .Edit}}{{range .Nodes}}
+        <option value="{{.ID}}" {{if $edit}}{{if eq $edit.NodeID .ID}}selected{{end}}{{end}}>{{.Name}}{{if .Online}} · 在线{{else}} · 离线{{end}}</option>
+        {{end}}
+      </select>
+      <span class="hint">隧道由这台机器的 agent 发起连接，指向它所在的局域网。</span>
+      {{else}}
+      <div class="flash warn">这台实例上还没有接入节点。先到 <a href="/_nfr/nodes">节点</a> 页生成加入码，在内网机器上运行 <code>nfr join</code>。</div>
+      {{end}}
+    </div>
   </div>
 
-  <div id="hostrow" style="display:none"><label for="hosts">Hostnames</label>
-    <textarea id="hosts" name="hosts" placeholder="app.example.com">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
-    <p class="muted" style="font-size:12px;margin:6px 0 0">One per line or comma separated. HTTP traffic on 80/443 is routed by Host / SNI.</p>
+  <div class="card stack">
+    <div class="field">
+      <span class="label">类型</span>
+      <div class="seg">
+        <label>
+          <input type="radio" name="type" value="tcp" {{if .Edit}}{{if eq .Edit.Type "tcp"}}checked{{end}}{{else}}checked{{end}}>
+          <span class="t">TCP 端口</span>
+          <span class="d">独立公网端口，可转发任意 TCP 协议</span>
+        </label>
+        <label>
+          <input type="radio" name="type" value="http" {{if .Edit}}{{if eq .Edit.Type "http"}}checked{{end}}{{end}}>
+          <span class="t">HTTP 域名</span>
+          <span class="d">复用 80 / 443，按 Host 与 SNI 分流</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="local">内网地址</label>
+      <input id="local" name="local" value="{{if .Edit}}{{.Edit.Local}}{{end}}" placeholder="127.0.0.1:8080" required>
+      <span class="hint">相对接入节点而言的地址，例如 <code>127.0.0.1:8080</code> 或 <code>192.168.1.10:22</code>。</span>
+    </div>
+
+    <div class="field" id="portrow">
+      <label for="port">公网端口 <span class="muted">可选 {{index .PortRange 0}}–{{index .PortRange 1}}</span></label>
+      <div class="field-row">
+        <input id="port" name="remote_port" type="number" value="{{if .Edit}}{{if .Edit.RemotePort}}{{.Edit.RemotePort}}{{end}}{{end}}" placeholder="留空自动分配">
+        <button type="button" class="btn" onclick="grab()">获取端口</button>
+      </div>
+      <span class="hint" id="leasehint">留空则在保存时自动分配一个空闲端口。</span>
+    </div>
+
+    <div class="field" id="hostrow">
+      <label for="hosts">域名</label>
+      <textarea id="hosts" name="hosts" placeholder="app.example.com">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
+      <span class="hint">每行一个，或用逗号分隔。流量按 Host（HTTP）或 SNI（HTTPS）匹配到这条隧道。</span>
+    </div>
   </div>
 
-  <div class="inline"><input type="checkbox" id="enabled" name="enabled" value="1" style="width:auto" {{if .Edit}}{{if .Edit.Enabled}}checked{{end}}{{else}}checked{{end}}>
-    <label for="enabled" style="margin:0">Enabled</label></div>
-
-  <div class="inline"><button type="submit">{{if .Edit}}Save changes{{else}}Create tunnel{{end}}</button>
-    <a class="btn ghost" href="/_nfr/tunnels?server={{.Current}}">Cancel</a></div>
+  <div class="card hstack">
+    <label class="switch">
+      <input type="checkbox" id="enabled" name="enabled" value="1" {{if .Edit}}{{if .Edit.Enabled}}checked{{end}}{{else}}checked{{end}}>
+      <span>启用这条隧道</span>
+    </label>
+    <span class="right"></span>
+    <a class="btn ghost" href="/_nfr/tunnels?server={{.Current}}">取消</a>
+    <button type="submit" class="btn primary"{{if eq (len .Nodes) 0}} disabled{{end}}>{{if .Edit}}保存修改{{else}}创建隧道{{end}}</button>
+  </div>
 </form>
+
 <script>
-function sync(){
-  const t=document.getElementById('type').value;
-  document.getElementById('portrow').style.display = t==='tcp' ? '' : 'none';
-  document.getElementById('hostrow').style.display = t==='http' ? '' : 'none';
-}
-sync();
-async function grab(){
-  const f=document.getElementById('tform');
-  const body=new FormData(f);
-  const server=body.get('server')||'local';
-  try{
-    const res=await fetch('/_nfr/api/allocate?server='+encodeURIComponent(server),{
-      method:'POST',
-      headers:{'X-CSRF':'{{.CSRF}}','Content-Type':'application/x-www-form-urlencoded'},
-      body:'tunnel_id='+encodeURIComponent(body.get('id')||'')
-    });
-    const j=await res.json();
-    if(!res.ok){alert(j.error||'could not reserve a port');return}
-    document.getElementById('port').value=j.port;
-    document.getElementById('lease').value=j.lease_id;
-    document.getElementById('leasehint').textContent='Reserved until '+new Date(j.expires_at).toLocaleTimeString()+' — save to keep it.';
-  }catch(e){alert('request failed: '+e)}
-}
+(function () {
+  var form = document.getElementById('tform');
+  function kind() {
+    var r = form.querySelector('input[name="type"]:checked');
+    return r ? r.value : 'tcp';
+  }
+  function sync() {
+    var http = kind() === 'http';
+    document.getElementById('portrow').style.display = http ? 'none' : '';
+    document.getElementById('hostrow').style.display = http ? '' : 'none';
+  }
+  form.querySelectorAll('input[name="type"]').forEach(function (r) {
+    r.addEventListener('change', sync);
+  });
+  sync();
+
+  window.grab = async function () {
+    var body = new FormData(form);
+    var server = body.get('server') || 'local';
+    var hint = document.getElementById('leasehint');
+    try {
+      var res = await fetch('/_nfr/api/allocate?server=' + encodeURIComponent(server), {
+        method: 'POST',
+        headers: { 'X-CSRF': '{{.CSRF}}', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'tunnel_id=' + encodeURIComponent(body.get('id') || '')
+      });
+      var j = await res.json();
+      if (!res.ok) { hint.textContent = j.error || '暂时拿不到端口，请重试。'; return; }
+      document.getElementById('port').value = j.port;
+      document.getElementById('lease').value = j.lease_id;
+      hint.textContent = '已保留到 ' + new Date(j.expires_at).toLocaleTimeString() + '，保存后即为该隧道的固定端口。';
+    } catch (e) {
+      hint.textContent = '请求失败：' + e;
+    }
+  };
+})();
 </script>

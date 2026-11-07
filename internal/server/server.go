@@ -497,6 +497,7 @@ func (s *Server) Remotes() []api.Remote {
 	for _, r := range st.Remotes {
 		out = append(out, api.Remote{
 			ID: r.ID, Name: r.Name, URL: r.URL, Version: r.Version,
+			Nodes: r.Nodes, Tunnels: r.Tunnels,
 			Reachable: r.LastError == "", LastError: r.LastError, CA: r.CA,
 			LastSeen: r.LastSeen, CreatedAt: r.CreatedAt,
 		})

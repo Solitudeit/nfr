@@ -97,6 +97,8 @@ type Remote struct {
 	// so renewals do not invalidate the pin.
 	CA        bool       `json:"ca,omitempty"`
 	Version   string     `json:"version,omitempty"`
+	Nodes     int        `json:"nodes,omitempty"`
+	Tunnels   int        `json:"tunnels,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	LastSeen  *time.Time `json:"last_seen,omitempty"`
 	LastError string     `json:"last_error,omitempty"`

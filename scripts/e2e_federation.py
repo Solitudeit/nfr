@@ -183,10 +183,10 @@ def main():
                 "api_enabled": "1", "port_low": "20000", "port_high": "29999", "email": "",
             },
         )
-        check("B API enabled", "Settings" in html and "error" not in html.lower(), "status %d" % status)
+        check("B API enabled", status == 200 and "设置已保存" in html, "status %d" % status)
 
         status, html = B.request("/_nfr/keys", {"csrf": B.csrf, "label": "console-a", "scope": "admin"})
-        m = re.search(r'class="mono" style="margin-top:6px">([^<]+)<', html)
+        m = re.search(r'data-newkey="([^"]+)"', html)
         check("B admin key created", m is not None, "status %d" % status)
         if not m:
             return 1
@@ -197,10 +197,10 @@ def main():
             "/_nfr/servers",
             {"csrf": A.csrf, "url": "https://127.0.0.1:%d" % b_ctl, "api_key": key, "name": "Node B", "pin": ""},
         )
-        err = re.search(r'class="msg err">\s*([^<]+)', html)
-        check("A added B", "added Node B" in html,
+        err = re.search(r'class="flash err"[^>]*>\s*([^<]+)', html)
+        check("A added B", "已添加 Node B" in html,
               "status %d err=%s" % (status, err.group(1).strip() if err else "?"))
-        check("A card shows B online", "online" in html and "Node B" in html)
+        check("A card shows B online", "在线" in html and "Node B" in html)
 
         m = re.search(r'href="/_nfr/tunnels\?server=([0-9a-z]+)"', html)
         check("B appears as a server card", m is not None)
@@ -210,7 +210,7 @@ def main():
 
         # B: join an agent so B can actually forward traffic.
         status, html = B.request("/_nfr/nodes", {"csrf": B.csrf, "name": "node-b-agent"})
-        m = re.search(r'class="code">([0-9A-Z]+)<', html)
+        m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
         check("B join code issued", m is not None)
         if not m:
             return 1
@@ -253,7 +253,7 @@ def main():
                 "hosts": "b.test", "enabled": "1",
             },
         )
-        check("A created a tunnel on B", "tunnel saved" in html, "status %d" % status)
+        check("A created a tunnel on B", "隧道已保存" in html, "status %d" % status)
 
         ok = False
         for _ in range(40):
@@ -284,7 +284,7 @@ def main():
             },
         )
         status, html = A.request("/_nfr/servers")
-        check("A reports B unreachable after API off", "unreachable" in html, "status %d" % status)
+        check("A reports B unreachable after API off", "不可达" in html, "status %d" % status)
 
     finally:
         cleanup()

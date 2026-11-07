@@ -1,45 +1,91 @@
-<h1>Servers</h1>
-<p class="sub">Instances this console can manage. They stay independent — this node only talks to their API.</p>
-<div class="split">
+<div class="page-head">
   <div>
-    <h2 style="margin-top:0">Add a server</h2>
-    <form method="post" action="/_nfr/servers" class="rowform">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div><label for="url">Address</label>
-        <input id="url" name="url" placeholder="https://hk.example.com:8443" required></div>
-      <div><label for="api_key">API key</label>
-        <input id="api_key" name="api_key" placeholder="nfr_..." required></div>
-      <div><label for="name">Label</label>
-        <input id="name" name="name" placeholder="Hong Kong"></div>
-      <div><label for="pin">Certificate fingerprint <span class="muted">(optional)</span></label>
-        <input id="pin" name="pin" placeholder="AA:BB:...">
-        <p class="muted" style="font-size:12px;margin:6px 0 0">Leave empty to trust on first use; the fingerprint is stored and must not change later.</p></div>
-      <div><button>Add server</button></div>
-    </form>
-    <p class="foot">On the other machine: Settings → enable the API, then API → create a key with the <span class="mono">admin</span> scope.</p>
+    <h1>服务器</h1>
+    <p class="lead">这里列着可以被本控制台管理的实例。每台实例彼此独立 —— 这里只是通过它们的 API 操作，不会改变谁是入口。</p>
   </div>
-  <div>
-    <h2 style="margin-top:0">Managed</h2>
-    {{if .Cards}}
-    <div class="grid">
-    {{range .Cards}}
-      <div class="pick" style="cursor:default">
-        <div class="t">{{.Name}} {{if .Reachable}}<span class="badge on">online</span>{{else}}<span class="badge err">unreachable</span>{{end}}</div>
-        <div class="u">{{.URL}}</div>
-        <div class="inline">
-          <a class="btn ghost sm" href="/_nfr/tunnels?server={{.ID}}">Tunnels</a>
-          <form method="post" action="/_nfr/servers" onsubmit="return confirm('Remove this server?')">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="action" value="delete">
-            <input type="hidden" name="id" value="{{.ID}}">
-            <button class="danger sm">Remove</button>
-          </form>
-        </div>
-      </div>
-    {{end}}
+</div>
+
+{{if .Cards}}
+<div class="grid-auto">
+  {{range .Cards}}
+  <div class="card">
+    <div class="hstack">
+      <span class="dot {{if .Reachable}}on{{else}}err{{end}}"></span>
+      <b>{{.Name}}</b>
+      {{if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}
+      {{if .Version}}<span class="chip key">{{.Version}}</span>{{end}}
     </div>
-    {{else}}
-    <p class="muted">Nothing managed yet.</p>
+    <div class="mono muted" style="font-size:12px;margin-top:9px;word-break:break-all">{{.URL}}</div>
+    <div class="hstack" style="margin-top:16px">
+      <span class="muted" style="font-size:12.5px">{{.Nodes}} 个节点 · {{.Tunnels}} 条隧道</span>
+      <span class="right"></span>
+      <a class="btn ghost sm" href="/_nfr/tunnels?server={{.ID}}">隧道</a>
+      <form method="post" action="/_nfr/servers" data-confirm="不再管理「{{.Name}}」？只影响这个控制台，不会动那台服务器上的东西。">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button class="btn danger sm" type="submit">移除</button>
+      </form>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{else}}
+<section class="card">
+  <div class="empty">
+    {{template "i-servers"}}
+    <b>还没有纳管其他服务器</b>
+    <p>在另一台机器上装好 NFR 后，用下面的表单把它接进来，之后就能在同一个面板里管理它的隧道。</p>
+  </div>
+</section>
+{{end}}
+
+<div class="grid2" style="margin-top:22px">
+  <form class="card form" method="post" action="/_nfr/servers">
+    <div class="card-head"><h2>添加服务器</h2></div>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <div class="field">
+      <label for="url">控制地址</label>
+      <input id="url" name="url" placeholder="https://hk.example.com:8443" required>
+      <span class="hint">目标服务器的 NFR 控制端口地址，通常以 <code>:8443</code> 结尾。</span>
+    </div>
+    <div class="field">
+      <label for="api_key">API 密钥</label>
+      <input id="api_key" name="api_key" placeholder="nfr_..." required>
+      <span class="hint">在对方面板的 <b>API</b> 页创建，建议使用 <code>admin</code> 权限。</span>
+    </div>
+    <div class="field">
+      <label for="name">显示名称</label>
+      <input id="name" name="name" placeholder="香港">
+    </div>
+    <div class="field">
+      <label for="pin">证书指纹 <span class="muted">可选</span></label>
+      <input id="pin" name="pin" placeholder="AA:BB:CC:...">
+      <span class="hint">留空则首次连接时信任并记住指纹；之后指纹变化会被拒绝。</span>
+    </div>
+    <div class="actions"><button class="btn primary" type="submit">连接并纳管</button></div>
+  </form>
+
+  <div class="card stack">
+    <div>
+      <h2 style="font-size:15px;margin-bottom:10px">怎样把另一台接进来</h2>
+      <ol class="note" style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px">
+        <li>在对方机器上启动 <code>nfr server</code>。</li>
+        <li>打开它的面板，在 <b>设置</b> 里启用 REST API。</li>
+        <li>到 <b>API</b> 页创建一把 <code>admin</code> 密钥并复制。</li>
+        <li>回到这里填写地址与密钥即可。</li>
+      </ol>
+    </div>
+    {{if .Pin}}
+    <div class="divider"></div>
+    <div>
+      <div class="label" style="margin-bottom:8px">本机证书指纹</div>
+      <div class="copyfield">
+        <code>{{.Pin}}</code>
+        <button type="button" class="btn sm" data-copy="{{.Pin}}">复制</button>
+      </div>
+      <p class="note" style="margin-top:8px">在别处添加这台机器时，可以粘贴它来跳过首次信任。</p>
+    </div>
     {{end}}
   </div>
 </div>
