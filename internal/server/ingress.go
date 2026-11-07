@@ -231,7 +231,18 @@ func isUpgrade(r *http.Request) bool {
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	// Behind a local reverse proxy (nginx, Caddy, 宝塔), trust its headers.
+	if isLoopback(host) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if i := strings.IndexByte(xff, ','); i > 0 {
+				xff = xff[:i]
+			}
+			if v := strings.TrimSpace(xff); v != "" {
+				return v
+			}
+		}
 	}
 	return host
 }
@@ -240,7 +251,26 @@ func schemeOf(r *http.Request) string {
 	if r.TLS != nil {
 		return "https"
 	}
+	if isLoopback(peerHost(r)) {
+		switch p := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); p {
+		case "http", "https":
+			return p
+		}
+	}
 	return "http"
+}
+
+func peerHost(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func isLoopback(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) openFor(t store.Tunnel, remote string) (net.Conn, error) {

@@ -151,10 +151,10 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	if err := s.startHTTP(); err != nil {
-		s.lg.Warn("http ingress disabled", "err", err)
+		s.lg.Warn("http ingress disabled", "err", err, "hint", ingressHint(s.cfg.HTTPListen))
 	}
 	if err := s.startHTTPS(); err != nil {
-		s.lg.Warn("https ingress disabled", "err", err)
+		s.lg.Warn("https ingress disabled", "err", err, "hint", ingressHint(s.cfg.HTTPSListen))
 	}
 	s.reconcile()
 
@@ -275,6 +275,12 @@ func (s *Server) serveConsoleConn(c net.Conn) {
 		IdleTimeout:       90 * time.Second,
 	}
 	_ = srv.Serve(&oneConnListener{c: c})
+}
+
+// ingressHint explains how to coexist with a web server that already owns the
+// port, which is the usual situation on 宝塔 / nginx boxes.
+func ingressHint(addr string) string {
+	return fmt.Sprintf("if %s is already used by nginx or 宝塔, keep it running: set http_listen = \"127.0.0.1:8080\" and https_listen = \"off\" in server.toml, then run `nfr proxy-config <domain>` and paste the snippet into that site's nginx config", addr)
 }
 
 func (s *Server) startHTTP() error {
