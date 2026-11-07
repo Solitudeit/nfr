@@ -56,14 +56,16 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 
 ## 快速开始
 
+三条命令，不用先写配置文件。
+
 ### 1. 公网服务器
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo nfr server -c /etc/nfr/server.toml
+sudo nfr server
 ```
 
-首次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码，并把面板地址
+第一次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码，并把面板地址
 和密码打印一次：
 
 ```
@@ -72,31 +74,35 @@ sudo nfr server -c /etc/nfr/server.toml
   Console   https://203.0.113.10:8443/_nfr/
   Password  k3m9xw2p
   Cert      3f:0e:...
+  Next: sign in, open 节点, click 生成加入码
 ```
 
-> 域名 + 80/443 的正式部署见 [docs/deploy.md](docs/deploy.md)，
-> 想用 Let's Encrypt 就在配置里打开 `[acme] enabled = true`。
+> 也可以用 Docker 起，同样一条命令：
+>
+> ```bash
+> docker run -d --name nfr --restart=always -p 8443:8443 -p 80:80 -p 443:443 \
+>   -v nfr-data:/var/lib/nfr ghcr.io/solitudeit/nfr
+> docker logs nfr      # 面板地址与密码
+> ```
+>
+> 要接域名 + 80/443，或让 Let's Encrypt 签证书，改 `/etc/nfr/server.toml` 后重启即可，
+> 细节见 [docs/deploy.md](docs/deploy.md)。
 
 ### 2. 内网机器
 
-在面板的 **节点 → 生成加入码** 得到一个一次性加入码，然后在目标机器上：
+在面板「节点」页点「生成加入码」，把打印出来的那条命令粘到内网机器：
 
 ```bash
 nfr join example.com ABC123
 ```
 
-它只做三件事：信任证书（记录指纹）、换取长期令牌、写入 `/etc/nfr/agent.toml`。
-之后：
-
-```bash
-sudo nfr agent -c /etc/nfr/agent.toml      # 或交给 systemd
-```
-
-agent 断线会自己重连（1s 起，指数退避到 30s），服务器重启后隧道照样恢复。
+它记下证书指纹、换取长期令牌、写入 `/etc/nfr/agent.toml`，然后**直接保持连接**。
+Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfr agent` 作为服务。
+断线会自己重连（1s 起，指数退避到 30s），服务器重启后隧道照样恢复。
 
 ### 3. 建隧道
 
-面板里 **Create tunnel**：选服务器 → 选节点 → 选协议：
+面板「隧道」→ 选服务器 →「新建隧道」：
 
 - **HTTP**：填内网地址和域名（`blog.example.com`），80/443 按 Host/SNI 分流，不占额外端口
 - **TCP**：填内网地址，点「获取端口」拿一个公网端口（如 `20612`），访客直接连 `example.com:20612`
@@ -117,8 +123,7 @@ TOML
 
 go run ./cmd/nfr server -c /tmp/nfr-demo.toml &     # 记下打印出来的密码
 # 打开 https://127.0.0.1:18443/_nfr/ ，节点页生成加入码 ABC123，然后：
-go run ./cmd/nfr join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123
-go run ./cmd/nfr agent -c /tmp/nfr-agent.toml &
+go run ./cmd/nfr join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123 &
 
 python3 -m http.server 8080 &                       # 一个假的内网服务
 # 面板里建 HTTP 隧道，内网地址 8080，域名 test.local，然后：
@@ -133,8 +138,8 @@ curl -H "Host: test.local" http://127.0.0.1:18080/
 - **隧道**：先按服务器卡片选一台，再新建 / 编辑 / 启停 / 删除，改完立即推送
 - **节点**：加入码、在线状态、最后心跳，可随时移除
 - **服务器**：纳管其它 NFR 实例（填地址 + API 密钥即可）
-- **设置**：实例名、域名、端口池、证书来源与到期、面板密码
-- **API 密钥**：给自动化用的 read / write / admin 密钥，明文只显示一次
+- **设置**：实例名、域名、端口池、证书来源与到期、面板密码，以及 API 密钥
+  （给自动化用的 read / write / admin 密钥，明文只显示一次）
 
 ## 多服务器纳管
 
@@ -142,7 +147,7 @@ curl -H "Host: test.local" http://127.0.0.1:18080/
 A 的面板通过 HTTPS 调用 B 的 REST API，把 B 的服务器卡片合并进同一个界面。
 B 不用改配置，也不用信任 A 的数据库——B 的 state 永远在自己手里。
 
-在 B 上：**设置 → 开放 REST API**，再到 **API 密钥** 建一个 key。
+在 B 上：**设置 → 开放 REST API**，然后在同一页的「API 密钥」里建一个 key。
 在 A 上：**服务器 → 添加服务器**，填 `https://B:8443` + key。
 自签证书第一次会显示指纹，确认后钉住；之后指纹变了会直接拒连并告警。
 

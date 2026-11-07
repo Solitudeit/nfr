@@ -5,6 +5,19 @@
   </div>
 </div>
 
+{{if .NewKey}}
+<section class="card" data-newkey="{{.NewKey}}" style="margin-bottom:18px">
+  <div class="hstack">
+    <span class="chip on">新密钥</span>
+    <span class="muted" style="font-size:12.5px">离开本页后将无法再次查看，请现在复制</span>
+  </div>
+  <div class="copyfield" style="margin-top:12px">
+    <code>{{.NewKey}}</code>
+    <button type="button" class="btn sm" data-copy="{{.NewKey}}">复制</button>
+  </div>
+</section>
+{{end}}
+
 <div class="grid2">
   <form class="card form" method="post" action="/_nfr/settings">
     <div class="card-head"><h2>常规</h2><span class="card-sub">保存后立即生效，无需重启</span></div>
@@ -78,3 +91,57 @@
     </form>
   </div>
 </div>
+
+<section class="card form" id="api" style="margin-top:18px">
+  <div class="card-head">
+    <h2>API 密钥</h2>
+    <span class="card-sub">给别的面板或脚本使用；只保存哈希，明文仅显示一次</span>
+  </div>
+
+  <form class="hstack" method="post" action="/_nfr/settings">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="action" value="key">
+    <div class="field" style="flex:1;min-width:180px">
+      <label for="label">用途备注</label>
+      <input id="label" name="label" placeholder="香港面板">
+    </div>
+    <div class="field" style="width:150px">
+      <label for="scope">权限</label>
+      <select id="scope" name="scope">
+        <option value="read">read · 只读</option>
+        <option value="write">write · 读写</option>
+        <option value="admin">admin · 全部</option>
+      </select>
+    </div>
+    <button class="btn primary" type="submit" style="align-self:flex-end">{{template "i-plus"}}创建密钥</button>
+  </form>
+
+  {{if .Keys}}
+  <div class="list">
+    {{range .Keys}}
+    <div class="item">
+      <div class="item-main">
+        <div class="item-name">{{.Label}} <span class="chip key">{{.Scope}}</span></div>
+        <div class="item-meta">创建于 {{short .CreatedAt}} · 最近使用 {{ago .LastUsed}}</div>
+      </div>
+      <div class="item-num mono">{{.ID}}</div>
+      <div class="item-actions">
+        <form method="post" action="/_nfr/settings" data-confirm="吊销密钥「{{.Label}}」？使用它的面板会立刻失去访问权。">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="action" value="revoke">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="btn danger sm" type="submit">吊销</button>
+        </form>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="note">还没有密钥。需要从另一台 NFR 面板管理这台机器，或者写脚本调用 REST API 时再创建。</p>
+  {{end}}
+
+  <p class="note">
+    密钥只在开放 REST API 后生效——上面的「开放 REST API」开关控制这一点。
+    调用时带上 <code>Authorization: Bearer nfr_…</code>。
+  </p>
+</section>

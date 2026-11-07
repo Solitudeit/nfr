@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -62,11 +63,19 @@ func main() {
 func usage() {
 	fmt.Print(`nfr — self-hosted reverse tunnels
 
-  nfr server  [-c server.toml]   run a control node (ingress, console, API)
-  nfr agent   [-c agent.toml]    connect this machine to one or more servers
-  nfr join    <server> <code>    join a node using a one-time code
-  nfr status  [-c agent.toml]    show local configuration
-  nfr version                    print the build version
+  nfr server                 run a control node (config is created for you)
+  nfr join <server> <code>   join this machine and keep it connected
+  nfr agent                  connect with the saved agent.toml
+  nfr status                 show the local configuration
+  nfr version                print the build version
+
+First run on the public server:
+
+  nfr server
+
+It prints the console URL and a one-time password. Then, inside your network:
+
+  nfr join <server> <code>
 
 Documentation: https://github.com/Solitudeit/nfr
 `)
@@ -116,6 +125,8 @@ func cmdServer(args []string) {
   Cert      %s
 
   The password is shown once. Change it in Settings after signing in.
+  Next: sign in, open 节点, click 生成加入码, then run the printed command
+  inside your network.
 `, info.PanelURL, generated, info.Pinned)
 	}
 	lg.Info("starting", "control", cfg.ControlListen, "http", cfg.HTTPListen, "https", cfg.HTTPSListen, "data", cfg.DataDir)
@@ -142,28 +153,7 @@ func cmdAgent(args []string) {
 	if !existed || len(cfg.Servers) == 0 {
 		fatal("no server configured\n\n  run: nfr join <server> <code>")
 	}
-	lg := log.New(cfg.LogLevel, cfg.LogFile)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	var wg sync.WaitGroup
-	for _, s := range cfg.Servers {
-		a := agent.New(agent.Options{
-			Addr:   s.Addr,
-			Token:  s.Token,
-			NodeID: s.NodeID,
-			Pin:    s.Pin,
-			CA:     s.CA,
-			Logger: lg.With("server", s.Addr),
-		})
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			a.Run(ctx)
-		}()
-	}
-	lg.Info("agent started", "servers", len(cfg.Servers))
-	wg.Wait()
+	runAgents(cfg, log.New(cfg.LogLevel, cfg.LogFile))
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +173,7 @@ func cmdJoin(args []string) {
 	fs := flag.NewFlagSet("join", flag.ExitOnError)
 	cfgPath := fs.String("c", defaultAgentConfig(), "configuration file")
 	name := fs.String("name", "", "name shown in the console")
+	noStart := fs.Bool("no-start", false, "save the configuration but do not start the agent")
 	_ = fs.Parse(args)
 	if fs.NArg() < 2 {
 		fatal("usage: nfr join <server> <code>")
@@ -248,18 +239,51 @@ func cmdJoin(args []string) {
 	}
 
 	fmt.Printf(`
-  Joined "%s" as node %s
+  Connected "%s" as node %s
   ─────────────────────────────
-  Server     %s
-  Config     %s
-  Cert       %s
+  Server   %s
+  Config   %s
+  Cert     %s
+`, *name, welcome.NodeID, control, *cfgPath, certLabel(caMode, observedPin))
 
-  Start the agent:
+	if *noStart {
+		fmt.Printf(`
+  Start the agent when you are ready:
 
     nfr agent -c %s
+`, *cfgPath)
+		return
+	}
 
-  Keep it running with systemd, Docker or tmux; it reconnects by itself.
-`, *name, welcome.NodeID, control, *cfgPath, certLabel(caMode, observedPin), *cfgPath)
+	lg := log.New(cfg.LogLevel, cfg.LogFile)
+	fmt.Print("\n  Keeping it connected; press Ctrl-C to stop.\n\n")
+	runAgents(cfg, lg)
+}
+
+// runAgents keeps one connection per configured server until the process is
+// asked to stop.
+func runAgents(cfg config.Agent, lg *slog.Logger) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var wg sync.WaitGroup
+	for _, s := range cfg.Servers {
+		a := agent.New(agent.Options{
+			Addr:   s.Addr,
+			Token:  s.Token,
+			NodeID: s.NodeID,
+			Pin:    s.Pin,
+			CA:     s.CA,
+			Logger: lg.With("server", s.Addr),
+		})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.Run(ctx)
+		}()
+	}
+	lg.Info("agent started", "servers", len(cfg.Servers))
+	wg.Wait()
 }
 
 // discover fetches /.well-known/nfr and records the certificate fingerprint

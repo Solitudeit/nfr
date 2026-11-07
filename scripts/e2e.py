@@ -202,7 +202,7 @@ def main():
 
         agent_cfg = os.path.join(tmp, "agent.toml")
         p = subprocess.run(
-            [binary, "join", "-c", agent_cfg, "--name", "testnode", "127.0.0.1:%d" % control, code],
+            [binary, "join", "--no-start", "-c", agent_cfg, "--name", "testnode", "127.0.0.1:%d" % control, code],
             capture_output=True,
             text=True,
         )
@@ -331,7 +331,8 @@ def main():
             {"csrf": panel.csrf, "name": "testnode", "domain": "", "api_enabled": "1",
              "port_low": "20000", "port_high": "29999", "email": ""},
         )
-        status, html = panel.request("/_nfr/keys", {"csrf": panel.csrf, "label": "e2e", "scope": "read"})
+        status, html = panel.request("/_nfr/settings",
+                                     {"csrf": panel.csrf, "action": "key", "label": "e2e", "scope": "read"})
         m = re.search(r'data-newkey="([^"]+)"', html)
         check("api key created", m is not None, "status %d" % status)
         key = m.group(1) if m else ""

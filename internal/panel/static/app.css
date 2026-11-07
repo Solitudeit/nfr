@@ -651,7 +651,7 @@ input[type="number"] { font-family: var(--mono); font-size: 14px; }
 
   .tabbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-    display: grid; grid-template-columns: repeat(6, 1fr);
+    display: grid; grid-template-columns: repeat(5, 1fr);
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
     background: var(--material-thick);
     -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
