@@ -2,6 +2,8 @@ package server
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -215,5 +217,28 @@ func TestUpdateSettingsRange(t *testing.T) {
 	}
 	if err := s.UpdateSettings("", false, [2]int{40000, 40000}, ""); err == nil {
 		t.Fatal("a one-port range was accepted")
+	}
+}
+
+func TestForwardedHeadersFromLocalProxy(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://app.example.com/", nil)
+	r.RemoteAddr = "127.0.0.1:51234"
+	r.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.1")
+	r.Header.Set("X-Forwarded-Proto", "https")
+
+	if got := clientIP(r); got != "203.0.113.7" {
+		t.Fatalf("clientIP = %q, want the first X-Forwarded-For hop", got)
+	}
+	if got := schemeOf(r); got != "https" {
+		t.Fatalf("schemeOf = %q, want https", got)
+	}
+
+	// Headers from a non-loopback peer are not trusted.
+	r.RemoteAddr = "198.51.100.9:51234"
+	if got := clientIP(r); got != "198.51.100.9" {
+		t.Fatalf("clientIP = %q, want the socket peer", got)
+	}
+	if got := schemeOf(r); got != "http" {
+		t.Fatalf("schemeOf = %q, want http", got)
 	}
 }

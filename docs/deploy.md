@@ -75,14 +75,44 @@ docker logs nfr          # 首次启动的面板地址与密码在这里
 注意：容器默认以 root 运行，否则绑不了 80/443。想降权就把
 `http_listen` / `https_listen` 换成高位端口，再用端口映射或反代转发。
 
-## 和已有的 nginx / caddy 共存
+## 和已有的 nginx / 宝塔共存
 
-NFR 自己要占 80/443，和 nginx 直接抢端口。三种选择：
+80/443 已经被 nginx（或宝塔面板）占用时，不要让 NFR 去抢端口，改成 **nginx 在前、NFR 在后**：
 
-1. **推荐**：换一台独立机器/独立 IP 给 NFR；
-2. 让 nginx 只监听回环，把 `http_listen = "127.0.0.1:8080"` 给 NFR，再用 iptables
-   把 80 转发过去（443 同理，但证书要 NFR 自己处理）；
-3. 只用 TCP 隧道：`http_listen = "off"`、`https_listen = "off"`，nginx 继续用 80/443。
+**1. `server.toml` 让出入口**
+
+```toml
+control_listen = ":8443"
+http_listen    = "127.0.0.1:8080"
+https_listen   = "off"
+```
+
+`control_listen` 仍然直接对公网提供面板与 agent 接入；HTTP 入口只监听回环，由 nginx 转发进来。
+
+**2. 生成反代配置**
+
+```bash
+nfr proxy-config app.example.com        # 换成你的域名
+```
+
+把打印出来的 `server { … }` 粘到该站点的配置里（宝塔：网站 → 设置 → 配置文件），或者写到
+`/etc/nginx/conf.d/nfr.conf`。片段里已经带好 `Host`、`X-Forwarded-*` 和 WebSocket 的升级头；
+其中 `map $http_upgrade $connection_upgrade` 需要放在 nginx 的 `http {}` 里（宝塔：软件商店 →
+Nginx → 配置修改），否则 `nginx -t` 会报未知变量。
+
+**3. 重载并建隧道**
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx   # 宝塔直接点「重载配置」
+```
+
+回到面板建 HTTP 隧道，域名填 `app.example.com`、内网地址填内网机器的 `127.0.0.1:端口`。
+TLS 由 nginx 的证书终止，NFR 会从 `X-Forwarded-Proto` 知道访客其实是 HTTPS，再转给后端。
+
+**多域名**：建一个泛解析站点 `server_name *.example.com;` 指向同一个 8080，之后每条 HTTP
+隧道填各自域名即可；也可以一个域名一个站点，反代目标都写 `http://127.0.0.1:8080`。
+
+**TCP 隧道**不受这一节影响：它们直接监听 `port_range` 里的端口，不经过 nginx。
 
 ## 内网机器
 

@@ -87,6 +87,10 @@ sudo nfr server
 >
 > 要接域名 + 80/443，或让 Let's Encrypt 签证书，改 `/etc/nfr/server.toml` 后重启即可，
 > 细节见 [docs/deploy.md](docs/deploy.md)。
+>
+> 80/443 已经被 nginx / 宝塔面板占着？把 `http_listen` 改到 `127.0.0.1:8080`、
+> `https_listen = "off"`，再跑 `nfr proxy-config app.example.com` 生成反代片段贴进站点配置，
+> 详见 [和已有的 nginx / 宝塔共存](docs/deploy.md#和已有的-nginx--宝塔共存)。
 
 ### 2. 内网机器
 
