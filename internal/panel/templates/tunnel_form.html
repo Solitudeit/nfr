@@ -77,7 +77,8 @@
   <div class="card hstack">
     <label class="switch">
       <input type="checkbox" id="enabled" name="enabled" value="1" {{if .Edit}}{{if .Edit.Enabled}}checked{{end}}{{else}}checked{{end}}>
-      <span>启用这条隧道</span>
+      <span class="track" aria-hidden="true"></span>
+      <span class="txt">启用这条隧道</span>
     </label>
     <span class="right"></span>
     <a class="btn ghost" href="/_nfr/tunnels?server={{.Current}}">取消</a>
