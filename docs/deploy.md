@@ -12,7 +12,7 @@
 | 20000-29999/tcp | TCP 隧道的公网端口 | `port_range`（面板里也能改） |
 
 ```bash
-curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sudo sh
 sudo nfr server -c /etc/nfr/server.toml        # 首次运行：生成配置、证书、密码
 sudo cp deploy/systemd/nfr-server.service /etc/systemd/system/
 sudo systemctl enable --now nfr-server
@@ -98,7 +98,7 @@ agent 支持同时连多台服务器：多执行几次 `nfr join`（指向不同
 ## 升级
 
 ```bash
-curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sudo sh
 sudo systemctl restart nfr-server nfr-agent
 ```
 

@@ -23,7 +23,7 @@ NFR 是一款自托管的内网穿透 / 反向隧道工具：把内网的服务�
 ### 1. 公网服务器
 
 ```bash
-curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sudo sh
 sudo nfr server -c /etc/nfr/server.toml
 ```
 
@@ -193,6 +193,7 @@ python3 scripts/e2e_federation.py # 双实例纳管端到端
 - [ ] WebSocket / gRPC 长连接的更多测试用例
 - [ ] QUIC 传输（代码里已留接口，默认不启用）
 - [ ] UDP 隧道
+- [ ] 多用户面板（注册、配额、按用户隔离隧道）
 - [ ] 流量配额与限速
 
 ## License
