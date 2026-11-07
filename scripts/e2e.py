@@ -191,10 +191,10 @@ def main():
 
         panel = Panel("https://127.0.0.1:%d" % control)
         status, html = panel.login(password)
-        check("panel login", status == 200 and "Overview" in html, "status %d" % status)
+        check("panel login", status == 200 and "概览" in html, "status %d" % status)
 
         status, html = panel.request("/_nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
-        m = re.search(r'class="code">([0-9A-Z]+)<', html)
+        m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
         check("join code issued", m is not None, "status %d" % status)
         if not m:
             return 1
@@ -240,7 +240,7 @@ def main():
                 "hosts": "test.local", "enabled": "1",
             },
         )
-        check("create http tunnel", "tunnel saved" in html, "status %d" % status)
+        check("create http tunnel", "隧道已保存" in html, "status %d" % status)
 
         ok = False
         for _ in range(40):
@@ -265,7 +265,7 @@ def main():
                 "lease_id": alloc.get("lease_id", ""), "enabled": "1",
             },
         )
-        check("create tcp tunnel", "tunnel saved" in html, "status %d" % status)
+        check("create tcp tunnel", "隧道已保存" in html, "status %d" % status)
 
         ok = False
         port = alloc.get("port")
@@ -332,7 +332,7 @@ def main():
              "port_low": "20000", "port_high": "29999", "email": ""},
         )
         status, html = panel.request("/_nfr/keys", {"csrf": panel.csrf, "label": "e2e", "scope": "read"})
-        m = re.search(r'class="mono" style="margin-top:6px">([^<]+)<', html)
+        m = re.search(r'data-newkey="([^"]+)"', html)
         check("api key created", m is not None, "status %d" % status)
         key = m.group(1) if m else ""
 

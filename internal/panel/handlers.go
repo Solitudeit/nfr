@@ -34,7 +34,7 @@ type overviewData struct {
 func (p *Panel) overview(w http.ResponseWriter, r *http.Request, s *session) {
 	tunnels := p.srv.Tunnels()
 	nodes := p.srv.Nodes()
-	d := overviewData{base: p.newBase(r, s, "overview", "Overview", "overview"), Tunnels: tunnels, Nodes: nodes}
+	d := overviewData{base: p.newBase(r, s, "overview", "概览", "overview"), Tunnels: tunnels, Nodes: nodes}
 	for _, n := range nodes {
 		if n.Online {
 			d.Online++
@@ -73,7 +73,7 @@ func (p *Panel) cards() []serverCard {
 	for _, rem := range p.srv.Remotes() {
 		out = append(out, serverCard{
 			ID: rem.ID, Name: rem.Name, URL: rem.URL, Reachable: rem.Reachable,
-			Version: rem.Version,
+			Version: rem.Version, Nodes: rem.Nodes, Tunnels: rem.Tunnels,
 		})
 	}
 	return out
@@ -82,7 +82,7 @@ func (p *Panel) cards() []serverCard {
 func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 	sel := r.URL.Query().Get("server")
 	d := tunnelsData{
-		base:      p.newBase(r, s, "tunnels", "Tunnels", "tunnels"),
+		base:      p.newBase(r, s, "tunnels", "隧道", "tunnels"),
 		PortRange: p.srv.Settings().PortRange,
 	}
 	if sel == "" {
@@ -125,8 +125,12 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 	if sel == "" {
 		sel = "local"
 	}
+	title := "新建隧道"
+	if existing != nil {
+		title = "编辑隧道"
+	}
 	d := tunnelsData{
-		base:      p.newBase(r, s, "tunnels", "New tunnel", "tunnel_form"),
+		base:      p.newBase(r, s, "tunnels", title, "tunnel_form"),
 		Current:   sel,
 		IsLocal:   sel == "local",
 		PortRange: p.srv.Settings().PortRange,
@@ -227,10 +231,10 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	if req.Type == "http" {
-		p.ok(w, r, "/_nfr/tunnels", "tunnel saved")
+		p.ok(w, r, "/_nfr/tunnels", "隧道已保存")
 		return
 	}
-	p.ok(w, r, "/_nfr/tunnels", "tunnel saved")
+	p.ok(w, r, "/_nfr/tunnels", "隧道已保存")
 }
 
 func (p *Panel) tunnelDelete(w http.ResponseWriter, r *http.Request, s *session) {
@@ -252,7 +256,7 @@ func (p *Panel) tunnelDelete(w http.ResponseWriter, r *http.Request, s *session)
 		p.backErr(w, r, "/_nfr/tunnels", err)
 		return
 	}
-	p.ok(w, r, "/_nfr/tunnels", "tunnel deleted")
+	p.ok(w, r, "/_nfr/tunnels", "隧道已删除")
 }
 
 func (p *Panel) tunnelToggle(w http.ResponseWriter, r *http.Request, s *session) {
@@ -275,7 +279,7 @@ func (p *Panel) tunnelToggle(w http.ResponseWriter, r *http.Request, s *session)
 		p.backErr(w, r, "/_nfr/tunnels", err)
 		return
 	}
-	p.ok(w, r, "/_nfr/tunnels", "tunnel updated")
+	p.ok(w, r, "/_nfr/tunnels", "隧道已更新")
 }
 
 type nodesData struct {
@@ -286,7 +290,7 @@ type nodesData struct {
 }
 
 func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
-	d := nodesData{base: p.newBase(r, s, "nodes", "Nodes", "nodes"), Nodes: p.srv.Nodes()}
+	d := nodesData{base: p.newBase(r, s, "nodes", "节点", "nodes"), Nodes: p.srv.Nodes()}
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		req := api.JoinCodeRequest{Name: strings.TrimSpace(r.FormValue("name"))}
@@ -301,6 +305,15 @@ func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
 	p.render(w, r, "nodes", d)
 }
 
+func (p *Panel) nodeDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.FormValue("id")
+	if err := p.srv.RemoveNode(id); err != nil {
+		p.back(w, r, "/_nfr/nodes", err)
+		return
+	}
+	p.ok(w, r, "/_nfr/nodes", "节点已移除")
+}
+
 type serversData struct {
 	base
 	Cards []serverCard
@@ -308,7 +321,7 @@ type serversData struct {
 }
 
 func (p *Panel) servers(w http.ResponseWriter, r *http.Request, s *session) {
-	d := serversData{base: p.newBase(r, s, "servers", "Servers", "servers")}
+	d := serversData{base: p.newBase(r, s, "servers", "服务器", "servers")}
 	p.refreshRemotes(r.Context())
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
@@ -316,7 +329,7 @@ func (p *Panel) servers(w http.ResponseWriter, r *http.Request, s *session) {
 			if err := p.srv.RemoveRemote(r.FormValue("id")); err != nil {
 				d.Error = err.Error()
 			} else {
-				d.Notice = "server removed"
+				d.Notice = "服务器已移除"
 			}
 			d.Cards = p.cards()[1:]
 			d.Pin = p.srv.Pin()
@@ -333,7 +346,7 @@ func (p *Panel) servers(w http.ResponseWriter, r *http.Request, s *session) {
 		if err != nil {
 			d.Error = err.Error()
 		} else {
-			d.Notice = "added " + rec.Name
+			d.Notice = "已添加 " + rec.Name
 		}
 	}
 	d.Cards = p.cards()[1:]
@@ -357,7 +370,7 @@ type settingsData struct {
 }
 
 func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
-	d := settingsData{base: p.newBase(r, s, "settings", "Settings", "settings")}
+	d := settingsData{base: p.newBase(r, s, "settings", "设置", "settings")}
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		action := r.FormValue("action")
@@ -382,7 +395,7 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 				d.Error = err.Error()
 				break
 			}
-			d.Notice = "password updated"
+			d.Notice = "密码已更新"
 		default:
 			low, _ := strconv.Atoi(r.FormValue("port_low"))
 			high, _ := strconv.Atoi(r.FormValue("port_high"))
@@ -402,7 +415,7 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 					break
 				}
 			}
-			d.Notice = "settings saved"
+			d.Notice = "设置已保存"
 		}
 	}
 	set := p.srv.Settings()
@@ -414,6 +427,12 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 	d.Email = set.HTTPSEmail
 	d.Pin = info.Pinned
 	d.PanelURL = info.PanelURL
+	cert := p.srv.CertSummary()
+	d.CertMode = cert.Mode
+	d.CertSource = certSourceLabel(cert.Source)
+	if cert.NotAfter != nil {
+		d.CertExpiry = cert.NotAfter.Local().Format("2006-01-02")
+	}
 	p.render(w, r, "settings", d)
 }
 
@@ -423,8 +442,24 @@ type keysData struct {
 	NewKey string
 }
 
+// certSourceLabel turns the internal certificate source key into something a
+// person can read.
+func certSourceLabel(source string) string {
+	switch source {
+	case "self-signed":
+		return "自签，本机自动生成"
+	case "acme":
+		return "ACME（Let's Encrypt 或指定 CA）"
+	case "file":
+		return "自有证书文件"
+	case "":
+		return "未知"
+	}
+	return source
+}
+
 func (p *Panel) keys(w http.ResponseWriter, r *http.Request, s *session) {
-	d := keysData{base: p.newBase(r, s, "keys", "API keys", "keys")}
+	d := keysData{base: p.newBase(r, s, "keys", "API 密钥", "keys")}
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		switch r.FormValue("action") {

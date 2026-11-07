@@ -29,6 +29,30 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 | 端口分配 | 自己猜一个没被占的 | 「获取端口」按钮，服务端查占用后租给你 |
 | 观测 | 另装 frps dashboard + Prometheus | 面板实时速率 + `/metrics` |
 
+## 界面
+
+面板是服务端渲染的，没有 npm、没有前端构建、没有 CDN：跟随系统深浅色，手机上是底部
+标签栏，数据每 4 秒自己刷新。
+
+![概览](docs/screenshots/overview.png)
+
+| 新建隧道 | 生成加入码 |
+|---|---|
+| ![新建隧道](docs/screenshots/tunnel-new.png) | ![节点](docs/screenshots/nodes.png) |
+
+<details>
+<summary>更多截图：隧道列表 / 服务器纳管 / 设置 / 手机</summary>
+
+| 选择服务器 | 纳管另一台 |
+|---|---|
+| ![隧道](docs/screenshots/tunnels.png) | ![服务器](docs/screenshots/servers.png) |
+
+| 设置与证书 | 手机 |
+|---|---|
+| ![设置](docs/screenshots/settings.png) | ![手机](docs/screenshots/overview-phone.png) |
+
+</details>
+
 ## 快速开始
 
 ### 1. 公网服务器
@@ -54,7 +78,7 @@ sudo nfr server -c /etc/nfr/server.toml
 
 ### 2. 内网机器
 
-在面板的 **Nodes → Create join code** 生成一个一次性加入码，然后在目标机器上：
+在面板的 **节点 → 生成加入码** 得到一个一次性加入码，然后在目标机器上：
 
 ```bash
 nfr join example.com ABC123
@@ -91,7 +115,7 @@ data_dir       = "/tmp/nfr-demo"
 TOML
 
 go run ./cmd/nfr server -c /tmp/nfr-demo.toml &     # 记下打印出来的密码
-# 打开 https://127.0.0.1:18443/_nfr/ ，Nodes 页生成加入码 ABC123，然后：
+# 打开 https://127.0.0.1:18443/_nfr/ ，节点页生成加入码 ABC123，然后：
 go run ./cmd/nfr join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123
 go run ./cmd/nfr agent -c /tmp/nfr-agent.toml &
 
@@ -104,14 +128,12 @@ curl -H "Host: test.local" http://127.0.0.1:18080/
 
 同一个进程，`/_nfr/`：
 
-- **Overview**：全部隧道、实时速率、连接数、错误数
-- **Tunnels**：按服务器卡片切换，新建 / 编辑 / 启停 / 删除，即时生效
-- **Nodes**：在线节点、最后心跳、加入码
-- **Servers**：纳管其它 NFR 实例（填地址 + API 密钥即可）
-- **Settings**：域名、端口池、证书、管理员密码
-- **API keys**：给自动化用的只读 / 读写 / 管理密钥
-
-面板是服务端渲染的 Go template，没有 npm、没有前端构建、没有外部 CDN。
+- **概览**：在线节点、启用隧道、进出流量、实时速率曲线
+- **隧道**：先按服务器卡片选一台，再新建 / 编辑 / 启停 / 删除，改完立即推送
+- **节点**：加入码、在线状态、最后心跳，可随时移除
+- **服务器**：纳管其它 NFR 实例（填地址 + API 密钥即可）
+- **设置**：实例名、域名、端口池、证书来源与到期、面板密码
+- **API 密钥**：给自动化用的 read / write / admin 密钥，明文只显示一次
 
 ## 多服务器纳管
 
@@ -119,8 +141,8 @@ curl -H "Host: test.local" http://127.0.0.1:18080/
 A 的面板通过 HTTPS 调用 B 的 REST API，把 B 的服务器卡片合并进同一个界面。
 B 不用改配置，也不用信任 A 的数据库——B 的 state 永远在自己手里。
 
-在 B 上：**Settings → 开放 API**，再到 **API keys** 建一个 key。
-在 A 上：**Servers → Add server**，填 `https://B:8443` + key。
+在 B 上：**设置 → 开放 REST API**，再到 **API 密钥** 建一个 key。
+在 A 上：**服务器 → 添加服务器**，填 `https://B:8443` + key。
 自签证书第一次会显示指纹，确认后钉住；之后指纹变了会直接拒连并告警。
 
 ## 安全模型

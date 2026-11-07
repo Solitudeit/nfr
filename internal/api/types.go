@@ -110,6 +110,8 @@ type Remote struct {
 	Name      string     `json:"name"`
 	URL       string     `json:"url"`
 	Version   string     `json:"version,omitempty"`
+	Nodes     int        `json:"nodes"`
+	Tunnels   int        `json:"tunnels"`
 	Reachable bool       `json:"reachable"`
 	CA        bool       `json:"ca,omitempty"`
 	LastError string     `json:"last_error,omitempty"`

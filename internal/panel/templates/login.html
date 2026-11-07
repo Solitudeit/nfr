@@ -1,10 +1,18 @@
 <div class="login">
-  <form class="box" method="post" action="/_nfr/login">
-    <h1>NFR</h1>
-    <p class="sub">Sign in to manage this node.</p>
-    <label for="pw">Password</label>
-    <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
-    <div style="height:14px"></div>
-    <button type="submit" style="width:100%">Sign in</button>
+  <form class="login-card" method="post" action="/_nfr/login">
+    <div class="login-brand">
+      <span class="logo-mark">N</span>
+      <div>
+        <h1>NFR</h1>
+        <p>反向隧道控制台</p>
+      </div>
+    </div>
+    {{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+    <div class="field">
+      <label for="pw">面板密码</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
+    </div>
+    <button class="btn primary" type="submit" style="width:100%">登录</button>
+    <p class="login-foot">密码在首次启动时随日志打印一次。</p>
   </form>
 </div>

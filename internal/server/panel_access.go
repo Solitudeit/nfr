@@ -61,6 +61,8 @@ func (s *Server) RefreshRemote(ctx context.Context, id string) (api.Info, error)
 			} else {
 				r.LastError = ""
 				r.Version = info.Version
+				r.Nodes = info.Nodes
+				r.Tunnels = info.Tunnels
 			}
 		}
 		return nil

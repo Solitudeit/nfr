@@ -1,29 +1,84 @@
-<h1>{{.Info.Name}}</h1>
-<p class="sub">{{.Info.PanelURL}} · revision {{.Info.Revision}} · v{{.Info.Version}}</p>
-<div class="cards">
-  <div class="card"><div class="k">Nodes</div><div class="v">{{.Online}} / {{len .Nodes}}</div><div class="c">online / joined</div></div>
-  <div class="card"><div class="k">Tunnels</div><div class="v">{{.Enabled}} / {{len .Tunnels}}</div><div class="c">enabled / total</div></div>
-  <div class="card"><div class="k">In</div><div class="v">{{bytes .In}}</div><div class="c">visitor → service</div></div>
-  <div class="card"><div class="k">Out</div><div class="v">{{bytes .Out}}</div><div class="c">service → visitor</div></div>
+<div class="page-head">
+  <div>
+    <h1>{{.Info.Name}}</h1>
+    <p class="lead">反向隧道控制台 · <span class="mono">{{.Info.PanelURL}}</span></p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/_nfr/nodes">{{template "i-nodes"}}接入机器</a>
+    <a class="btn primary" href="/_nfr/tunnels">{{template "i-plus"}}新建隧道</a>
+  </div>
 </div>
-<h2>Tunnels</h2>
-{{if .Tunnels}}
-<div class="scroll"><table>
-<thead><tr><th>Name</th><th>Node</th><th>Public</th><th>Local</th><th>Status</th><th>Traffic</th><th></th></tr></thead>
-<tbody>
-{{range .Tunnels}}
-<tr>
-  <td><a href="/_nfr/tunnels/edit?id={{.ID}}&server=local">{{.Name}}</a></td>
-  <td class="muted">{{.NodeName}}{{if not .Online}} <span class="badge off">offline</span>{{end}}</td>
-  <td class="mono">{{if eq .Type "http"}}{{join .Hosts ", "}}{{else}}:{{port .RemotePort}}{{end}}</td>
-  <td class="mono muted">{{.Local}}</td>
-  <td>{{if .Enabled}}<span class="badge on">enabled</span>{{else}}<span class="badge off">disabled</span>{{end}}</td>
-  <td class="muted">{{bytes .In}} / {{bytes .Out}}</td>
-  <td><a href="/_nfr/tunnels?server=local">manage</a></td>
-</tr>
-{{end}}
-</tbody></table></div>
-{{else}}
-<p class="muted">No tunnels yet. <a href="/_nfr/tunnels">Pick a server</a> to create one.</p>
-{{end}}
-<p class="foot">Tip: agents retry on their own. Nothing here needs a restart.</p>
+
+<div class="stats">
+  <div class="stat">
+    <span class="stat-k">在线节点</span>
+    <span class="stat-v" data-stat="nodes-online">{{.Online}} / {{len .Nodes}}</span>
+    <span class="stat-c">内网机器已接入</span>
+  </div>
+  <div class="stat">
+    <span class="stat-k">启用隧道</span>
+    <span class="stat-v" data-stat="tunnels-enabled">{{.Enabled}} / {{len .Tunnels}}</span>
+    <span class="stat-c">共 {{len .Tunnels}} 条</span>
+  </div>
+  <div class="stat">
+    <span class="stat-k">入站流量</span>
+    <span class="stat-v" data-stat="total-in">{{bytes .In}}</span>
+    <span class="stat-c">访客 → 服务</span>
+  </div>
+  <div class="stat">
+    <span class="stat-k">出站流量</span>
+    <span class="stat-v" data-stat="total-out">{{bytes .Out}}</span>
+    <span class="stat-c">服务 → 访客</span>
+  </div>
+</div>
+
+<div class="grid2">
+  <section class="card pad0">
+    <div class="card-head" style="padding:16px 20px 12px;margin:0">
+      <h2>隧道</h2>
+      <span class="card-sub">实时状态</span>
+      <a class="right btn ghost sm" href="/_nfr/tunnels">管理</a>
+    </div>
+    {{if .Tunnels}}
+    <div class="list">
+      {{range .Tunnels}}
+      <div class="item" data-tid="{{.ID}}">
+        <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
+        <div class="item-main">
+          <div class="item-name"><a href="/_nfr/tunnels/edit?id={{.ID}}&amp;server=local">{{.Name}}</a>
+            <span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}已停用{{else if .Online}}在线{{else}}节点离线{{end}}</span>
+          </div>
+          <div class="item-meta">{{.NodeName}} · {{if eq .Type "http"}}HTTP{{else}}TCP{{end}}</div>
+        </div>
+        <div class="item-end">
+          <span class="endpoint">{{if eq .Type "http"}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}} <span class="arrow">→</span> {{.Local}}</span>
+        </div>
+        <div class="item-num" data-live-rate>{{rate .InRate}} / {{rate .OutRate}}</div>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="empty">
+      {{template "i-empty"}}
+      <b>还没有隧道</b>
+      <p>隧道把内网服务映射到公网。先接入一台内网机器，再为它的服务建一条隧道。</p>
+      <a class="btn primary" href="/_nfr/tunnels">{{template "i-plus"}}新建隧道</a>
+    </div>
+    {{end}}
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>实时流量</h2>
+      <span class="card-sub">最近几分钟</span>
+    </div>
+    <div class="chart" data-chart>
+      <div class="chart-empty">正在采样…</div>
+    </div>
+    <div class="legend">
+      <span class="in"><i></i>入站</span>
+      <span class="out"><i></i>出站</span>
+      <span class="right dim">每 4 秒采样</span>
+    </div>
+  </section>
+</div>

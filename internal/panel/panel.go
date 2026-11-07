@@ -4,6 +4,7 @@
 package panel
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -25,9 +26,10 @@ import (
 	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/server"
+	"github.com/solitudeit/nfr/internal/version"
 )
 
-//go:embed templates/*.html
+//go:embed templates/*.html static/*
 var files embed.FS
 
 const (
@@ -69,6 +71,7 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 		"short": shortTime,
 		"port":  portLabel,
 		"join":  strings.Join,
+		"rate":  func(n float64) string { return humanBytes(int64(n)) + "/s" },
 	}
 	base := template.Must(template.New("layout").Funcs(funcs).ParseFS(files, "templates/layout.html"))
 	pages := map[string]*template.Template{}
@@ -108,6 +111,9 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/_nfr/login":
 		p.login(w, r)
 		return
+	case strings.HasPrefix(r.URL.Path, "/_nfr/static/"):
+		p.static(w, r)
+		return
 	case r.URL.Path == "/_nfr/logout":
 		p.logout(w, r)
 		return
@@ -144,6 +150,8 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.tunnelToggle(w, r, sess)
 	case r.URL.Path == "/_nfr/nodes":
 		p.nodes(w, r, sess)
+	case r.URL.Path == "/_nfr/nodes/delete":
+		p.nodeDelete(w, r, sess)
 	case r.URL.Path == "/_nfr/servers":
 		p.servers(w, r, sess)
 	case r.URL.Path == "/_nfr/settings":
@@ -221,7 +229,7 @@ func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/_nfr/", http.StatusSeeOther)
 			return
 		}
-		p.render(w, r, "login", base{Title: "Sign in", Nav: "login", Error: r.URL.Query().Get("err")})
+		p.render(w, r, "login", base{Title: "登录", Page: "login", Nav: "login", Error: r.URL.Query().Get("err"), Ver: version.Version})
 		return
 	}
 	ip := clientIP(r)
@@ -307,6 +315,7 @@ type base struct {
 	Error  string
 	Notice string
 	Info   api.Info
+	Ver    string
 }
 
 func (p *Panel) newBase(r *http.Request, s *session, nav, title, page string) base {
@@ -319,7 +328,33 @@ func (p *Panel) newBase(r *http.Request, s *session, nav, title, page string) ba
 		Error:  q.Get("err"),
 		Notice: q.Get("ok"),
 		Info:   p.srv.Info(),
+		Ver:    version.Version,
 	}
+}
+
+// static serves the embedded stylesheet and script. They are public: the login
+// page needs them too, and they hold no secrets.
+func (p *Panel) static(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/_nfr/static/")
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, ".") {
+		http.NotFound(w, r)
+		return
+	}
+	body, err := files.ReadFile("static/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	switch {
+	case strings.HasSuffix(name, ".css"):
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case strings.HasSuffix(name, ".js"):
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	default:
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(body)
 }
 
 func (p *Panel) render(w http.ResponseWriter, r *http.Request, page string, data any) {
@@ -331,9 +366,15 @@ func (p *Panel) render(w http.ResponseWriter, r *http.Request, page string, data
 		http.Error(w, "unknown page", http.StatusInternalServerError)
 		return
 	}
-	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
+	// Render into memory first: a template error half way through would
+	// otherwise leave the browser with a truncated page and no clue.
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, "layout", data); err != nil {
 		p.lg.Error("render console", "page", page, "err", err)
+		http.Error(w, "console template error: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (p *Panel) back(w http.ResponseWriter, r *http.Request, path string, err error) {
@@ -391,18 +432,18 @@ func humanBytes(n int64) string {
 
 func humanAgo(t *time.Time) string {
 	if t == nil {
-		return "never"
+		return "从未"
 	}
 	d := time.Since(*t)
 	switch {
 	case d < time.Minute:
-		return "just now"
+		return "刚刚"
 	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+		return fmt.Sprintf("%d 分钟前", int(d.Minutes()))
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+		return fmt.Sprintf("%d 小时前", int(d.Hours()))
 	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+		return fmt.Sprintf("%d 天前", int(d.Hours()/24))
 	}
 }
 

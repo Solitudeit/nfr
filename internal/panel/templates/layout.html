@@ -1,92 +1,72 @@
 {{define "layout"}}<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
 <title>{{.Title}} · NFR</title>
-<style>
-:root{
-  --bg:#0b0f14;--panel:#121821;--line:#1f2836;--text:#e6edf3;--dim:#8b98a8;
-  --accent:#3ddc97;--accent2:#4c8dff;--warn:#ffb454;--bad:#ff6b6b;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}
-a{color:var(--accent2);text-decoration:none}
-a:hover{text-decoration:underline}
-header.top{display:flex;align-items:center;gap:18px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(18,24,33,.9);position:sticky;top:0;backdrop-filter:blur(8px);z-index:9}
-.brand{font-weight:700;font-size:18px;color:var(--text)}
-.brand span{color:var(--accent);font-weight:600;font-size:12px;margin-left:6px;letter-spacing:.08em;text-transform:uppercase}
-nav{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
-nav a{padding:6px 10px;border-radius:8px;color:var(--dim);font-size:14px}
-nav a:hover{background:var(--panel);color:var(--text);text-decoration:none}
-nav a.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
-main{max-width:1080px;margin:0 auto;padding:22px 20px 60px}
-h1{font-size:22px;margin:0 0 4px}
-h2{font-size:16px;margin:26px 0 10px}
-.sub{color:var(--dim);font-size:13px;margin:0 0 18px}
-.msg{padding:10px 14px;border-radius:10px;margin:0 0 16px;font-size:14px;border:1px solid}
-.msg.err{border-color:#5a2730;background:#2a1216;color:#ffb3b3}
-.msg.ok{border-color:#1d4a38;background:#0f2a20;color:#a8f0cf}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
-.card .k{color:var(--dim);font-size:12px;letter-spacing:.05em;text-transform:uppercase}
-.card .v{font-size:24px;font-weight:650;margin-top:4px}
-.card .c{color:var(--dim);font-size:12px;margin-top:2px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-.pick{display:block;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;color:var(--text)}
-.pick:hover{border-color:var(--accent2);text-decoration:none}
-.pick .t{font-weight:650;font-size:16px}
-.pick .u{color:var(--dim);font-size:12px;word-break:break-all;margin:4px 0 10px}
-.rowform{display:grid;gap:12px;max-width:560px}
-label{display:block;font-size:13px;color:var(--dim);margin-bottom:5px}
-input,select,textarea{width:100%;background:#0d131b;border:1px solid var(--line);color:var(--text);border-radius:9px;padding:9px 11px;font:inherit}
-textarea{min-height:76px;resize:vertical}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent2)}
-.inline{display:flex;gap:10px;align-items:center}
-.inline input{flex:1}
-button,.btn{background:var(--accent);color:#04231a;border:0;border-radius:9px;padding:9px 16px;font-weight:650;font:inherit;cursor:pointer}
-button.ghost,.btn.ghost{background:transparent;color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
-button.danger{background:transparent;color:var(--bad);box-shadow:inset 0 0 0 1px #4a2430}
-button:hover{filter:brightness(1.08)}
-button.sm{padding:5px 10px;font-size:13px;border-radius:7px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th{text-align:left;color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--line)}
-td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
-tr:hover td{background:#0f151d}
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--line);color:var(--dim)}
-.badge.on{color:var(--accent);border-color:#1d4a38;background:#0f2a20}
-.badge.off{color:var(--dim)}
-.badge.err{color:var(--bad);border-color:#4a2430;background:#2a1216}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;word-break:break-all}
-.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:26px;letter-spacing:.35em;color:var(--accent);font-weight:700}
-.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:720px){.split{grid-template-columns:1fr}nav a{padding:5px 7px}}
-.muted{color:var(--dim)}
-.scroll{overflow-x:auto}
-.login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-.login .box{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:26px}
-.login h1{margin-bottom:2px}
-.foot{color:var(--dim);font-size:12px;margin-top:26px}
-</style>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzM1ZDZhNCIvPjxwYXRoIGQ9Ik0xNiA2LjUgMjQgMTZsLTggOS41TDggMTZ6IiBmaWxsPSIjMDQyMzFhIi8+PC9zdmc+">
+<link rel="stylesheet" href="/_nfr/static/app.css?v={{.Ver}}">
+<script>try{var s=localStorage.getItem("nfr-theme");document.documentElement.setAttribute("data-theme",s||"dark")}catch(e){}</script>
 </head>
-<body>
-{{if ne .Page "login"}}
-<header class="top">
-  <a class="brand" href="/_nfr/">NFR<span>control</span></a>
-  <nav>
-    <a href="/_nfr/overview" class="{{if eq .Nav "overview"}}on{{end}}">Overview</a>
-    <a href="/_nfr/tunnels" class="{{if eq .Nav "tunnels"}}on{{end}}">Tunnels</a>
-    <a href="/_nfr/nodes" class="{{if eq .Nav "nodes"}}on{{end}}">Nodes</a>
-    <a href="/_nfr/servers" class="{{if eq .Nav "servers"}}on{{end}}">Servers</a>
-    <a href="/_nfr/settings" class="{{if eq .Nav "settings"}}on{{end}}">Settings</a>
-    <a href="/_nfr/keys" class="{{if eq .Nav "keys"}}on{{end}}">API</a>
-  </nav>
-</header>
-{{end}}
-<main>
-{{if .Error}}<div class="msg err">{{.Error}}</div>{{end}}
-{{if .Notice}}<div class="msg ok">{{.Notice}}</div>{{end}}
+<body{{if ne .Page "login"}} data-live{{end}}>
+{{if eq .Page "login"}}
 {{template "content" .}}
-</main>
+{{else}}
+<div class="shell">
+  <aside class="side">
+    <a class="logo" href="/_nfr/">
+      <span class="logo-mark">N</span>
+      <span class="logo-text">NFR<small>{{.Info.Name}}</small></span>
+    </a>
+    <nav class="nav">{{template "nav" .}}</nav>
+    <div class="side-foot">
+      <div class="build">v{{.Info.Version}} · rev {{.Info.Revision}}</div>
+      <a class="signout" href="/_nfr/logout">{{template "i-logout"}}退出登录</a>
+    </div>
+  </aside>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="crumb"><b>{{.Info.Name}}</b><span class="sep">/</span><span>{{.Title}}</span></div>
+      <div class="top-actions">
+        {{if .Info.Domain}}<span class="chip">{{.Info.Domain}}</span>{{end}}
+        <button class="icon-btn" type="button" data-theme-toggle title="切换深色 / 浅色">
+          {{template "i-moon"}}{{template "i-sun"}}
+        </button>
+      </div>
+    </header>
+    <main class="content">
+      {{if .Error}}<div class="flash err">{{.Error}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
+      {{if .Notice}}<div class="flash ok">{{.Notice}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
+      {{template "content" .}}
+    </main>
+  </div>
+</div>
+<nav class="tabbar">{{template "nav" .}}</nav>
+{{end}}
+<script src="/_nfr/static/app.js?v={{.Ver}}" defer></script>
 </body>
 </html>{{end}}
+
+{{define "nav"}}
+<a href="/_nfr/overview" class="{{if eq .Nav "overview"}}active{{end}}">{{template "i-grid"}}<span>概览</span></a>
+<a href="/_nfr/tunnels" class="{{if eq .Nav "tunnels"}}active{{end}}">{{template "i-tunnels"}}<span>隧道</span></a>
+<a href="/_nfr/nodes" class="{{if eq .Nav "nodes"}}active{{end}}">{{template "i-nodes"}}<span>节点</span></a>
+<a href="/_nfr/servers" class="{{if eq .Nav "servers"}}active{{end}}">{{template "i-servers"}}<span>服务器</span></a>
+<a href="/_nfr/settings" class="{{if eq .Nav "settings"}}active{{end}}">{{template "i-settings"}}<span>设置</span></a>
+<a href="/_nfr/keys" class="{{if eq .Nav "keys"}}active{{end}}">{{template "i-key"}}<span>API</span></a>
+{{end}}
+
+{{define "i-grid"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>{{end}}
+{{define "i-tunnels"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5h11"/><path d="m11.5 4.5 3 3-3 3"/><path d="M20.5 16.5h-11"/><path d="m12.5 13.5-3 3 3 3"/></svg>{{end}}
+{{define "i-nodes"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>{{end}}
+{{define "i-servers"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.5L12 12 3.5 7.5 12 3Z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5"/><path d="m3.5 17 8.5 4.5 8.5-4.5"/></svg>{{end}}
+{{define "i-settings"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.9v2.3M12 18.8v2.3M4.6 12H2.3M21.7 12h-2.3M6.7 6.7 5.1 5.1M18.9 18.9l-1.6-1.6M6.7 17.3l-1.6 1.6M18.9 5.1l-1.6 1.6"/></svg>{{end}}
+{{define "i-key"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.2"/><path d="m10.6 12.4 8.9-8.9"/><path d="m16.5 6.5 2.7 2.7"/><path d="m14.2 8.8 2.7 2.7"/></svg>{{end}}
+{{define "i-logout"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 20.5H5.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4"/><path d="m16.5 16.5 4.5-4.5-4.5-4.5"/><path d="M21 12H9.5"/></svg>{{end}}
+{{define "i-moon"}}<svg data-icon="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.8A8.6 8.6 0 0 1 9.2 3.5a8.6 8.6 0 1 0 11.3 11.3Z"/></svg>{{end}}
+{{define "i-sun"}}<svg data-icon="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.2 12H2M22 12h-2.2M6.3 6.3 4.8 4.8M19.2 19.2l-1.5-1.5M6.3 17.7l-1.5 1.5M19.2 4.8l-1.5 1.5"/></svg>{{end}}
+{{define "i-copy"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2.2"/><path d="M5.5 15V5.8A1.8 1.8 0 0 1 7.3 4h9.2"/></svg>{{end}}
+{{define "i-plus"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>{{end}}
+{{define "i-arrow-left"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg>{{end}}
+{{define "i-empty"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M6.5 7v11a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V7"/><path d="M9.5 4h5"/></svg>{{end}}

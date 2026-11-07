@@ -1,58 +1,92 @@
 {{if not .Current}}
-<h1>Choose a server</h1>
-<p class="sub">Every NFR instance manages its own tunnels. Pick the machine the service should become reachable from.</p>
-<div class="grid">
-{{range .Cards}}
-  <a class="pick" href="/_nfr/tunnels?server={{.ID}}">
-    <div class="t">{{.Name}} {{if .Local}}<span class="badge">this node</span>{{else}}{{if .Reachable}}<span class="badge on">online</span>{{else}}<span class="badge err">unreachable</span>{{end}}{{end}}</div>
-    <div class="u">{{.URL}}</div>
-    <div class="c muted">{{.Nodes}} nodes · {{.Tunnels}} tunnels</div>
-  </a>
-{{end}}
+<div class="page-head">
+  <div>
+    <h1>隧道</h1>
+    <p class="lead">选择一台服务器。每台 NFR 实例独立管理自己的隧道，这里只是入口。</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/_nfr/servers">{{template "i-servers"}}管理服务器</a>
+  </div>
 </div>
-<p class="foot">Add more machines under <a href="/_nfr/servers">Servers</a>.</p>
-{{else}}
-<h1>Tunnels on {{.CurName}}</h1>
-<p class="sub"><span class="mono">{{.CurURL}}</span> · <a href="/_nfr/tunnels">switch server</a></p>
-{{if .RemoteErr}}<div class="msg err">Cannot reach this server: {{.RemoteErr}}</div>{{end}}
-{{if not .RemoteErr}}
-<div class="inline" style="margin-bottom:12px">
-  <a class="btn" href="/_nfr/tunnels/new?server={{.Current}}">New tunnel</a>
-</div>
-{{if .Tunnels}}
-<div class="scroll"><table>
-<thead><tr><th>Name</th><th>Node</th><th>Public</th><th>Local</th><th>Status</th><th>Traffic</th><th></th></tr></thead>
-<tbody>
-{{range .Tunnels}}
-<tr>
-  <td><a href="/_nfr/tunnels/edit?id={{.ID}}&server={{$.Current}}">{{.Name}}</a></td>
-  <td class="muted">{{.NodeName}}{{if not .Online}} <span class="badge off">offline</span>{{end}}</td>
-  <td class="mono">{{if eq .Type "http"}}{{join .Hosts ", "}}{{else}}:{{port .RemotePort}}{{end}}</td>
-  <td class="mono muted">{{.Local}}</td>
-  <td>{{if .Enabled}}<span class="badge on">enabled</span>{{else}}<span class="badge off">disabled</span>{{end}}</td>
-  <td class="muted">{{bytes .In}} / {{bytes .Out}}</td>
-  <td>
-    <div class="inline">
-      <form method="post" action="/_nfr/tunnels/toggle">
-        <input type="hidden" name="csrf" value="{{$.CSRF}}">
-        <input type="hidden" name="server" value="{{$.Current}}">
-        <input type="hidden" name="id" value="{{.ID}}">
-        <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
-        <button class="ghost sm">{{if .Enabled}}Disable{{else}}Enable{{end}}</button>
-      </form>
-      <form method="post" action="/_nfr/tunnels/delete" onsubmit="return confirm('Delete this tunnel?')">
-        <input type="hidden" name="csrf" value="{{$.CSRF}}">
-        <input type="hidden" name="server" value="{{$.Current}}">
-        <input type="hidden" name="id" value="{{.ID}}">
-        <button class="danger sm">Delete</button>
-      </form>
+
+<div class="grid-auto">
+  {{range .Cards}}
+  <a class="card pick" href="/_nfr/tunnels?server={{.ID}}">
+    <div class="hstack">
+      <span class="dot {{if or .Local .Reachable}}on{{else}}err{{end}}"></span>
+      <b>{{.Name}}</b>
+      {{if .Local}}<span class="chip">本机</span>{{else if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}
     </div>
-  </td>
-</tr>
-{{end}}
-</tbody></table></div>
+    <div class="mono muted" style="font-size:12px;margin-top:9px;word-break:break-all">{{.URL}}</div>
+    <div class="pick-foot">
+      <span>{{.Nodes}} 个节点</span><span>·</span><span>{{.Tunnels}} 条隧道</span>
+      <span class="go">打开 →</span>
+    </div>
+  </a>
+  {{end}}
+  <a class="card pick add" href="/_nfr/servers">
+    <b>＋ 纳管另一台服务器</b>
+    <span class="muted">在别的机器上装好 NFR，用 API 密钥接进来，之后在这里统一管理。</span>
+  </a>
+</div>
+
 {{else}}
-<p class="muted">No tunnels on this server yet.</p>
-{{end}}
+<div class="page-head">
+  <div>
+    <h1>{{.CurName}}</h1>
+    <p class="lead"><span class="mono">{{.CurURL}}</span></p>
+  </div>
+  <div class="page-actions">
+    <a class="btn ghost" href="/_nfr/tunnels">{{template "i-arrow-left"}}切换服务器</a>
+    <a class="btn primary" href="/_nfr/tunnels/new?server={{.Current}}">{{template "i-plus"}}新建隧道</a>
+  </div>
+</div>
+
+{{if .RemoteErr}}
+<div class="flash err">无法连接这台服务器：{{.RemoteErr}}</div>
+{{else}}
+<section class="card pad0">
+  {{if .Tunnels}}
+  <div class="list">
+    {{range .Tunnels}}
+    <div class="item" data-tid="{{.ID}}">
+      <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
+      <div class="item-main">
+        <div class="item-name">
+          <a href="/_nfr/tunnels/edit?id={{.ID}}&amp;server={{$.Current}}">{{.Name}}</a>
+          <span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}已停用{{else if .Online}}在线{{else}}节点离线{{end}}</span>
+        </div>
+        <div class="item-meta">{{.NodeName}} · {{if eq .Type "http"}}HTTP{{else}}TCP{{end}} · 入 {{bytes .In}} / 出 {{bytes .Out}}</div>
+      </div>
+      <div class="item-end">
+        <span class="endpoint">{{if eq .Type "http"}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}} <span class="arrow">→</span> {{.Local}}</span>
+      </div>
+      <div class="item-actions">
+        <form method="post" action="/_nfr/tunnels/toggle">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="server" value="{{$.Current}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
+          <button class="btn ghost sm" type="submit">{{if .Enabled}}停用{{else}}启用{{end}}</button>
+        </form>
+        <form method="post" action="/_nfr/tunnels/delete" data-confirm="删除隧道「{{.Name}}」？该操作不可撤销。">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="server" value="{{$.Current}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="btn danger sm" type="submit">删除</button>
+        </form>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="empty">
+    {{template "i-empty"}}
+    <b>这台服务器还没有隧道</b>
+    <p>指定一个内网地址，NFR 会把它映射到公网。</p>
+    <a class="btn primary" href="/_nfr/tunnels/new?server={{.Current}}">{{template "i-plus"}}新建隧道</a>
+  </div>
+  {{end}}
+</section>
 {{end}}
 {{end}}

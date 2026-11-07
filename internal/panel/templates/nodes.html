@@ -1,34 +1,63 @@
-<h1>Nodes</h1>
-<p class="sub">Machines that joined this server. Each keeps a single outbound connection.</p>
+<div class="page-head">
+  <div>
+    <h1>节点</h1>
+    <p class="lead">已接入的内网机器。每台只保持一条主动外连，不需要公网 IP，也不需要在路由器上开端口。</p>
+  </div>
+  <div class="page-actions">
+    <form method="post" action="/_nfr/nodes" class="hstack">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input name="name" placeholder="节点名称（可选）" style="width:190px">
+      <button class="btn primary" type="submit">{{template "i-plus"}}生成加入码</button>
+    </form>
+  </div>
+</div>
+
 {{if .Code}}
-<div class="msg ok">
-  <div>Join code <span class="code">{{.Code}}</span></div>
-  <div class="mono" style="margin-top:6px">Run on the private machine: <b>{{.Command}}</b></div>
-  <div class="muted" style="font-size:12px;margin-top:6px">Valid for five minutes, works once.</div>
-</div>
+<section class="card" style="margin-bottom:18px">
+  <div class="hstack">
+    <span class="chip on">加入码</span>
+    <span class="muted" style="font-size:12.5px">5 分钟内有效 · 只能使用一次</span>
+    <span class="right muted" style="font-size:12.5px">在内网机器上执行</span>
+  </div>
+  <div style="margin:14px 0 16px"><span class="join-code">{{.Code}}</span></div>
+  <div class="copyfield">
+    <code>{{.Command}}</code>
+    <button type="button" class="btn sm" data-copy="{{.Command}}">复制</button>
+  </div>
+  <p class="note" style="margin-top:12px">加入码用来换取该节点专属的长期令牌。令牌只保存在内网机器上，泄露后删掉节点即可失效。</p>
+</section>
 {{end}}
-<div class="inline" style="margin-bottom:14px">
-  <form method="post" action="/_nfr/nodes" class="inline">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <input name="name" placeholder="node name (optional)" style="width:220px">
-    <button>Create join code</button>
-  </form>
-</div>
-{{if .Nodes}}
-<div class="scroll"><table>
-<thead><tr><th>Name</th><th>Platform</th><th>Version</th><th>Status</th><th>Last seen</th><th>Tunnels</th></tr></thead>
-<tbody>
-{{range .Nodes}}
-<tr>
-  <td>{{.Name}}</td>
-  <td class="muted">{{.OS}}/{{.Arch}}</td>
-  <td class="muted mono">{{.Version}}</td>
-  <td>{{if .Online}}<span class="badge on">online</span>{{else}}<span class="badge off">offline</span>{{end}}</td>
-  <td class="muted">{{ago .LastSeen}}</td>
-  <td class="muted">{{.Tunnels}}</td>
-</tr>
-{{end}}
-</tbody></table></div>
-{{else}}
-<p class="muted">No nodes yet. Create a join code and run <span class="mono">nfr join</span> on the machine.</p>
-{{end}}
+
+<section class="card pad0">
+  {{if .Nodes}}
+  <div class="list">
+    {{range .Nodes}}
+    <div class="item" data-nid="{{.ID}}">
+      <span class="dot {{if .Online}}on{{else}}off{{end}}"></span>
+      <div class="item-main">
+        <div class="item-name">{{.Name}}</div>
+        <div class="item-meta">{{.OS}} / {{.Arch}} {{if .Version}}· {{.Version}}{{end}}</div>
+      </div>
+      <div class="item-end">
+        <span class="chip {{if .Online}}on{{else}}off{{end}}" data-live-chip>{{if .Online}}在线{{else}}离线{{end}}</span>
+        <span class="item-num" data-live-seen>{{ago .LastSeen}}</span>
+      </div>
+      <div class="item-num">{{.Tunnels}} 条隧道</div>
+      <div class="item-actions">
+        <form method="post" action="/_nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="btn danger sm" type="submit">移除</button>
+        </form>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="empty">
+    {{template "i-empty"}}
+    <b>还没有接入任何机器</b>
+    <p>生成加入码，在那台机器上运行一条 <code>nfr join</code> 命令即可。之后它会自己重连，不需要额外看护。</p>
+  </div>
+  {{end}}
+</section>
