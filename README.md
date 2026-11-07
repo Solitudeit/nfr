@@ -78,6 +78,28 @@ agent 断线会自己重连（1s 起，指数退避到 30s），服务器重启�
 
 保存后 agent 立刻收到新配置，正在传输的连接不会断。
 
+## 本地 30 秒试玩
+
+不需要公网服务器，也不需要 root（用高位端口）：
+
+```bash
+cat > /tmp/nfr-demo.toml <<'TOML'
+control_listen = "127.0.0.1:18443"
+http_listen    = "127.0.0.1:18080"
+https_listen   = "off"
+data_dir       = "/tmp/nfr-demo"
+TOML
+
+go run ./cmd/nfr server -c /tmp/nfr-demo.toml &     # 记下打印出来的密码
+# 打开 https://127.0.0.1:18443/_nfr/ ，Nodes 页生成加入码 ABC123，然后：
+go run ./cmd/nfr join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123
+go run ./cmd/nfr agent -c /tmp/nfr-agent.toml &
+
+python3 -m http.server 8080 &                       # 一个假的内网服务
+# 面板里建 HTTP 隧道，内网地址 8080，域名 test.local，然后：
+curl -H "Host: test.local" http://127.0.0.1:18080/
+```
+
 ## 自托管面板
 
 同一个进程，`/_nfr/`：
