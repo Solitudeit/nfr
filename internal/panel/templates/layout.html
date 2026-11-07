@@ -3,46 +3,43 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="light dark">
 <title>{{.Title}} · NFR</title>
-<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzM1ZDZhNCIvPjxwYXRoIGQ9Ik0xNiA2LjUgMjQgMTZsLTggOS41TDggMTZ6IiBmaWxsPSIjMDQyMzFhIi8+PC9zdmc+">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzRmNDZlNSIvPjxwYXRoIGQ9Ik0xMSAxMFYyMmgydi03LjJsNSA3LjJoMnYtMTJoLTJ2Ny4yTDEzIDEweiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==">
 <link rel="stylesheet" href="/_nfr/static/app.css?v={{.Ver}}">
-<script>try{var s=localStorage.getItem("nfr-theme");document.documentElement.setAttribute("data-theme",s||"dark")}catch(e){}</script>
+<script>try{var t=localStorage.getItem("nfr-theme");if(!t){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 </head>
 <body{{if ne .Page "login"}} data-live{{end}}>
 {{if eq .Page "login"}}
 {{template "content" .}}
 {{else}}
 <div class="shell">
-  <aside class="side">
-    <a class="logo" href="/_nfr/">
-      <span class="logo-mark">N</span>
-      <span class="logo-text">NFR<small>{{if .Info.Domain}}{{.Info.Domain}}{{else}}控制台{{end}}</small></span>
-    </a>
-    <nav class="nav">{{template "nav" .}}</nav>
-    <div class="side-foot">
-      <div class="build">v{{.Info.Version}} · rev {{.Info.Revision}}</div>
-      <a class="signout" href="/_nfr/logout">{{template "i-logout"}}退出登录</a>
-    </div>
-  </aside>
-  <div class="wrap">
-    <header class="topbar">
-      <div class="crumb"><b>{{.Info.Name}}</b><span class="sep">/</span><span>{{.Title}}</span></div>
+  <header class="topbar">
+    <div class="bar">
+      <a class="brand" href="/_nfr/">
+        <span class="brand-mark">N</span>
+        <span class="brand-name">NFR</span>
+        {{if .Info.Domain}}<span class="brand-site">{{.Info.Domain}}</span>{{end}}
+      </a>
+      <nav class="nav">{{template "nav" .}}</nav>
       <div class="top-actions">
-        {{if .Info.Domain}}<span class="chip">{{.Info.Domain}}</span>{{end}}
         <button class="icon-btn" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
           {{template "i-moon"}}{{template "i-sun"}}
         </button>
+        <a class="icon-btn" href="/_nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
       </div>
-    </header>
-    <main class="content">
-      <div class="page">
-        {{if .Error}}<div class="flash err" role="alert">{{.Error}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
-        {{if .Notice}}<div class="flash ok" role="status">{{.Notice}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
-        {{template "content" .}}
-      </div>
-    </main>
-  </div>
+    </div>
+  </header>
+  <main class="content">
+    {{if .Error}}<div class="flash err" role="alert">{{.Error}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
+    {{if .Notice}}<div class="flash ok" role="status">{{.Notice}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
+    {{template "content" .}}
+    <footer class="foot">
+      <span>{{.Info.Name}} · {{.Info.Version}}</span>
+      <span class="dim">rev {{.Info.Revision}}</span>
+      <span class="right dim">NFR 反向隧道控制台</span>
+    </footer>
+  </main>
 </div>
 <nav class="tabbar">{{template "nav" .}}</nav>
 {{end}}

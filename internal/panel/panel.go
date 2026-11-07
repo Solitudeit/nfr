@@ -72,6 +72,12 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 		"port":  portLabel,
 		"join":  strings.Join,
 		"rate":  func(n float64) string { return humanBytes(int64(n)) + "/s" },
+		"vshort": func(v string) string {
+			if i := strings.IndexByte(v, ' '); i > 0 {
+				return v[:i]
+			}
+			return v
+		},
 	}
 	base := template.Must(template.New("layout").Funcs(funcs).ParseFS(files, "templates/layout.html"))
 	pages := map[string]*template.Template{}
