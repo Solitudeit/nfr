@@ -13,7 +13,7 @@
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo nfr server -c /etc/nfr/server.toml        # 首次运行：生成配置、证书、密码
+sudo nfr server                                 # 首次运行：生成配置、证书、密码
 sudo cp deploy/systemd/nfr-server.service /etc/systemd/system/
 sudo systemctl enable --now nfr-server
 journalctl -u nfr-server -f
@@ -66,10 +66,10 @@ tls_key  = "/etc/letsencrypt/live/example.com/privkey.pem"
 
 ```bash
 docker run -d --name nfr --restart=always \
-  -p 8443:8443 -p 80:80 -p 443:443 -p 20000-29999:20000-29999 \
+  -p 8443:8443 -p 80:80 -p 443:443 \
   -v nfr-data:/var/lib/nfr \
-  ghcr.io/solitudeit/nfr:latest server -c /var/lib/nfr/server.toml
-docker logs nfr          # 首次启动的密码在这里
+  ghcr.io/solitudeit/nfr
+docker logs nfr          # 首次启动的面板地址与密码在这里
 ```
 
 注意：容器默认以 root 运行，否则绑不了 80/443。想降权就把
@@ -88,6 +88,12 @@ NFR 自己要占 80/443，和 nginx 直接抢端口。三种选择：
 
 ```bash
 nfr join example.com ABC123                  # 加入码在面板「节点」页生成
+```
+
+`join` 默认写完配置就一直连着，适合 `tmux`/`screen` 里直接跑；交给 systemd 时：
+
+```bash
+nfr join --no-start example.com ABC123
 sudo cp deploy/systemd/nfr-agent.service /etc/systemd/system/
 sudo systemctl enable --now nfr-agent
 ```

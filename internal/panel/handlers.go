@@ -367,6 +367,8 @@ type settingsData struct {
 	CertSource string
 	CertMode   string
 	CertExpiry string
+	Keys       []api.APIKey
+	NewKey     string
 }
 
 func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
@@ -375,6 +377,27 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 		_ = r.ParseForm()
 		action := r.FormValue("action")
 		switch action {
+		case "key":
+			req := api.APIKeyRequest{
+				Label: strings.TrimSpace(r.FormValue("label")),
+				Scope: r.FormValue("scope"),
+			}
+			if req.Scope == "" {
+				req.Scope = "read"
+			}
+			resp, err := p.srv.CreateAPIKey(req)
+			if err != nil {
+				d.Error = err.Error()
+				break
+			}
+			d.NewKey = resp.Key
+			d.Notice = "密钥已创建"
+		case "revoke":
+			if err := p.srv.DeleteAPIKey(r.FormValue("id")); err != nil {
+				d.Error = err.Error()
+				break
+			}
+			d.Notice = "密钥已吊销"
 		case "password":
 			old := r.FormValue("old_password")
 			next := r.FormValue("new_password")
@@ -428,18 +451,13 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 	d.Pin = info.Pinned
 	d.PanelURL = info.PanelURL
 	cert := p.srv.CertSummary()
+	d.Keys = p.srv.APIKeys()
 	d.CertMode = cert.Mode
 	d.CertSource = certSourceLabel(cert.Source)
 	if cert.NotAfter != nil {
 		d.CertExpiry = cert.NotAfter.Local().Format("2006-01-02")
 	}
 	p.render(w, r, "settings", d)
-}
-
-type keysData struct {
-	base
-	Keys   []api.APIKey
-	NewKey string
 }
 
 // certSourceLabel turns the internal certificate source key into something a
@@ -456,35 +474,6 @@ func certSourceLabel(source string) string {
 		return "未知"
 	}
 	return source
-}
-
-func (p *Panel) keys(w http.ResponseWriter, r *http.Request, s *session) {
-	d := keysData{base: p.newBase(r, s, "keys", "API 密钥", "keys")}
-	if r.Method == http.MethodPost {
-		_ = r.ParseForm()
-		switch r.FormValue("action") {
-		case "delete":
-			if err := p.srv.DeleteAPIKey(r.FormValue("id")); err != nil {
-				d.Error = err.Error()
-			}
-		default:
-			req := api.APIKeyRequest{
-				Label: strings.TrimSpace(r.FormValue("label")),
-				Scope: r.FormValue("scope"),
-			}
-			if req.Scope == "" {
-				req.Scope = "read"
-			}
-			resp, err := p.srv.CreateAPIKey(req)
-			if err != nil {
-				d.Error = err.Error()
-			} else {
-				d.NewKey = resp.Key
-			}
-		}
-	}
-	d.Keys = p.srv.APIKeys()
-	p.render(w, r, "keys", d)
 }
 
 // allocate answers the "get a port" button without leaving the page.

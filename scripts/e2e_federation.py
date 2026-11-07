@@ -185,7 +185,8 @@ def main():
         )
         check("B API enabled", status == 200 and "设置已保存" in html, "status %d" % status)
 
-        status, html = B.request("/_nfr/keys", {"csrf": B.csrf, "label": "console-a", "scope": "admin"})
+        status, html = B.request("/_nfr/settings",
+                                 {"csrf": B.csrf, "action": "key", "label": "console-a", "scope": "admin"})
         m = re.search(r'data-newkey="([^"]+)"', html)
         check("B admin key created", m is not None, "status %d" % status)
         if not m:
@@ -218,7 +219,7 @@ def main():
 
         agent_cfg = os.path.join(tmp, "b-agent.toml")
         p = subprocess.run(
-            [binary, "join", "-c", agent_cfg, "--name", "node-b-agent",
+            [binary, "join", "--no-start", "-c", agent_cfg, "--name", "node-b-agent",
              "127.0.0.1:%d" % b_ctl, code],
             capture_output=True, text=True,
         )

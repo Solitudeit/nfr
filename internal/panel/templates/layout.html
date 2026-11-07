@@ -17,7 +17,7 @@
   <aside class="side">
     <a class="logo" href="/_nfr/">
       <span class="logo-mark">N</span>
-      <span class="logo-text">NFR<small>{{.Info.Name}}</small></span>
+      <span class="logo-text">NFR<small>{{if .Info.Domain}}{{.Info.Domain}}{{else}}控制台{{end}}</small></span>
     </a>
     <nav class="nav">{{template "nav" .}}</nav>
     <div class="side-foot">
@@ -56,7 +56,6 @@
 <a href="/_nfr/nodes" class="{{if eq .Nav "nodes"}}active{{end}}">{{template "i-nodes"}}<span>节点</span></a>
 <a href="/_nfr/servers" class="{{if eq .Nav "servers"}}active{{end}}">{{template "i-servers"}}<span>服务器</span></a>
 <a href="/_nfr/settings" class="{{if eq .Nav "settings"}}active{{end}}">{{template "i-settings"}}<span>设置</span></a>
-<a href="/_nfr/keys" class="{{if eq .Nav "keys"}}active{{end}}">{{template "i-key"}}<span>API</span></a>
 {{end}}
 
 {{define "i-grid"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>{{end}}

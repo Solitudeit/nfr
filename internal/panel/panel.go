@@ -157,7 +157,7 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/_nfr/settings":
 		p.settings(w, r, sess)
 	case r.URL.Path == "/_nfr/keys":
-		p.keys(w, r, sess)
+		http.Redirect(w, r, "/_nfr/settings#api", http.StatusMovedPermanently)
 	case r.URL.Path == "/_nfr/api/allocate":
 		p.allocate(w, r, sess)
 	case r.URL.Path == "/_nfr/api/state":

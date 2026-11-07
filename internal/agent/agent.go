@@ -130,6 +130,17 @@ func (a *Agent) session(ctx context.Context) error {
 		return err
 	}
 	defer sess.Close()
+	// Cancelling the context (Ctrl-C) must break the blocking frame read below,
+	// so close the session instead of waiting for the read deadline.
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		select {
+		case <-ctx.Done():
+			sess.Close()
+		case <-stop:
+		}
+	}()
 	ctrl, err := sess.Open()
 	if err != nil {
 		return err

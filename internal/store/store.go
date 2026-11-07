@@ -123,7 +123,7 @@ func Open(dir string) (*Store, error) {
 		s.state = State{
 			SchemaVersion: SchemaVersion,
 			ID:            NewID(),
-			Name:          "nfr",
+			Name:          "NFR",
 			CreatedAt:     time.Now().UTC(),
 			Settings: Settings{
 				PortRange: [2]int{20000, 29999},
@@ -140,6 +140,14 @@ func Open(dir string) (*Store, error) {
 		}
 		if s.state.Settings.PortRange[1] == 0 {
 			s.state.Settings.PortRange = [2]int{20000, 29999}
+		}
+		// states written before v0.4 called the instance "nfr"; the product
+		// name is upper case everywhere else, so normalise the default.
+		if s.state.Name == "nfr" {
+			s.state.Name = "NFR"
+			if err := s.saveLocked(); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return s, nil
