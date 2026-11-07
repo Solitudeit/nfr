@@ -30,15 +30,17 @@
       <div class="crumb"><b>{{.Info.Name}}</b><span class="sep">/</span><span>{{.Title}}</span></div>
       <div class="top-actions">
         {{if .Info.Domain}}<span class="chip">{{.Info.Domain}}</span>{{end}}
-        <button class="icon-btn" type="button" data-theme-toggle title="切换深色 / 浅色">
+        <button class="icon-btn" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
           {{template "i-moon"}}{{template "i-sun"}}
         </button>
       </div>
     </header>
     <main class="content">
-      {{if .Error}}<div class="flash err">{{.Error}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
-      {{if .Notice}}<div class="flash ok">{{.Notice}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
-      {{template "content" .}}
+      <div class="page">
+        {{if .Error}}<div class="flash err" role="alert">{{.Error}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
+        {{if .Notice}}<div class="flash ok" role="status">{{.Notice}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
+        {{template "content" .}}
+      </div>
     </main>
   </div>
 </div>

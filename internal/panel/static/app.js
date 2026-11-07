@@ -1,31 +1,47 @@
-// NFR console — small progressive enhancements only. The panel is fully usable
-// without JavaScript: this file adds theme switching, copy buttons, live status
-// polling and a traffic sparkline.
+// NFR console — progressive enhancement only. The panel is fully usable without
+// JavaScript: this file adds theme switching, copy buttons, live status polling,
+// a traffic chart and small motion touches (press feedback, materialize-in).
 (function () {
   "use strict";
 
-  // ── theme ──────────────────────────────────────────────────────────
   var root = document.documentElement;
+  var reduceQuery = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  function reduce() { return !!(reduceQuery && reduceQuery.matches); }
+
+  // ── theme ──────────────────────────────────────────────────────────
   var saved = null;
   try { saved = localStorage.getItem("nfr-theme"); } catch (e) {}
   if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
 
+  var themeTimer = null;
   function currentTheme() {
-    var t = root.getAttribute("data-theme");
-    if (t) return t;
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    return root.getAttribute("data-theme") ||
+      (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  }
+  function setTheme(next) {
+    if (!reduce()) root.classList.add("theme-anim");
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("nfr-theme", next); } catch (e) {}
+    clearTimeout(themeTimer);
+    themeTimer = setTimeout(function () { root.classList.remove("theme-anim"); }, 320);
   }
 
+  // iOS only paints :active if a touch listener exists somewhere.
+  document.addEventListener("touchstart", function () {}, { passive: true });
+
+  // ── top bar edge shadow ────────────────────────────────────────────
+  var topbar = document.querySelector(".topbar");
+  if (topbar) {
+    var onScroll = function () { topbar.classList.toggle("scrolled", window.scrollY > 4); };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+  }
+
+  // ── delegated clicks ───────────────────────────────────────────────
   document.addEventListener("click", function (ev) {
     var t = ev.target.closest("[data-theme-toggle]");
-    if (t) {
-      var next = currentTheme() === "light" ? "dark" : "light";
-      root.setAttribute("data-theme", next);
-      try { localStorage.setItem("nfr-theme", next); } catch (e) {}
-      return;
-    }
+    if (t) { setTheme(currentTheme() === "light" ? "dark" : "light"); return; }
 
-    // ── copy to clipboard ────────────────────────────────────────────
     var c = ev.target.closest("[data-copy]");
     if (c) {
       var text = c.getAttribute("data-copy");
@@ -48,12 +64,8 @@
       return;
     }
 
-    // ── dismissable flash ────────────────────────────────────────────
     var x = ev.target.closest("[data-dismiss]");
-    if (x) {
-      var el = x.closest(".flash");
-      if (el) el.remove();
-    }
+    if (x) { dismiss(x.closest(".flash"), 0); }
   });
 
   document.addEventListener("submit", function (ev) {
@@ -73,19 +85,23 @@
     document.body.removeChild(ta);
   }
 
-  // ── flash auto-hide ────────────────────────────────────────────────
+  // ── flash: materialize in, fade out along the same path ────────────
+  function dismiss(el, delay) {
+    if (!el || el.hasAttribute("data-leaving")) return;
+    el.setAttribute("data-leaving", "");
+    setTimeout(function () { el.remove(); }, reduce() ? 120 : 200);
+  }
+
   Array.prototype.forEach.call(document.querySelectorAll(".flash"), function (el) {
-    setTimeout(function () {
-      el.style.transition = "opacity .3s";
-      el.style.opacity = "0";
-      setTimeout(function () { el.remove(); }, 320);
-    }, 6000);
+    setTimeout(function () { dismiss(el); }, 6000);
   });
 
   // ── live state ─────────────────────────────────────────────────────
   var chart = document.querySelector("[data-chart]");
-  var series = { in: [], out: [] };
   var MAX = 48;
+  var target = { in: [], out: [] };
+  var shown = { in: [], out: [] };
+  var anim = null;
 
   function fmtBytes(n) {
     n = Number(n) || 0;
@@ -96,7 +112,6 @@
     return (n >= 100 ? n.toFixed(0) : n.toFixed(n >= 10 ? 1 : 2)) + " " + units[i];
   }
   function fmtRate(n) { return fmtBytes(n) + "/s"; }
-
   function setText(el, v) { if (el && el.textContent !== v) el.textContent = v; }
 
   function apply(state) {
@@ -151,10 +166,9 @@
     });
 
     if (chart) {
-      series.in.push(tunnels.reduce(function (a, t) { return a + (t.in_rate || 0); }, 0));
-      series.out.push(tunnels.reduce(function (a, t) { return a + (t.out_rate || 0); }, 0));
-      while (series.in.length > MAX) { series.in.shift(); series.out.shift(); }
-      drawChart();
+      var tinRate = tunnels.reduce(function (a, t) { return a + (t.in_rate || 0); }, 0);
+      var toutRate = tunnels.reduce(function (a, t) { return a + (t.out_rate || 0); }, 0);
+      pushSample(tinRate, toutRate);
     }
   }
 
@@ -167,6 +181,42 @@
     return Math.round(d / 86400) + " 天前";
   }
 
+  function pushSample(tin, tout) {
+    target.in.push(tin); target.out.push(tout);
+    // Start the new point from the current on-screen value so the curve never jumps.
+    shown.in.push(shown.in.length ? shown.in[shown.in.length - 1] : tin);
+    shown.out.push(shown.out.length ? shown.out[shown.out.length - 1] : tout);
+    while (target.in.length > MAX) {
+      target.in.shift(); target.out.shift();
+      shown.in.shift(); shown.out.shift();
+    }
+    if (reduce()) {
+      shown.in = target.in.slice();
+      shown.out = target.out.slice();
+      drawChart();
+      return;
+    }
+    animateChart();
+  }
+
+  function animateChart() {
+    if (anim) cancelAnimationFrame(anim);
+    var fromIn = shown.in.slice(), fromOut = shown.out.slice();
+    var toIn = target.in.slice(), toOut = target.out.slice();
+    var t0 = performance.now(), dur = 260;
+    function frame(now) {
+      var k = Math.min(1, (now - t0) / dur);
+      var e = 1 - Math.pow(1 - k, 3);
+      for (var i = 0; i < toIn.length; i++) {
+        shown.in[i] = fromIn[i] + (toIn[i] - fromIn[i]) * e;
+        shown.out[i] = fromOut[i] + (toOut[i] - fromOut[i]) * e;
+      }
+      drawChart();
+      if (k < 1) anim = requestAnimationFrame(frame); else anim = null;
+    }
+    anim = requestAnimationFrame(frame);
+  }
+
   var NS = "http://www.w3.org/2000/svg";
   function el(name, attrs) {
     var e = document.createElementNS(NS, name);
@@ -176,7 +226,7 @@
 
   function drawChart() {
     var w = 300, h = 96, padT = 10, padB = 8;
-    var all = series.in.concat(series.out);
+    var all = shown.in.concat(shown.out);
     var max = Math.max.apply(null, all.length ? all : [0]);
     if (!max || max <= 0) {
       if (!chart.querySelector(".chart-empty")) {
@@ -184,7 +234,7 @@
       }
       return;
     }
-    var n = Math.max(series.in.length, 2);
+    var n = Math.max(shown.in.length, 2);
     function path(arr, close) {
       var d = "";
       for (var i = 0; i < arr.length; i++) {
@@ -195,7 +245,7 @@
       if (close) d += " L" + w + " " + h + " L0 " + h + " Z";
       return d;
     }
-    var svg = el("svg", { viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none" });
+    var svg = el("svg", { viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none", "aria-hidden": "true" });
     var defs = el("defs", {});
     var grad = el("linearGradient", { id: "nfr-fill", x1: 0, y1: 0, x2: 0, y2: 1 });
     grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--mint)", "stop-opacity": "0.26" }));
@@ -207,32 +257,29 @@
       svg.appendChild(el("line", { class: "grid", x1: 0, y1: y.toFixed(1), x2: w, y2: y.toFixed(1) }));
     });
     svg.appendChild(el("line", { class: "axis", x1: 0, y1: h - padB, x2: w, y2: h - padB }));
-    if (series.in.length > 1) {
-      svg.appendChild(el("path", { class: "area-in", d: path(series.in, true) }));
-      svg.appendChild(el("path", { class: "line-out", d: path(series.out, false), "vector-effect": "non-scaling-stroke" }));
-      svg.appendChild(el("path", { class: "line-in", d: path(series.in, false), "vector-effect": "non-scaling-stroke" }));
+    if (shown.in.length > 1) {
+      svg.appendChild(el("path", { class: "area-in", d: path(shown.in, true) }));
+      svg.appendChild(el("path", { class: "line-out", d: path(shown.out, false), "vector-effect": "non-scaling-stroke" }));
+      svg.appendChild(el("path", { class: "line-in", d: path(shown.in, false), "vector-effect": "non-scaling-stroke" }));
     } else {
-      var lastY = h - padB - (series.in[0] / max) * (h - padT - padB);
+      var lastY = h - padB - (shown.in[0] / max) * (h - padT - padB);
       svg.appendChild(el("circle", { class: "dot-in", cx: w, cy: lastY.toFixed(1), r: 1.6, "vector-effect": "non-scaling-stroke" }));
     }
     chart.innerHTML = "";
     chart.appendChild(svg);
-    var peak = document.createElement("div");
-    peak.className = "chart-peak";
-    peak.textContent = "峰值 " + fmtRate(max);
-    chart.appendChild(peak);
+    setText(document.querySelector("[data-peak]"), "最近几分钟 · 峰值 " + fmtRate(max));
   }
 
   var live = document.querySelector("[data-live]");
   if (live) {
     var timer = null, stop = false;
-    async function tick() {
+    function tick() {
       if (stop) return;
-      try {
-        var res = await fetch("/_nfr/api/state", { credentials: "same-origin", cache: "no-store" });
-        if (res.ok) apply(await res.json());
-      } catch (e) { /* offline for a moment; the next tick will retry */ }
-      timer = setTimeout(tick, document.hidden ? 15000 : 4000);
+      fetch("/_nfr/api/state", { credentials: "same-origin", cache: "no-store" })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (state) { if (state) apply(state); })
+        .catch(function () { /* offline for a moment; the next tick will retry */ })
+        .then(function () { timer = setTimeout(tick, document.hidden ? 15000 : 4000); });
     }
     tick();
     document.addEventListener("visibilitychange", function () {

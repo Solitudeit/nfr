@@ -35,7 +35,8 @@
     <div class="field">
       <label class="switch">
         <input type="checkbox" name="api_enabled" value="1" {{if .APIEnabled}}checked{{end}}>
-        <span>开放 REST API</span>
+        <span class="track" aria-hidden="true"></span>
+        <span class="txt">开放 REST API</span>
       </label>
       <span class="hint">开启后别的面板才能用 API 密钥管理这台机器。默认关闭。</span>
     </div>
