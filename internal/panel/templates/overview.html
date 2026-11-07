@@ -50,7 +50,7 @@
           <div class="item-meta">{{.NodeName}} · {{if eq .Type "http"}}HTTP{{else}}TCP{{end}}</div>
         </div>
         <div class="item-end">
-          <span class="endpoint">{{if eq .Type "http"}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}} <span class="arrow">→</span> {{.Local}}</span>
+          <span class="endpoint">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}} → {{.Local}}</span>
         </div>
         <div class="item-num" data-live-rate>{{rate .InRate}} / {{rate .OutRate}}</div>
       </div>

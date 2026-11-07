@@ -33,7 +33,9 @@ func (s *Server) reconcile() {
 	st := s.st.Snapshot()
 	desired := make(map[int]store.Tunnel, len(st.Tunnels))
 	for _, t := range st.Tunnels {
-		if t.Enabled && t.Type == store.TunnelTCP && t.RemotePort > 0 {
+		// TCP tunnels always own a port; HTTP tunnels can own one too, which is
+		// how http://<server-ip>:<port>/ works without any hostname.
+		if t.Enabled && t.RemotePort > 0 {
 			desired[t.RemotePort] = t
 		}
 	}
@@ -63,10 +65,14 @@ func (s *Server) reconcile() {
 		s.listeners[port] = ln
 		s.mu.Unlock()
 		s.wg.Add(1)
-		go func(port int, ln net.Listener) {
+		go func(port int, ln net.Listener, typ string) {
 			defer s.wg.Done()
+			if typ == store.TunnelHTTP {
+				s.serveHTTPPort(port, ln)
+				return
+			}
 			s.servePort(port, ln)
-		}(port, ln)
+		}(port, ln, desired[port].Type)
 		s.lg.Info("public port open", "port", port, "tunnel", desired[port].Name)
 	}
 }
@@ -100,6 +106,23 @@ func (s *Server) servePort(port int, ln net.Listener) {
 	}
 }
 
+// serveHTTPPort answers plain HTTP on a dedicated public port. The tunnel is
+// looked up per request so toggling it off takes effect immediately.
+func (s *Server) serveHTTPPort(port int, ln net.Listener) {
+	srv := &http.Server{
+		ReadHeaderTimeout: 30 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t, ok, _ := s.tunnelByPort(port)
+			if !ok || !t.Enabled {
+				http.Error(w, "nfr: no tunnel is listening on this port", http.StatusBadGateway)
+				return
+			}
+			s.proxyHTTP(w, r, t)
+		}),
+	}
+	_ = srv.Serve(ln)
+}
+
 func (s *Server) done() <-chan struct{} {
 	if s.ctx == nil {
 		return make(chan struct{})
@@ -115,7 +138,7 @@ func (s *Server) tunnelByPort(port int) (store.Tunnel, bool, string) {
 	)
 	_ = s.st.View(func(st *store.State) error {
 		for _, t := range st.Tunnels {
-			if t.Type == store.TunnelTCP && t.RemotePort == port {
+			if (t.Type == store.TunnelTCP || t.Type == store.TunnelHTTP) && t.RemotePort == port {
 				out, okf, node = t, true, t.NodeID
 				return nil
 			}
@@ -216,12 +239,17 @@ func (s *Server) serveTunnelHTTP(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		return false
 	}
+	s.proxyHTTP(w, r, t)
+	return true
+}
+
+// proxyHTTP forwards one HTTP exchange to the tunnel's node.
+func (s *Server) proxyHTTP(w http.ResponseWriter, r *http.Request, t store.Tunnel) {
 	if isUpgrade(r) {
 		s.proxyUpgrade(w, r, t)
-		return true
+		return
 	}
 	s.proxyRequest(w, r, t)
-	return true
 }
 
 func isUpgrade(r *http.Request) bool {

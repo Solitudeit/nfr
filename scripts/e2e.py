@@ -289,6 +289,36 @@ def main():
                 time.sleep(0.2)
         check("tcp tunnel proxies", ok, "port %s" % port)
 
+        # HTTP can also be reached on a dedicated port, without any domain.
+        _, body = panel.request("/_nfr/api/allocate", {"tunnel_id": ""}, {"X-CSRF": panel.csrf})
+        halloc = json.loads(body)
+        status, html = panel.request(
+            "/_nfr/tunnels/save",
+            {
+                "csrf": panel.csrf, "server": "local", "name": "webport",
+                "node_id": node["id"], "type": "http",
+                "local": "127.0.0.1:%d" % local_port,
+                "remote_port": str(halloc.get("port", "")),
+                "lease_id": halloc.get("lease_id", ""), "hosts": "", "enabled": "1",
+            },
+        )
+        check("create http tunnel on a port", "隧道已保存" in html, "status %d" % status)
+
+        ok = False
+        hport = halloc.get("port")
+        if hport:
+            end = time.time() + 10
+            while time.time() < end:
+                try:
+                    st, body = http_get(hport, "127.0.0.1")
+                    if st == 200 and LocalService.payload in body:
+                        ok = True
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.2)
+        check("http tunnel on a port proxies", ok, "port %s" % hport)
+
         # Toggling a tunnel must stop traffic without touching the agent.
         _, body = panel.request("/_nfr/api/state")
         tunnels = json.loads(body)["tunnels"]

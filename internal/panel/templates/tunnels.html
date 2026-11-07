@@ -32,12 +32,12 @@
 
 <div class="grid2" style="margin-top:20px">
   <section class="card">
-    <div class="card-head"><h2>HTTP 域名</h2><span class="card-sub">复用 80 / 443，不占端口</span></div>
-    <p class="note">按请求的 Host 或 TLS 的 SNI 分流，一个域名对应一个内网服务。适合网站、面板和 API。</p>
+    <div class="card-head"><h2>HTTP 站点</h2><span class="card-sub">端口直连，或按域名分流</span></div>
+    <p class="note">分配一个公网端口，访客直接访问 <code>http://服务器IP:端口</code>；也可以绑定域名，复用 80 / 443 按 Host 分流。</p>
     <ul class="bullets">
-      <li>需要把域名解析到这台服务器</li>
+      <li>端口模式不需要域名和证书</li>
+      <li>域名模式需要把域名解析到这台服务器</li>
       <li>自动补 <code>X-Forwarded-*</code>，支持 WebSocket</li>
-      <li>HTTPS 走 SNI，同一个 443 能挂很多条</li>
     </ul>
   </section>
   <section class="card">
@@ -80,7 +80,7 @@
         <div class="item-meta">{{.NodeName}} · {{if eq .Type "http"}}HTTP{{else}}TCP{{end}} · 入 {{bytes .In}} / 出 {{bytes .Out}}</div>
       </div>
       <div class="item-end">
-        <span class="endpoint">{{if eq .Type "http"}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}} <span class="arrow">→</span> {{.Local}}</span>
+        <span class="endpoint">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}} → {{.Local}}</span>
       </div>
       <div class="item-actions">
         <form method="post" action="/_nfr/tunnels/toggle">

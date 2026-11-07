@@ -7,9 +7,9 @@
 | 端口 | 用途 | 能否改 |
 |---|---|---|
 | 8443/tcp | 控制通道 + 面板 + REST API | `control_listen` |
-| 80/tcp | HTTP 隧道入口 | `http_listen`，可设 `"off"` |
-| 443/tcp | HTTPS 隧道入口 | `https_listen`，可设 `"off"` |
-| 20000-29999/tcp | TCP 隧道的公网端口 | `port_range`（面板里也能改） |
+| 80/tcp | 域名模式的 HTTP 入口（可选） | `http_listen`，可设 `"off"` |
+| 443/tcp | 域名模式的 HTTPS 入口（可选） | `https_listen`，可设 `"off"` |
+| 20000-29999/tcp | HTTP 与 TCP 隧道的公网端口 | `port_range`（面板里也能改） |
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
@@ -21,6 +21,10 @@ journalctl -u nfr-server -f
 
 第一次的密码只会打印一次；忘了就在面板「设置」里改，或者删掉
 `state.json` 里的 `panel_password` 字段再重启（会重新生成）。
+
+建好的隧道默认按 **公网端口** 访问：面板里给隧道分配一个 `20000-29999` 的端口，
+访客直接打开 `http://服务器IP:端口`，不需要域名、证书或 nginx。只有想「一条 80/443
+挂多个站点」时才需要看后面的「域名与证书」。
 
 ### 防火墙
 
@@ -77,7 +81,8 @@ docker logs nfr          # 首次启动的面板地址与密码在这里
 
 ## 和已有的 nginx / 宝塔共存
 
-80/443 已经被 nginx（或宝塔面板）占用时，不要让 NFR 去抢端口，改成 **nginx 在前、NFR 在后**：
+只有「域名模式」才需要 80/443；端口模式的 HTTP 隧道和 TCP 隧道都不经过 nginx，
+直接跳过这一节。nginx 已经占着 80/443 时，改成 **nginx 在前、NFR 在后**：
 
 **1. `server.toml` 让出入口**
 

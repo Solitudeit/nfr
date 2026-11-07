@@ -42,12 +42,12 @@
         <label>
           <input type="radio" name="type" value="tcp" {{if .Edit}}{{if eq .Edit.Type "tcp"}}checked{{end}}{{else}}checked{{end}}>
           <span class="t">TCP 端口</span>
-          <span class="d">独立公网端口，可转发任意 TCP 协议</span>
+          <span class="d">一个公网端口，原样转发任意 TCP 协议</span>
         </label>
         <label>
           <input type="radio" name="type" value="http" {{if .Edit}}{{if eq .Edit.Type "http"}}checked{{end}}{{end}}>
-          <span class="t">HTTP 域名</span>
-          <span class="d">复用 80 / 443，按 Host 与 SNI 分流</span>
+          <span class="t">HTTP 站点</span>
+          <span class="d">用公网端口直连，或复用 80 / 443 按域名分流</span>
         </label>
       </div>
     </div>
@@ -68,9 +68,9 @@
     </div>
 
     <div class="field" id="hostrow">
-      <label for="hosts">域名</label>
-      <textarea id="hosts" name="hosts" placeholder="app.example.com">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
-      <span class="hint">每行一个，或用逗号分隔。流量按 Host（HTTP）或 SNI（HTTPS）匹配到这条隧道。</span>
+      <label for="hosts">域名 <span class="muted">可选</span></label>
+      <textarea id="hosts" name="hosts" placeholder="留空则只通过上面的公网端口访问">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
+      <span class="hint">填了域名就按 Host / SNI 分流；不填也能用，访客直接访问 <code>http://服务器IP:端口</code>。</span>
     </div>
   </div>
 
@@ -95,7 +95,6 @@
   }
   function sync() {
     var http = kind() === 'http';
-    document.getElementById('portrow').style.display = http ? 'none' : '';
     document.getElementById('hostrow').style.display = http ? '' : 'none';
   }
   form.querySelectorAll('input[name="type"]').forEach(function (r) {
