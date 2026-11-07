@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/version"
+	"github.com/solitudeit/nfr/internal/version"
 )
 
 // buildMetrics serves a small Prometheus text exposition. It reuses the API

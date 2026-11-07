@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/auth"
-	"github.com/nfr-tunnel/nfr/internal/federation"
-	"github.com/nfr-tunnel/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/federation"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 // CreateTunnel validates and stores a new tunnel, then tells the agent.

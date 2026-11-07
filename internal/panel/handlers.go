@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/api"
 )
 
 // serverCard is one selectable instance on the tunnel screens.

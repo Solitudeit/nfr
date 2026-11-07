@@ -23,15 +23,15 @@ import (
 
 	"github.com/hashicorp/yamux"
 
-	"github.com/nfr-tunnel/nfr/internal/agent"
-	"github.com/nfr-tunnel/nfr/internal/config"
-	"github.com/nfr-tunnel/nfr/internal/log"
-	"github.com/nfr-tunnel/nfr/internal/panel"
-	"github.com/nfr-tunnel/nfr/internal/proto"
-	"github.com/nfr-tunnel/nfr/internal/server"
-	"github.com/nfr-tunnel/nfr/internal/store"
-	"github.com/nfr-tunnel/nfr/internal/transport"
-	"github.com/nfr-tunnel/nfr/internal/version"
+	"github.com/solitudeit/nfr/internal/agent"
+	"github.com/solitudeit/nfr/internal/config"
+	"github.com/solitudeit/nfr/internal/log"
+	"github.com/solitudeit/nfr/internal/panel"
+	"github.com/solitudeit/nfr/internal/proto"
+	"github.com/solitudeit/nfr/internal/server"
+	"github.com/solitudeit/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/transport"
+	"github.com/solitudeit/nfr/internal/version"
 )
 
 func main() {
@@ -68,7 +68,7 @@ func usage() {
   nfr status  [-c agent.toml]    show local configuration
   nfr version                    print the build version
 
-Documentation: https://github.com/nfr-tunnel/nfr
+Documentation: https://github.com/Solitudeit/nfr
 `)
 }
 

@@ -16,14 +16,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/auth"
-	"github.com/nfr-tunnel/nfr/internal/config"
-	"github.com/nfr-tunnel/nfr/internal/metrics"
-	"github.com/nfr-tunnel/nfr/internal/proto"
-	"github.com/nfr-tunnel/nfr/internal/store"
-	"github.com/nfr-tunnel/nfr/internal/transport"
-	"github.com/nfr-tunnel/nfr/internal/version"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/config"
+	"github.com/solitudeit/nfr/internal/metrics"
+	"github.com/solitudeit/nfr/internal/proto"
+	"github.com/solitudeit/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/transport"
+	"github.com/solitudeit/nfr/internal/version"
 	"golang.org/x/crypto/acme"
 )
 

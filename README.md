@@ -34,7 +34,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 ### 1. 公网服务器
 
 ```bash
-curl -fsSL https://github.com/nfr-tunnel/nfr/releases/latest/download/install.sh | sudo sh
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
 sudo nfr server -c /etc/nfr/server.toml
 ```
 

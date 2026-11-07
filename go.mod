@@ -1,4 +1,4 @@
-module github.com/nfr-tunnel/nfr
+module github.com/solitudeit/nfr
 
 go 1.26.0
 

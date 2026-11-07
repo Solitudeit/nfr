@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/api"
-	"github.com/nfr-tunnel/nfr/internal/config"
-	"github.com/nfr-tunnel/nfr/internal/log"
-	"github.com/nfr-tunnel/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/config"
+	"github.com/solitudeit/nfr/internal/log"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 func newTestServer(t *testing.T, mut func(*config.Server)) (*Server, *store.Store) {

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nfr-tunnel/nfr/internal/proto"
+	"github.com/solitudeit/nfr/internal/proto"
 )
 
 // CertFingerprint returns the lowercase hex sha256 of a certificate.
