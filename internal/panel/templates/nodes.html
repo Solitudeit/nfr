@@ -1,0 +1,34 @@
+<h1>Nodes</h1>
+<p class="sub">Machines that joined this server. Each keeps a single outbound connection.</p>
+{{if .Code}}
+<div class="msg ok">
+  <div>Join code <span class="code">{{.Code}}</span></div>
+  <div class="mono" style="margin-top:6px">Run on the private machine: <b>{{.Command}}</b></div>
+  <div class="muted" style="font-size:12px;margin-top:6px">Valid for five minutes, works once.</div>
+</div>
+{{end}}
+<div class="inline" style="margin-bottom:14px">
+  <form method="post" action="/_nfr/nodes" class="inline">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input name="name" placeholder="node name (optional)" style="width:220px">
+    <button>Create join code</button>
+  </form>
+</div>
+{{if .Nodes}}
+<div class="scroll"><table>
+<thead><tr><th>Name</th><th>Platform</th><th>Version</th><th>Status</th><th>Last seen</th><th>Tunnels</th></tr></thead>
+<tbody>
+{{range .Nodes}}
+<tr>
+  <td>{{.Name}}</td>
+  <td class="muted">{{.OS}}/{{.Arch}}</td>
+  <td class="muted mono">{{.Version}}</td>
+  <td>{{if .Online}}<span class="badge on">online</span>{{else}}<span class="badge off">offline</span>{{end}}</td>
+  <td class="muted">{{ago .LastSeen}}</td>
+  <td class="muted">{{.Tunnels}}</td>
+</tr>
+{{end}}
+</tbody></table></div>
+{{else}}
+<p class="muted">No nodes yet. Create a join code and run <span class="mono">nfr join</span> on the machine.</p>
+{{end}}

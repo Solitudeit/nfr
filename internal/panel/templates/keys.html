@@ -1,0 +1,40 @@
+<h1>API keys</h1>
+<p class="sub">Used by another NFR console to manage this instance. Keys are stored as hashes; the secret is shown once.</p>
+{{if .NewKey}}
+<div class="msg ok">
+  <div>New key — copy it now, it will not be shown again:</div>
+  <div class="mono" style="margin-top:6px">{{.NewKey}}</div>
+</div>
+{{end}}
+<form method="post" action="/_nfr/keys" class="inline" style="margin-bottom:16px">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <input name="label" placeholder="label" style="width:180px">
+  <select name="scope" style="width:130px">
+    <option value="read">read</option>
+    <option value="write">write</option>
+    <option value="admin">admin</option>
+  </select>
+  <button>Create key</button>
+</form>
+{{if .Keys}}
+<div class="scroll"><table>
+<thead><tr><th>Label</th><th>Scope</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+<tbody>
+{{range .Keys}}
+<tr>
+  <td>{{.Label}}</td>
+  <td><span class="badge">{{.Scope}}</span></td>
+  <td class="muted">{{short .CreatedAt}}</td>
+  <td class="muted">{{ago .LastUsed}}</td>
+  <td><form method="post" action="/_nfr/keys" onsubmit="return confirm('Revoke this key?')">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="action" value="delete">
+    <input type="hidden" name="id" value="{{.ID}}">
+    <button class="danger sm">Revoke</button>
+  </form></td>
+</tr>
+{{end}}
+</tbody></table></div>
+{{else}}
+<p class="muted">No keys yet.</p>
+{{end}}
