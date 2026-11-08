@@ -1,6 +1,7 @@
 <div class="page-head">
   <div>
     <h1>{{.Info.Name}}</h1>
+    <p class="lead">{{len .Nodes}} 个节点 · {{len .Tunnels}} 条隧道 · 每 4 秒刷新</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="/_nfr/nodes">{{template "i-nodes"}}接入机器</a>
@@ -32,29 +33,42 @@
 </div>
 
 <div class="grid2">
-  <section class="card pad0">
-    <div class="card-head">
+  <section class="panel">
+    <div class="panel-head">
       <h2>隧道</h2>
       <span class="card-sub">实时状态</span>
       <a class="right btn ghost sm" href="/_nfr/tunnels">管理</a>
     </div>
     {{if .Tunnels}}
-    <div class="list">
-      {{range .Tunnels}}
-      <div class="item" data-tid="{{.ID}}">
-        <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
-        <div class="item-main">
-          <div class="item-name"><a href="/_nfr/tunnels/edit?id={{.ID}}&amp;server=local">{{.Name}}</a>
-            <span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}已停用{{else if .Online}}在线{{else}}节点离线{{end}}</span>
-          </div>
-          <div class="item-meta">{{.NodeName}} · {{if eq .Type "http"}}HTTP{{else}}TCP{{end}}</div>
-        </div>
-        <div class="item-end">
-          <span class="endpoint">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}} → {{.Local}}</span>
-        </div>
-        <div class="item-num" data-live-rate>{{rate .InRate}} / {{rate .OutRate}}</div>
-      </div>
-      {{end}}
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>隧道</th>
+            <th>节点</th>
+            <th>公网入口</th>
+            <th>内网地址</th>
+            <th>状态</th>
+            <th class="num">速率</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Tunnels}}
+          <tr data-tid="{{.ID}}">
+            <td>
+              <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
+              <a class="name" href="/_nfr/tunnels/edit?id={{.ID}}&amp;server=local">{{.Name}}</a>
+              <span class="sub">{{if eq .Type "http"}}HTTP{{else}}TCP{{end}}</span>
+            </td>
+            <td>{{.NodeName}}</td>
+            <td class="addr">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}}</td>
+            <td class="addr">{{.Local}}</td>
+            <td><span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}已停用{{else if .Online}}在线{{else}}节点离线{{end}}</span></td>
+            <td class="num" data-live-rate>{{rate .InRate}} / {{rate .OutRate}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
     </div>
     {{else}}
     <div class="empty">
@@ -66,8 +80,8 @@
     {{end}}
   </section>
 
-  <section class="card pad0">
-    <div class="card-head">
+  <section class="panel">
+    <div class="panel-head">
       <h2>实时流量</h2>
       <span class="card-sub" data-peak>最近几分钟</span>
     </div>

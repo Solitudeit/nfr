@@ -1,29 +1,16 @@
 <div class="login">
-  <div class="login-shell">
-    <aside class="login-intro">
-      <div class="login-brand">
-        <span class="brand-mark">N</span>
-        <span class="brand-name">NFR</span>
-      </div>
-      <h1>把内网服务<br>安全地放到公网。</h1>
-      <p class="lead">自托管的反向隧道控制台。内网机器主动外连，公网只需要一台服务器和一个端口。</p>
-      <ul class="bullets">
-        <li>HTTP 按域名分流，共用 80 / 443</li>
-        <li>TCP 从端口池分配，适合任意协议</li>
-        <li>一个面板纳管多台服务器</li>
-      </ul>
-    </aside>
-
-    <form class="login-card" method="post" action="/_nfr/login">
-      <div class="login-wordmark"><span class="brand-mark">N</span><span class="brand-name">NFR</span></div>
-      <div class="card-head"><h2>登录</h2><span class="card-sub">控制台</span></div>
-      {{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
-      <div class="field">
-        <label for="pw">面板密码</label>
-        <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
-      </div>
-      <button class="btn primary" type="submit">登录</button>
-      <p class="login-foot">密码在首次启动时随日志打印一次。忘了可以删掉 state.json 里的面板密码后重启。</p>
-    </form>
-  </div>
+  <form class="login-card" method="post" action="/_nfr/login">
+    <div class="login-wordmark">
+      <span class="brand-mark">N</span>
+      <span class="brand-name">NFR</span>
+    </div>
+    <div class="card-head"><h2>登录控制台</h2></div>
+    {{if .Error}}<div class="flash err" role="alert">{{.Error}}</div>{{end}}
+    <div class="field">
+      <label for="pw">面板密码</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
+    </div>
+    <button class="btn primary" type="submit">登录</button>
+    <p class="login-foot">密码在首次启动时随日志打印一次。</p>
+  </form>
 </div>

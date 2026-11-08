@@ -3,61 +3,75 @@
     <h1>节点</h1>
     <p class="lead">已接入的内网机器。每台只保持一条主动外连，不需要公网 IP，也不需要在路由器上开端口。</p>
   </div>
+  <div class="page-actions">
+    <a class="btn" href="/_nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
+  </div>
 </div>
 
 <div class="grid2">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>已接入的机器</h2>
+      <span class="card-sub">{{len .Nodes}} 台</span>
+    </div>
+    {{if .Nodes}}
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>机器</th>
+            <th>系统</th>
+            <th class="num">隧道</th>
+            <th>状态</th>
+            <th>最后在线</th>
+            <th class="shrink"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Nodes}}
+          <tr data-nid="{{.ID}}">
+            <td>
+              <span class="dot {{if .Online}}on{{else}}off{{end}}"></span>
+              <span class="name">{{.Name}}</span>
+            </td>
+            <td>{{.OS}} / {{.Arch}}{{if .Version}} · {{vshort .Version}}{{end}}</td>
+            <td class="num">{{.Tunnels}}</td>
+            <td><span class="chip {{if .Online}}on{{else}}off{{end}}" data-live-chip>{{if .Online}}在线{{else}}离线{{end}}</span></td>
+            <td class="item-num" data-live-seen>{{ago .LastSeen}}</td>
+            <td class="shrink">
+              <form method="post" action="/_nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <button class="btn danger sm" type="submit">移除</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      {{template "i-empty"}}
+      <b>还没有接入任何机器</b>
+      <p>在右边生成一个加入码，然后在要映射的那台机器上执行打印出来的命令。</p>
+    </div>
+    {{end}}
+  </section>
+
   <div class="stack">
     {{if .Code}}
     <section class="card">
-      <div class="hstack">
-        <span class="chip on">加入码</span>
-        <span class="muted" style="font-size:12.5px">5 分钟内有效 · 只能使用一次</span>
-      </div>
-      <div style="margin:16px 0 14px"><span class="join-code">{{.Code}}</span></div>
+      <div class="card-head"><h2>加入码</h2><span class="card-sub">5 分钟内有效 · 只能使用一次</span></div>
+      <span class="join-code">{{.Code}}</span>
       <div class="copyfield">
         <code>{{.Command}}</code>
         <button type="button" class="btn sm" data-copy="{{.Command}}">复制</button>
       </div>
-      <p class="note" style="margin-top:12px">在内网机器上执行上面这条命令。加入码只用来换一次长期令牌，令牌只保存在那台机器上；泄露后删掉节点即可失效。</p>
+      <p class="hint" style="margin-top:12px">在内网机器上执行上面这条命令。加入码只用来换一次长期令牌，令牌只保存在那台机器上；泄露后删掉节点即可失效。</p>
     </section>
     {{end}}
 
-    <section class="card pad0">
-      {{if .Nodes}}
-      <div class="list">
-        {{range .Nodes}}
-        <div class="item" data-nid="{{.ID}}">
-          <span class="dot {{if .Online}}on{{else}}off{{end}}"></span>
-          <div class="item-main">
-            <div class="item-name">{{.Name}}</div>
-            <div class="item-meta">{{.OS}} / {{.Arch}}{{if .Version}} · {{vshort .Version}}{{end}}</div>
-          </div>
-          <div class="item-end">
-            <span class="chip {{if .Online}}on{{else}}off{{end}}" data-live-chip>{{if .Online}}在线{{else}}离线{{end}}</span>
-            <span class="item-num" data-live-seen>{{ago .LastSeen}}</span>
-          </div>
-          <div class="item-num">{{.Tunnels}} 条隧道</div>
-          <div class="item-actions">
-            <form method="post" action="/_nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
-              <input type="hidden" name="csrf" value="{{$.CSRF}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button class="btn danger sm" type="submit">移除</button>
-            </form>
-          </div>
-        </div>
-        {{end}}
-      </div>
-      {{else}}
-      <div class="empty">
-        {{template "i-empty"}}
-        <b>还没有接入任何机器</b>
-        <p>在右边生成一个加入码，然后在要映射的那台机器上执行打印出来的命令。</p>
-      </div>
-      {{end}}
-    </section>
-  </div>
-
-  <div class="stack">
     <form class="card form" method="post" action="/_nfr/nodes">
       <div class="card-head"><h2>接入新机器</h2></div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">

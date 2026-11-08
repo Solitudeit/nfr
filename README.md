@@ -34,13 +34,14 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 
 ## 界面
 
-面板是服务端渲染的，没有 npm、没有前端构建、没有 CDN：黑白灰的密集排版、发丝线分隔、
-等宽数字，强调色只留给链接和状态；右上角可切深色并记住选择。手机上是底部标签栏，
-数据每 4 秒自己刷新。系统开了「减少动态效果」时会自动降级。
+面板是服务端渲染的，没有 npm、没有前端构建、没有 CDN：一套 B 端后台的骨架 —— 深蓝侧栏、
+浅灰内容区、一条指标带、密集的表格、标签和输入框两栏排布的设置页。8px 栅格、4px 圆角、
+只有一处阴影，没有渐变、没有装饰色块；文字对比度按 WCAG 2.1 AA 校准，主色 `#17457f`
+配浅灰 `#f4f6f9`。右上角可切深色并记住选择，手机上是底部标签栏，数据每 4 秒自己刷新。
 
 ![概览](docs/screenshots/overview.png)
 
-| 新建隧道 | 生成加入码 |
+| 新建隧道 | 接入机器 |
 |---|---|
 | ![新建隧道](docs/screenshots/tunnel-new.png) | ![节点](docs/screenshots/nodes.png) |
 
@@ -54,6 +55,10 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 | 设置与证书 | 手机 |
 |---|---|
 | ![设置](docs/screenshots/settings.png) | ![手机](docs/screenshots/overview-phone.png) |
+
+| 隧道列表 | 登录 |
+|---|---|
+| ![隧道列表](docs/screenshots/tunnel-list.png) | ![登录](docs/screenshots/login.png) |
 
 </details>
 
