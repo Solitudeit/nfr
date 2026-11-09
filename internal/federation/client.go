@@ -153,10 +153,11 @@ func (c *Client) JoinCode(ctx context.Context, req api.JoinCodeRequest) (api.Joi
 	return out, err
 }
 
-// Allocate asks the remote for a free port.
-func (c *Client) Allocate(ctx context.Context, tunnelID string) (api.AllocateResponse, error) {
+// Allocate asks the remote for a free port in the given port space
+// ("tcp" default, "udp" for UDP tunnels).
+func (c *Client) Allocate(ctx context.Context, tunnelID, network string) (api.AllocateResponse, error) {
 	var out api.AllocateResponse
-	err := c.Do(ctx, http.MethodPost, "/api/v1/ports/allocate", api.AllocateRequest{TunnelID: tunnelID}, &out)
+	err := c.Do(ctx, http.MethodPost, "/api/v1/ports/allocate", api.AllocateRequest{TunnelID: tunnelID, Network: network}, &out)
 	return out, err
 }
 

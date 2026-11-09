@@ -28,16 +28,24 @@ func removeHopHeaders(h http.Header) {
 	}
 }
 
-// reconcile opens and closes public TCP listeners to match the registry.
+// reconcile opens and closes public listeners to match the registry. TCP and
+// HTTP tunnels share the TCP port space; UDP tunnels listen in their own.
 func (s *Server) reconcile() {
 	st := s.st.Snapshot()
+	s.pruneLimits(st.Tunnels)
 	desired := make(map[int]store.Tunnel, len(st.Tunnels))
+	udpDesired := make(map[int]store.Tunnel)
 	for _, t := range st.Tunnels {
+		if !t.Enabled || t.RemotePort <= 0 {
+			continue
+		}
 		// TCP tunnels always own a port; HTTP tunnels can own one too, which is
 		// how http://<server-ip>:<port>/ works without any hostname.
-		if t.Enabled && t.RemotePort > 0 {
-			desired[t.RemotePort] = t
+		if t.Type == store.TunnelUDP {
+			udpDesired[t.RemotePort] = t
+			continue
 		}
+		desired[t.RemotePort] = t
 	}
 
 	s.mu.Lock()
@@ -47,10 +55,22 @@ func (s *Server) reconcile() {
 			delete(s.listeners, port)
 		}
 	}
+	for port, conn := range s.udpListeners {
+		if _, ok := udpDesired[port]; !ok {
+			conn.Close()
+			delete(s.udpListeners, port)
+		}
+	}
 	var open []int
 	for port := range desired {
 		if _, ok := s.listeners[port]; !ok {
 			open = append(open, port)
+		}
+	}
+	var openUDP []int
+	for port := range udpDesired {
+		if _, ok := s.udpListeners[port]; !ok {
+			openUDP = append(openUDP, port)
 		}
 	}
 	s.mu.Unlock()
@@ -74,6 +94,22 @@ func (s *Server) reconcile() {
 			s.servePort(port, ln)
 		}(port, ln, desired[port].Type)
 		s.lg.Info("public port open", "port", port, "tunnel", desired[port].Name)
+	}
+	for _, port := range openUDP {
+		conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port})
+		if err != nil {
+			s.lg.Warn("cannot open public udp port", "port", port, "err", err)
+			continue
+		}
+		s.mu.Lock()
+		s.udpListeners[port] = conn
+		s.mu.Unlock()
+		s.wg.Add(1)
+		go func(port int, conn *net.UDPConn, t store.Tunnel) {
+			defer s.wg.Done()
+			s.serveUDPPort(port, conn, t)
+		}(port, conn, udpDesired[port])
+		s.lg.Info("public udp port open", "port", port, "tunnel", udpDesired[port].Name)
 	}
 }
 
@@ -153,6 +189,9 @@ func (s *Server) handleTCP(c net.Conn, port int) {
 	if !ok || !t.Enabled {
 		c.Close()
 		return
+	}
+	if lim := s.limiterFor(t); lim != nil {
+		c = &throttledConn{Conn: c, up: lim.up, down: lim.down}
 	}
 	ctr := s.met.For(t.ID)
 	ctr.Conns.Add(1)
@@ -307,6 +346,7 @@ func (s *Server) openFor(t store.Tunnel, remote string) (net.Conn, error) {
 
 func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, t store.Tunnel) {
 	ctr := s.met.For(t.ID)
+	lim := s.limiterFor(t)
 	ctr.Conns.Add(1)
 	stream, err := s.openFor(t, clientIP(r))
 	if err != nil {
@@ -330,6 +370,10 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, t store.Tu
 	out.Header.Set("X-Forwarded-Proto", schemeOf(r))
 	out.Header.Set("X-Forwarded-Host", r.Host)
 	out.Header.Set("X-Nfr-Tunnel", t.Name)
+	if lim != nil {
+		// Pace the request body (visitor -> origin) at the tunnel's up rate.
+		out.Body = &throttleReadCloser{ReadCloser: out.Body, b: lim.up}
+	}
 
 	if err := out.Write(stream); err != nil {
 		ctr.Errs.Add(1)
@@ -352,7 +396,12 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, t store.Tu
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	n, _ := io.Copy(flushWriter{w}, resp.Body)
+	var body io.Reader = resp.Body
+	if lim != nil {
+		// Pace the response body (origin -> visitor) at the tunnel's down rate.
+		body = throttleReader{r: resp.Body, b: lim.down}
+	}
+	n, _ := io.Copy(flushWriter{w}, body)
 
 	in := r.ContentLength
 	if in < 0 {
@@ -378,6 +427,7 @@ func (f flushWriter) Write(p []byte) (int, error) {
 // hijacking the client connection.
 func (s *Server) proxyUpgrade(w http.ResponseWriter, r *http.Request, t store.Tunnel) {
 	ctr := s.met.For(t.ID)
+	lim := s.limiterFor(t)
 	ctr.Conns.Add(1)
 	stream, err := s.openFor(t, clientIP(r))
 	if err != nil {
@@ -444,13 +494,21 @@ func (s *Server) proxyUpgrade(w http.ResponseWriter, r *http.Request, t store.Tu
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(client, io.MultiReader(br, stream))
+		var src io.Reader = io.MultiReader(br, stream)
+		if lim != nil {
+			src = throttleReader{r: src, b: lim.down}
+		}
+		n, _ := io.Copy(client, src)
 		ctr.Out.Add(n)
 		halfClose(client)
 	}()
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(stream, rw)
+		var dst io.Writer = stream
+		if lim != nil {
+			dst = throttleWriter{w: dst, b: lim.up}
+		}
+		n, _ := io.Copy(dst, rw)
 		ctr.In.Add(n)
 		halfClose(stream)
 	}()

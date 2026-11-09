@@ -13,19 +13,25 @@ import (
 // leaseTTL is how long a reserved port survives while a form is filled in.
 const leaseTTL = 10 * time.Minute
 
-// AllocatePort reserves a free remote port for ten minutes.
-func (s *Server) AllocatePort(tunnelID string) (api.AllocateResponse, error) {
+// AllocatePort reserves a free remote port for ten minutes. The network
+// selects the port space: "tcp" (the default, also used by http tunnels) or
+// "udp".
+func (s *Server) AllocatePort(tunnelID, network string) (api.AllocateResponse, error) {
+	if network != "udp" {
+		network = "tcp"
+	}
 	var out api.AllocateResponse
 	err := s.st.Update(func(st *store.State) error {
 		now := time.Now().UTC()
 		st.PruneLeases(now)
-		port, err := pickPort(st, tunnelID)
+		port, err := pickPort(st, tunnelID, network)
 		if err != nil {
 			return err
 		}
 		lease := store.Lease{
 			ID:        store.NewID(),
 			Port:      port,
+			Network:   network,
 			TunnelID:  tunnelID,
 			ExpiresAt: now.Add(leaseTTL),
 		}
@@ -37,20 +43,26 @@ func (s *Server) AllocatePort(tunnelID string) (api.AllocateResponse, error) {
 }
 
 // pickPort scans the configured range for a port that is neither registered
-// nor leased nor currently bound by another process.
-func pickPort(st *store.State, excludeTunnel string) (int, error) {
+// nor leased nor currently bindable, in the requested port space.
+func pickPort(st *store.State, excludeTunnel, network string) (int, error) {
 	lo, hi := st.Settings.PortRange[0], st.Settings.PortRange[1]
 	if lo <= 0 || hi < lo {
 		lo, hi = 20000, 29999
 	}
 	taken := make(map[int]bool, len(st.Tunnels)+len(st.Leases))
 	for _, t := range st.Tunnels {
-		if t.ID != excludeTunnel && t.RemotePort > 0 {
+		if t.ID != excludeTunnel && t.RemotePort > 0 && store.TunnelNetwork(t.Type) == network {
 			taken[t.RemotePort] = true
 		}
 	}
 	for _, l := range st.Leases {
-		taken[l.Port] = true
+		net := l.Network
+		if net == "" {
+			net = "tcp" // leases written before the field existed were TCP.
+		}
+		if net == network {
+			taken[l.Port] = true
+		}
 	}
 	// Start somewhere random so concurrent nodes do not race for the same
 	// low port, then wrap around the whole range.
@@ -58,7 +70,7 @@ func pickPort(st *store.State, excludeTunnel string) (int, error) {
 	start := int(auth.RandomBytes(1)[0]) % span
 	for i := 0; i < span; i++ {
 		p := lo + (start+i)%span
-		if taken[p] || !canListen(p) {
+		if taken[p] || !canListen(network, p) {
 			continue
 		}
 		return p, nil
@@ -67,7 +79,15 @@ func pickPort(st *store.State, excludeTunnel string) (int, error) {
 }
 
 // canListen reports whether a wildcard bind on port succeeds right now.
-func canListen(port int) bool {
+func canListen(network string, port int) bool {
+	if network == "udp" {
+		c, err := net.ListenPacket("udp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			return false
+		}
+		c.Close()
+		return true
+	}
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return false
@@ -78,7 +98,7 @@ func canListen(port int) bool {
 
 // consumeLease validates and removes a reservation, returning an error the
 // console can show when the port moved on.
-func consumeLease(st *store.State, leaseID string, port int, tunnelID string) error {
+func consumeLease(st *store.State, leaseID string, port int, tunnelID, network string) error {
 	if leaseID == "" {
 		return nil
 	}
@@ -93,6 +113,9 @@ func consumeLease(st *store.State, leaseID string, port int, tunnelID string) er
 		}
 		if l.Port != port {
 			return errConflict("lease_mismatch", "the reserved port does not match the requested port")
+		}
+		if net := l.Network; net != "" && net != network {
+			return errConflict("lease_mismatch", "the reserved port belongs to the other protocol, request a new one")
 		}
 		if l.TunnelID != "" && l.TunnelID != tunnelID {
 			return errConflict("lease_mismatch", "the reserved port belongs to another tunnel")

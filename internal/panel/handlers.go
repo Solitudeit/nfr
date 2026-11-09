@@ -198,15 +198,19 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	port, _ := strconv.Atoi(r.FormValue("remote_port"))
 	enabled := r.FormValue("enabled") != ""
+	bw, _ := strconv.Atoi(r.FormValue("bandwidth_kb"))
+	quota, _ := strconv.ParseInt(r.FormValue("quota_mb"), 10, 64)
 	req := api.TunnelRequest{
-		Name:       strings.TrimSpace(r.FormValue("name")),
-		NodeID:     r.FormValue("node_id"),
-		Type:       r.FormValue("type"),
-		Local:      strings.TrimSpace(r.FormValue("local")),
-		RemotePort: port,
-		Hosts:      splitHosts(r.FormValue("hosts")),
-		Enabled:    &enabled,
-		LeaseID:    r.FormValue("lease_id"),
+		Name:        strings.TrimSpace(r.FormValue("name")),
+		NodeID:      r.FormValue("node_id"),
+		Type:        r.FormValue("type"),
+		Local:       strings.TrimSpace(r.FormValue("local")),
+		RemotePort:  port,
+		Hosts:       splitHosts(r.FormValue("hosts")),
+		Enabled:     &enabled,
+		LeaseID:     r.FormValue("lease_id"),
+		BandwidthKB: &bw,
+		QuotaMB:     &quota,
 	}
 	id := r.FormValue("id")
 	var err error
@@ -476,11 +480,16 @@ func certSourceLabel(source string) string {
 	return source
 }
 
-// allocate answers the "get a port" button without leaving the page.
+// allocate answers the "get a port" button without leaving the page. The
+// tunnel type from the form picks the port space: udp tunnels reserve UDP.
 func (p *Panel) allocate(w http.ResponseWriter, r *http.Request, s *session) {
+	network := "tcp"
+	if r.FormValue("type") == "udp" {
+		network = "udp"
+	}
 	sel := r.URL.Query().Get("server")
 	if sel == "" || sel == "local" {
-		resp, err := p.srv.AllocatePort(r.FormValue("tunnel_id"))
+		resp, err := p.srv.AllocatePort(r.FormValue("tunnel_id"), network)
 		if err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
@@ -493,7 +502,7 @@ func (p *Panel) allocate(w http.ResponseWriter, r *http.Request, s *session) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	resp, err := c.Allocate(r.Context(), r.FormValue("tunnel_id"))
+	resp, err := c.Allocate(r.Context(), r.FormValue("tunnel_id"), network)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return

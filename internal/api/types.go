@@ -24,25 +24,29 @@ type Info struct {
 
 // Tunnel is the console's view of a published service.
 type Tunnel struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	NodeID     string    `json:"node_id"`
-	NodeName   string    `json:"node_name,omitempty"`
-	Type       string    `json:"type"`
-	Local      string    `json:"local"`
-	RemotePort int       `json:"remote_port"`
-	Hosts      []string  `json:"hosts,omitempty"`
-	Enabled    bool      `json:"enabled"`
-	Online     bool      `json:"online"`
-	In         int64     `json:"in"`
-	Out        int64     `json:"out"`
-	Conns      int64     `json:"conns"`
-	Active     int64     `json:"active"`
-	Errs       int64     `json:"errs"`
-	InRate     float64   `json:"in_rate"`
-	OutRate    float64   `json:"out_rate"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	NodeID      string    `json:"node_id"`
+	NodeName    string    `json:"node_name,omitempty"`
+	Type        string    `json:"type"`
+	Local       string    `json:"local"`
+	RemotePort  int       `json:"remote_port"`
+	Hosts       []string  `json:"hosts,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	BandwidthKB int       `json:"bandwidth_kb,omitempty"`
+	QuotaMB     int64     `json:"quota_mb,omitempty"`
+	UsedBytes   int64     `json:"used_bytes,omitempty"`
+	QuotaPaused bool      `json:"quota_paused,omitempty"`
+	Online      bool      `json:"online"`
+	In          int64     `json:"in"`
+	Out         int64     `json:"out"`
+	Conns       int64     `json:"conns"`
+	Active      int64     `json:"active"`
+	Errs        int64     `json:"errs"`
+	InRate      float64   `json:"in_rate"`
+	OutRate     float64   `json:"out_rate"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Node is an edge agent as seen by the console.
@@ -69,11 +73,20 @@ type TunnelRequest struct {
 	Hosts      []string `json:"hosts,omitempty"`
 	Enabled    *bool    `json:"enabled,omitempty"`
 	LeaseID    string   `json:"lease_id,omitempty"`
+	// BandwidthKB caps each direction of the tunnel in kilobytes per second.
+	// nil leaves the value unchanged, 0 explicitly removes the limit.
+	BandwidthKB *int `json:"bandwidth_kb,omitempty"`
+	// QuotaMB caps the tunnel's calendar month traffic. nil leaves it
+	// unchanged, 0 explicitly removes the quota.
+	QuotaMB *int64 `json:"quota_mb,omitempty"`
 }
 
 // AllocateRequest asks for a free remote port.
 type AllocateRequest struct {
 	TunnelID string `json:"tunnel_id,omitempty"`
+	// Network selects the port space: "tcp" (default, also for http tunnels)
+	// or "udp". TCP and UDP ports are independent, like on a normal host.
+	Network string `json:"network,omitempty"`
 }
 
 // AllocateResponse carries a short lived port reservation.

@@ -217,7 +217,13 @@
   }
 
   function drawChart() {
-    var w = 300, h = 96, padT = 10, padB = 8;
+    // ViewBox matches the container's pixel box 1:1, so labels never stretch
+    // even though preserveAspectRatio is "none".
+    var w = Math.max(chart.clientWidth || 320, 200);
+    var h = Math.max(chart.clientHeight || 200, 120);
+    var padT = 16, padB = 26, padL = 46, padR = 14;
+    var plotW = w - padL - padR;
+    var plotH = h - padT - padB;
     var all = shown.in.concat(shown.out);
     var max = Math.max.apply(null, all.length ? all : [0]);
     if (!max || max <= 0) {
@@ -227,42 +233,74 @@
       return;
     }
     var n = Math.max(shown.in.length, 2);
+    function X(i) { return padL + (i / (n - 1)) * plotW; }
+    function Y(v) { return padT + plotH - (v / max) * plotH; }
     function path(arr, close) {
       var d = "";
       for (var i = 0; i < arr.length; i++) {
-        var x = (i / (n - 1)) * w;
-        var y = h - padB - (arr[i] / max) * (h - padT - padB);
-        d += (i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2);
+        d += (i === 0 ? "M" : "L") + X(i).toFixed(2) + " " + Y(arr[i]).toFixed(2);
       }
-      if (close) d += " L" + w + " " + h + " L0 " + h + " Z";
+      if (close) {
+        d += " L" + (padL + plotW).toFixed(2) + " " + (padT + plotH).toFixed(2);
+        d += " L" + padL + " " + (padT + plotH).toFixed(2) + " Z";
+      }
       return d;
     }
     var svg = el("svg", { viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none", "aria-hidden": "true" });
     var defs = el("defs", {});
     var grad = el("linearGradient", { id: "nfr-fill", x1: 0, y1: 0, x2: 0, y2: 1 });
-    grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--brand)", "stop-opacity": "0.14" }));
+    grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--brand)", "stop-opacity": "0.24" }));
     grad.appendChild(el("stop", { offset: "100%", "stop-color": "var(--brand)", "stop-opacity": "0" }));
     defs.appendChild(grad);
     svg.appendChild(defs);
-    [0.25, 0.5, 0.75].forEach(function (f) {
-      var y = (h - padB) - f * (h - padT - padB);
-      svg.appendChild(el("line", { class: "grid", x1: 0, y1: y.toFixed(1), x2: w, y2: y.toFixed(1) }));
+
+    // horizontal grid + y axis labels
+    [0, 0.5, 1].forEach(function (f) {
+      var y = padT + plotH - f * plotH;
+      svg.appendChild(el("line", { class: "grid", x1: padL, y1: y.toFixed(1), x2: padL + plotW, y2: y.toFixed(1) }));
+      var label = el("text", { class: "chart-label", x: padL - 9, y: (y + 3).toFixed(1), "text-anchor": "end" });
+      label.textContent = f === 0 ? "0" : fmtBytes(max * f);
+      svg.appendChild(label);
     });
-    svg.appendChild(el("line", { class: "axis", x1: 0, y1: h - padB, x2: w, y2: h - padB }));
+    svg.appendChild(el("line", { class: "axis", x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH }));
+
+    // x axis labels
+    ["-3 分钟", "-2 分钟", "-1 分钟", "现在"].forEach(function (txt, i, arr) {
+      var x = padL + (i / (arr.length - 1)) * plotW;
+      var label = el("text", {
+        class: "chart-label", x: x.toFixed(1), y: h - 8,
+        "text-anchor": i === 0 ? "start" : (i === arr.length - 1 ? "end" : "middle")
+      });
+      label.textContent = txt;
+      svg.appendChild(label);
+    });
+
     if (shown.in.length > 1) {
       svg.appendChild(el("path", { class: "area-in", d: path(shown.in, true) }));
       if (shown.out.some(function (v) { return v > 0; })) {
         svg.appendChild(el("path", { class: "line-out", d: path(shown.out, false), "vector-effect": "non-scaling-stroke" }));
       }
       svg.appendChild(el("path", { class: "line-in", d: path(shown.in, false), "vector-effect": "non-scaling-stroke" }));
+      var lx = X(shown.in.length - 1), ly = Y(shown.in[shown.in.length - 1]);
+      svg.appendChild(el("circle", { class: "halo-in", cx: lx.toFixed(2), cy: ly.toFixed(2), r: 7 }));
+      svg.appendChild(el("circle", { class: "dot-in", cx: lx.toFixed(2), cy: ly.toFixed(2), r: 3 }));
     } else {
-      var lastY = h - padB - (shown.in[0] / max) * (h - padT - padB);
-      svg.appendChild(el("circle", { class: "dot-in", cx: w, cy: lastY.toFixed(1), r: 1.6, "vector-effect": "non-scaling-stroke" }));
+      var lastY = Y(shown.in[0] || 0);
+      svg.appendChild(el("circle", { class: "dot-in", cx: padL + plotW, cy: lastY.toFixed(1), r: 2.5 }));
     }
     chart.innerHTML = "";
     chart.appendChild(svg);
     setText(document.querySelector("[data-peak]"), "最近几分钟 · 峰值 " + fmtRate(max));
   }
+
+  // Keep the 1:1 viewBox in sync when the panel width changes.
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (chart && chart.querySelector("svg")) drawChart();
+    }, 120);
+  });
 
   var live = document.querySelector("[data-live]");
   if (live) {

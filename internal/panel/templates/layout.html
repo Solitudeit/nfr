@@ -16,25 +16,33 @@
 <div class="app">
   <aside class="side">
     <a class="side-brand" href="/_nfr/">
-      <span class="brand-mark">N</span>
       <span class="brand-name">{{.Info.Name}}</span>
     </a>
-    <div class="side-meta">
-      {{if .Info.Domain}}<div class="side-domain">{{.Info.Domain}}</div>{{else}}<div class="side-domain">反向隧道控制台</div>{{end}}
-    </div>
+    <div class="side-group">工作台</div>
     <nav class="side-nav">{{template "nav" .}}</nav>
     <div class="side-foot">
-      <button class="side-act" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
-        {{template "i-moon"}}{{template "i-sun"}}
-      </button>
-      <a class="side-act" href="/_nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
+      <div class="hstack">
+        <button class="side-act" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
+          {{template "i-moon"}}{{template "i-sun"}}
+        </button>
+        <a class="side-act" href="/_nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
+      </div>
+      {{if .Info.Domain}}<div class="side-ver">{{.Info.Domain}}</div>{{end}}
       <div class="side-ver">{{.Info.Version}} · rev {{.Info.Revision}}</div>
     </div>
   </aside>
 
   <div class="main">
+    <header class="topbar">
+      <div class="crumb"><b>{{if .Info.Domain}}{{.Info.Domain}}{{else}}NFR 控制台{{end}}</b></div>
+      <div class="top-actions">
+        <button class="tbtn" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
+          {{template "i-moon"}}{{template "i-sun"}}
+        </button>
+        <a class="tbtn" href="/_nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
+      </div>
+    </header>
     <header class="mhead">
-      <span class="brand-mark">N</span>
       <span class="brand-name">NFR</span>
       <span class="mhead-title">{{.Title}}</span>
       <button class="side-act" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
