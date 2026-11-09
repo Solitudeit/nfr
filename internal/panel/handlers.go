@@ -1,10 +1,12 @@
 package panel
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/solitudeit/nfr/internal/api"
 )
@@ -19,6 +21,8 @@ type serverCard struct {
 	Version   string
 	Nodes     int
 	Tunnels   int
+	Region    string // Chinese country name from the instance's address
+	RegionCode string // ISO 3166-1 alpha-2, for the flag
 }
 
 type overviewData struct {
@@ -56,6 +60,7 @@ type tunnelsData struct {
 	Current   string
 	CurName   string
 	CurURL    string
+	CurRegion string
 	IsLocal   bool
 	RemoteErr string
 	Tunnels   []api.Tunnel
@@ -67,10 +72,16 @@ type tunnelsData struct {
 	SelNode   *api.Node // node picked outside the form (entry link / edit); nil → form shows the picker
 }
 
-func (p *Panel) cards() []serverCard {
+// cards renders every instance the console can reach, the local one first.
+// Each card carries the country its address belongs to: with one machine that
+// is the country it sits in, with several it is how an operator tells them
+// apart. Lookups are cached and time boxed, so an offline geo service costs at
+// most geoBudget and only loses the label.
+func (p *Panel) cards(ctx context.Context) []serverCard {
+	info := p.srv.Info()
 	out := []serverCard{{
-		ID: "local", Name: p.srv.Info().Name, URL: p.srv.Info().PanelURL,
-		Local: true, Reachable: true, Version: p.srv.Info().Version,
+		ID: "local", Name: info.Name, URL: info.PanelURL,
+		Local: true, Reachable: true, Version: info.Version,
 		Nodes: len(p.srv.Nodes()), Tunnels: len(p.srv.Tunnels()),
 	}}
 	for _, rem := range p.srv.Remotes() {
@@ -79,7 +90,39 @@ func (p *Panel) cards() []serverCard {
 			Version: rem.Version, Nodes: rem.Nodes, Tunnels: rem.Tunnels,
 		})
 	}
+	p.labelRegions(ctx, out)
 	return out
+}
+
+// labelRegions fills Region and RegionCode for every card, in parallel. The
+// local card falls back to this machine's own exit address when its public URL
+// is a LAN name, which is the normal case for a home server.
+func (p *Panel) labelRegions(parent context.Context, cards []serverCard) {
+	ctx, cancel := context.WithTimeout(parent, geoBudget)
+	defer cancel()
+	regions := make([]region, len(cards))
+	var wg sync.WaitGroup
+	for i := range cards {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			regions[i] = p.geo.locate(ctx, geoQuery{Host: cards[i].URL, FallbackSelf: cards[i].Local})
+		}(i)
+	}
+	wg.Wait()
+	for i := range cards {
+		cards[i].Region = regions[i].Country
+		cards[i].RegionCode = regions[i].Code
+	}
+}
+
+// region names the country one instance sits in, for the page that has already
+// been narrowed down to it. It is the same lookup the cards use, so it costs
+// nothing after the first view.
+func (p *Panel) region(parent context.Context, rawURL string, local bool) string {
+	ctx, cancel := context.WithTimeout(parent, geoBudget)
+	defer cancel()
+	return p.geo.locate(ctx, geoQuery{Host: rawURL, FallbackSelf: local}).Country
 }
 
 func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
@@ -89,14 +132,11 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		PortRange: p.srv.Settings().PortRange,
 	}
 	if sel == "" {
-		cards := p.cards()
-		// One instance total: skip the server picker and go straight in.
-		if len(cards) == 1 {
-			http.Redirect(w, r, "/nfr/tunnels?server=local", http.StatusSeeOther)
-			return
-		}
+		// Every instance gets a card, even when there is only one: the card
+		// names the country the machine sits in, which is information the
+		// tunnel list below cannot show.
 		p.refreshRemotes(r.Context())
-		d.Cards = cards
+		d.Cards = p.cards(r.Context())
 		p.render(w, r, "tunnels", d)
 		return
 	}
@@ -107,6 +147,7 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		d.CurURL = p.srv.Info().PanelURL
 		d.Tunnels = p.srv.Tunnels()
 		d.Nodes = p.srv.Nodes()
+		d.CurRegion = p.region(r.Context(), d.CurURL, true)
 	} else {
 		c, rec, err := p.srv.RemoteClient(sel)
 		if err != nil {
@@ -115,6 +156,7 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 		d.CurName = rec.Name
 		d.CurURL = rec.URL
+		d.CurRegion = p.region(r.Context(), rec.URL, false)
 		ctx := r.Context()
 		tunnels, err := c.Tunnels(ctx)
 		if err != nil {
@@ -385,7 +427,7 @@ func (p *Panel) servers(w http.ResponseWriter, r *http.Request, s *session) {
 			} else {
 				d.Notice = "服务器已移除"
 			}
-			d.Cards = p.cards()[1:]
+			d.Cards = p.cards(r.Context())[1:]
 			d.Pin = p.srv.Pin()
 			p.render(w, r, "servers", d)
 			return
@@ -403,7 +445,7 @@ func (p *Panel) servers(w http.ResponseWriter, r *http.Request, s *session) {
 			d.Notice = "已添加 " + rec.Name
 		}
 	}
-	d.Cards = p.cards()[1:]
+	d.Cards = p.cards(r.Context())[1:]
 	d.Pin = p.srv.Pin()
 	p.render(w, r, "servers", d)
 }

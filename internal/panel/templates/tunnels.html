@@ -20,11 +20,12 @@
       <div class="nc-top">
         <span class="dot {{if or .Local .Reachable}}on{{else}}err{{end}}"></span>
         <span class="nc-name">{{.Name}}</span>
-        {{if .Local}}<span class="chip">本机</span>{{else if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}
+        {{if .Region}}<span class="chip loc" title="按公网 IP 归属地">{{.Region}}</span>{{end}}
       </div>
       <div class="nc-meta">
         <span>{{.Nodes}} 节点 · {{.Tunnels}} 隧道</span>
-        {{if .Version}}<span>{{.Version}}</span>{{end}}
+        {{if .Version}}<span>{{vshort .Version}}</span>{{end}}
+        {{if and (not .Local) (not .Reachable)}}<span class="chip err">不可达</span>{{end}}
       </div>
       <div class="nc-meta"><span class="mono">{{.URL}}</span></div>
     </a>
@@ -60,7 +61,7 @@
 {{else}}
 <div class="page-head">
   <div>
-    <h1>{{.CurName}}</h1>
+    <h1 class="cur-head">{{.CurName}}{{if .CurRegion}}<span class="chip loc">{{.CurRegion}}</span>{{end}}</h1>
     <p class="lead"><span class="mono">{{.CurURL}}</span></p>
   </div>
   <div class="page-actions">

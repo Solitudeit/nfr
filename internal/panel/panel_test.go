@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +32,18 @@ func newPanel(t *testing.T) (*Panel, string) {
 	if err != nil {
 		t.Fatalf("server: %v", err)
 	}
-	return New(srv, log.New("error", "")), password
+	p := New(srv, log.New("error", ""))
+	// The suite must never depend on a geo IP service being reachable.
+	p.geo = stubLocator{}
+	return p, password
+}
+
+// stubLocator answers every address with the same country, so tests can assert
+// the chip without touching the network.
+type stubLocator struct{}
+
+func (stubLocator) locate(context.Context, geoQuery) region {
+	return region{Country: "香港", Code: "HK"}
 }
 
 func do(p *Panel, method, path string, form url.Values, cookies []*http.Cookie) *httptest.ResponseRecorder {
@@ -137,6 +149,28 @@ func TestCreateJoinCode(t *testing.T) {
 	rec := do(p, http.MethodPost, "/nfr/nodes", url.Values{"csrf": {token}}, cookies)
 	if rec.Code != http.StatusOK && rec.Code != http.StatusSeeOther {
 		t.Fatalf("mint join code = %d", rec.Code)
+	}
+}
+
+func TestTunnelsAlwaysShowsServerCards(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	// A single instance still gets a card: the card is where the country and
+	// the tunnel counts live, so skipping it hid both.
+	rec := do(p, http.MethodGet, "/nfr/tunnels", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tunnels = %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `href="/nfr/tunnels?server=local"`) {
+		t.Fatal("tunnels does not link the local instance card")
+	}
+	if !strings.Contains(body, "香港") {
+		t.Fatal("server card does not carry the region label")
+	}
+	if strings.Contains(body, ">本机<") {
+		t.Fatal("the console should name the country, not call the instance local")
 	}
 }
 
