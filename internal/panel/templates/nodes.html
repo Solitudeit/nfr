@@ -39,11 +39,14 @@
             <td><span class="chip {{if .Online}}on{{else}}off{{end}}" data-live-chip>{{if .Online}}在线{{else}}离线{{end}}</span></td>
             <td class="item-num" data-live-seen>{{ago .LastSeen}}</td>
             <td class="shrink">
-              <form method="post" action="/_nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
-                <input type="hidden" name="csrf" value="{{$.CSRF}}">
-                <input type="hidden" name="id" value="{{.ID}}">
-                <button class="btn danger sm" type="submit">移除</button>
-              </form>
+              <div class="actions">
+                <a class="btn sm" href="/_nfr/tunnels/new?server=local&amp;node={{.ID}}">新建隧道</a>
+                <form method="post" action="/_nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="id" value="{{.ID}}">
+                  <button class="btn danger sm" type="submit">移除</button>
+                </form>
+              </div>
             </td>
           </tr>
           {{end}}

@@ -132,9 +132,18 @@
         setText(row.querySelector("[data-live-rate]"), fmtRate(t.in_rate || 0) + " / " + fmtRate(t.out_rate || 0));
         var chip = row.querySelector("[data-live-chip]");
         if (chip) {
-          if (!t.enabled) { chip.textContent = "已停用"; chip.className = "chip off"; }
+          if (!t.enabled) { chip.textContent = t.quota_paused ? "配额停用" : "已停用"; chip.className = "chip off"; }
           else if (t.online) { chip.textContent = "在线"; chip.className = "chip on"; }
           else { chip.textContent = "节点离线"; chip.className = "chip err"; }
+        }
+        var meter = row.querySelector("[data-live-meter]");
+        if (meter && t.quota_mb > 0) {
+          var p = Math.min(100, Math.round((t.used_bytes || 0) / (t.quota_mb * 1048576) * 100));
+          var bar = meter.querySelector("i");
+          if (bar) bar.style.width = p + "%";
+          var lv = p >= 85 ? "lv3" : p >= 60 ? "lv2" : p >= 30 ? "lv1" : "lv0";
+          meter.className = "meter " + lv;
+          setText(row.querySelector("[data-live-pct]"), p + "%");
         }
       }
     });

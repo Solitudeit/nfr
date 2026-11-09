@@ -112,7 +112,18 @@
           <td>
             <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
             <a class="name" href="/_nfr/tunnels/edit?id={{.ID}}&amp;server={{$.Current}}">{{.Name}}</a>
-            <span class="sub">{{if eq .Type "http"}}HTTP{{else if eq .Type "udp"}}UDP{{else}}TCP{{end}} · 入 {{bytes .In}} / 出 {{bytes .Out}}{{if .BandwidthKB}} · ≤{{.BandwidthKB}}KB/s{{end}}{{if .QuotaMB}} · 本月 {{bytes .UsedBytes}} / {{.QuotaMB}}MB{{end}}</span>
+            <div class="sub">
+              <span class="pill {{if eq .Type "http"}}pill-http{{else if eq .Type "udp"}}pill-udp{{else}}pill-tcp{{end}}">{{if eq .Type "http"}}HTTP{{else if eq .Type "udp"}}UDP{{else}}TCP{{end}}</span>
+              {{if .BandwidthKB}}<span class="pill pill-cap">≤{{.BandwidthKB}}KB/s</span>{{end}}
+              入 {{bytes .In}} / 出 {{bytes .Out}}
+            </div>
+            {{if .QuotaMB}}
+            <div class="meter-wrap">
+              <span class="meter {{pctlv .UsedBytes .QuotaMB}}" data-live-meter><i style="width:{{pct .UsedBytes .QuotaMB}}%"></i></span>
+              <span data-live-pct>{{pct .UsedBytes .QuotaMB}}%</span>
+              <span>本月 {{bytes .UsedBytes}} / {{.QuotaMB}}MB</span>
+            </div>
+            {{end}}
           </td>
           <td>{{.NodeName}}</td>
           <td class="addr">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}}</td>

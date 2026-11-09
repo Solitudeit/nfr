@@ -72,6 +72,34 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 		"port":  portLabel,
 		"join":  strings.Join,
 		"rate":  func(n float64) string { return humanBytes(int64(n)) + "/s" },
+		// pct reports quota usage as a percentage clamped to 100.
+		"pct": func(used, quotaMB int64) int {
+			if quotaMB <= 0 {
+				return 0
+			}
+			v := int(float64(used) / (float64(quotaMB) * 1024 * 1024) * 100)
+			if v > 100 {
+				v = 100
+			}
+			return v
+		},
+		// pctlv maps quota usage onto a meter level class.
+		"pctlv": func(used, quotaMB int64) string {
+			if quotaMB <= 0 {
+				return "lv0"
+			}
+			r := float64(used) / (float64(quotaMB) * 1024 * 1024)
+			switch {
+			case r >= .85:
+				return "lv3"
+			case r >= .6:
+				return "lv2"
+			case r >= .3:
+				return "lv1"
+			default:
+				return "lv0"
+			}
+		},
 		"vshort": func(v string) string {
 			if i := strings.IndexByte(v, ' '); i > 0 {
 				return v[:i]

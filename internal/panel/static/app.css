@@ -756,3 +756,135 @@ select { appearance: none; background-image: none; padding-right: 10px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ===== 隧道表单：行式布局 + combobox + 步进器 ========================== */
+.tf-card { padding: 26px 28px 30px; border-radius: 14px; }
+.tf-head { font-size: 19px; font-weight: 700; letter-spacing: .01em; margin-bottom: 22px; }
+.tf-rows { display: flex; flex-direction: column; gap: 20px; }
+.tf-row { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 14px; align-items: start; }
+.tf-row[hidden] { display: none; }
+.tf-label { font-size: 14px; color: var(--text); text-align: right; line-height: 44px; white-space: nowrap; }
+.tf-label .req { color: var(--err); font-style: normal; margin-left: 1px; }
+.tf-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tf-field input, .tf-field select, .tf-field textarea {
+  min-height: 44px; padding: 9px 13px; border-radius: 10px;
+  background: var(--surface-2); border-color: var(--line-strong);
+  font-size: 14px;
+}
+.tf-field textarea { min-height: 64px; }
+.tf-hint { font-size: 12px; color: var(--text-3); }
+.tf-hint code { background: transparent; border: 0; padding: 0; font-family: var(--mono); }
+.tf-field .flash { margin: 0; }
+.tf-field select {
+  appearance: none; padding-right: 38px; cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23818b98' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 13px center; background-size: 12px;
+}
+.tf-div { height: 1px; background: var(--line); margin: 24px 0 18px; }
+.tf-sub { font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 16px; }
+.tf-inline { display: flex; align-items: center; gap: 8px; }
+.tf-inline input { flex: 0 1 220px; }
+.tf-unit { font-size: 13px; color: var(--text-3); }
+.tf .grab-btn { align-self: flex-start; min-height: 38px; padding: 0 16px; border-radius: 10px; }
+
+/* 接入节点：小卡片点选 */
+.node-pick {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 8px; max-width: 640px;
+}
+.np-card {
+  position: relative; display: flex; flex-direction: column; gap: 4px;
+  text-align: left; font: inherit; color: inherit; cursor: pointer;
+  padding: 10px 12px; border: 1px solid var(--line-strong);
+  border-radius: 10px; background: var(--surface-2);
+}
+.np-card:hover { border-color: var(--text-3); }
+.np-card:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.np-card.sel { border-color: var(--brand); background: var(--brand-soft); }
+.np-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.np-name {
+  font-size: 13.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.np-meta { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-card.np-off { color: var(--text-2); }
+.np-card::after {
+  content: ""; position: absolute; top: 9px; right: 9px;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 1px solid var(--line-strong); background: var(--surface);
+}
+.np-card.sel::after {
+  border-color: var(--brand);
+  background: var(--brand) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 8.5l2.5 2.5 4.5-5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/12px no-repeat;
+}
+.dot { flex: none; }
+
+/* 接入节点：外部已选定时的只读确认 */
+.np-locked {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 14px; border: 1px solid var(--line-strong);
+  border-radius: 10px; background: var(--surface-2);
+  max-width: 100%; overflow: hidden;
+}
+.np-locked .np-name { font-size: 13.5px; font-weight: 600; }
+.np-locked .np-meta { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+
+/* combobox：可输入 + 常用值下拉 */
+.combo { position: relative; }
+.combo-list {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .16);
+  padding: 5px; max-height: 220px; overflow: auto;
+}
+.combo-list button {
+  display: block; width: 100%; text-align: left; border: 0; background: none;
+  padding: 8px 10px; border-radius: 7px; font: inherit; font-size: 13.5px;
+  color: var(--text); cursor: pointer;
+}
+.combo-list button:hover, .combo-list button:focus-visible { background: var(--brand-soft); outline: none; }
+
+/* 步进器：输入框内嵌 −/+ */
+.stepper {
+  display: flex; align-items: stretch; width: 100%;
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  border-radius: 10px; overflow: hidden;
+}
+.stepper input { flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; background: none; padding: 9px 13px; }
+.stepper input:focus { outline: none; box-shadow: none; }
+.stepper:focus-within { border-color: var(--brand); box-shadow: var(--focus-ring); }
+.step {
+  flex: none; width: 44px; border: 0; background: none; cursor: pointer;
+  font-size: 17px; color: var(--text-2); font-family: var(--mono);
+}
+.step:hover { background: var(--surface-3); color: var(--text); }
+
+/* ===== pill 徽标：描边彩色 ============================================== */
+.pill {
+  display: inline-block; padding: 0 7px; line-height: 18px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  border: 1px solid; background: transparent; vertical-align: 1px;
+}
+.pill-tcp  { color: #0550ae; border-color: #9ec1ec; }
+.pill-udp  { color: #0e7f74; border-color: #9ed3cc; }
+.pill-http { color: #8250df; border-color: #c4b0f2; }
+.pill-cap  { color: #9a6700; border-color: #d9c26a; }
+[data-theme="dark"] .pill-tcp  { color: #79b3f7; border-color: #2b4f79; }
+[data-theme="dark"] .pill-udp  { color: #52c7b8; border-color: #24554f; }
+[data-theme="dark"] .pill-http { color: #ab7df8; border-color: #473a6e; }
+[data-theme="dark"] .pill-cap  { color: #d9a53f; border-color: #5c4a1e; }
+
+/* ===== 用量进度条：分档变色 ============================================ */
+.meter-wrap { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); margin-top: 5px; }
+.meter { width: 110px; height: 4px; border-radius: 99px; background: var(--surface-3); overflow: hidden; flex: none; }
+.meter i { display: block; height: 100%; border-radius: 99px; background: var(--brand); }
+.meter.lv0 i { background: var(--series-2); }
+.meter.lv1 i { background: var(--ok); }
+.meter.lv2 i { background: var(--warn); }
+.meter.lv3 i { background: var(--err); }
+
+@media (max-width: 720px) {
+  .tf-card { padding: 20px 16px 24px; }
+  .tf-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .tf-label { text-align: left; line-height: 1.4; }
+}

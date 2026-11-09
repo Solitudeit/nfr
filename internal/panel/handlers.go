@@ -62,6 +62,9 @@ type tunnelsData struct {
 	Nodes     []api.Node
 	PortRange [2]int
 	Edit      *api.Tunnel
+	LocalHost string // Edit.Local split for the two-field form
+	LocalPort string
+	SelNode   *api.Node // node picked outside the form (entry link / edit); nil → form shows the picker
 }
 
 func (p *Panel) cards() []serverCard {
@@ -136,6 +139,9 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 		PortRange: p.srv.Settings().PortRange,
 		Edit:      existing,
 	}
+	if existing != nil {
+		d.LocalHost, d.LocalPort = splitLocal(existing.Local)
+	}
 	if d.IsLocal {
 		d.CurName = p.srv.Info().Name
 		d.Nodes = p.srv.Nodes()
@@ -148,6 +154,24 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 		d.CurName = rec.Name
 		if nodes, err := c.Nodes(r.Context()); err == nil {
 			d.Nodes = nodes
+		}
+	}
+	// The node is picked outside the form: either it is a property of the
+	// tunnel being edited, or it came in on the entry URL (?node=). When it
+	// resolves, the form shows a locked confirmation instead of the picker.
+	if existing != nil {
+		for i := range d.Nodes {
+			if d.Nodes[i].ID == existing.NodeID {
+				d.SelNode = &d.Nodes[i]
+				break
+			}
+		}
+	} else if nid := r.URL.Query().Get("node"); nid != "" {
+		for i := range d.Nodes {
+			if d.Nodes[i].ID == nid {
+				d.SelNode = &d.Nodes[i]
+				break
+			}
 		}
 	}
 	p.render(w, r, "tunnel_form", d)
@@ -200,11 +224,20 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 	enabled := r.FormValue("enabled") != ""
 	bw, _ := strconv.Atoi(r.FormValue("bandwidth_kb"))
 	quota, _ := strconv.ParseInt(r.FormValue("quota_mb"), 10, 64)
+	local := strings.TrimSpace(r.FormValue("local"))
+	if local == "" {
+		// The form posts two fields; join them for the backend contract.
+		lh := strings.TrimSpace(r.FormValue("local_host"))
+		lp := strings.TrimSpace(r.FormValue("local_port"))
+		if lh != "" && lp != "" {
+			local = lh + ":" + lp
+		}
+	}
 	req := api.TunnelRequest{
 		Name:        strings.TrimSpace(r.FormValue("name")),
 		NodeID:      r.FormValue("node_id"),
 		Type:        r.FormValue("type"),
-		Local:       strings.TrimSpace(r.FormValue("local")),
+		Local:       local,
 		RemotePort:  port,
 		Hosts:       splitHosts(r.FormValue("hosts")),
 		Enabled:     &enabled,
@@ -541,4 +574,16 @@ func splitHosts(raw string) []string {
 		}
 	}
 	return out
+}
+
+// splitLocal breaks "host:port" apart for the two-field form. It splits on
+// the last colon so bracketed IPv6 like [::1]:8080 keeps working; a value
+// without a port comes back with an empty port part.
+func splitLocal(local string) (host, port string) {
+	local = strings.TrimSpace(local)
+	i := strings.LastIndex(local, ":")
+	if i < 0 {
+		return local, ""
+	}
+	return strings.TrimSpace(local[:i]), strings.TrimSpace(local[i+1:])
 }
