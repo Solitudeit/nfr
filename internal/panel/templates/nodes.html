@@ -8,60 +8,48 @@
   </div>
 </div>
 
-<div class="grid2">
-  <section class="panel">
-    <div class="panel-head">
-      <h2>已接入的机器</h2>
-      <span class="card-sub">{{len .Nodes}} 台</span>
+{{if .Nodes}}
+<div class="node-grid">
+  {{range .Nodes}}
+  <section class="card node-card" data-nid="{{.ID}}">
+    <div class="nc-top">
+      <span class="dot {{if .Online}}on{{else}}off{{end}}"></span>
+      <span class="nc-name">{{.Name}}</span>
+      <span class="chip {{if .Online}}on{{else}}off{{end}}" data-live-chip>{{if .Online}}在线{{else}}离线{{end}}</span>
     </div>
-    {{if .Nodes}}
-    <div class="tbl-wrap">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>机器</th>
-            <th>系统</th>
-            <th class="num">隧道</th>
-            <th>状态</th>
-            <th>最后在线</th>
-            <th class="shrink"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Nodes}}
-          <tr data-nid="{{.ID}}">
-            <td>
-              <span class="dot {{if .Online}}on{{else}}off{{end}}"></span>
-              <span class="name">{{.Name}}</span>
-            </td>
-            <td>{{.OS}} / {{.Arch}}{{if .Version}} · {{vshort .Version}}{{end}}</td>
-            <td class="num">{{.Tunnels}}</td>
-            <td><span class="chip {{if .Online}}on{{else}}off{{end}}" data-live-chip>{{if .Online}}在线{{else}}离线{{end}}</span></td>
-            <td class="item-num" data-live-seen>{{ago .LastSeen}}</td>
-            <td class="shrink">
-              <div class="actions">
-                <a class="btn sm" href="/nfr/tunnels/new?server=local&amp;node={{.ID}}">新建隧道</a>
-                <form method="post" action="/nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
-                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
-                  <input type="hidden" name="id" value="{{.ID}}">
-                  <button class="btn danger sm" type="submit">移除</button>
-                </form>
-              </div>
-            </td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+    <div class="nc-meta">
+      <span>{{if .OS}}{{.OS}} / {{.Arch}}{{if .Version}} · {{vshort .Version}}{{end}}{{else}}系统未知{{end}}</span>
+      <span>{{.Tunnels}} 条隧道</span>
+      <span>最后在线 <span data-live-seen>{{if .Online}}刚刚{{else}}{{ago .LastSeen}}{{end}}</span></span>
     </div>
-    {{else}}
-    <div class="empty">
-      {{template "i-empty"}}
-      <b>还没有接入任何机器</b>
-      <p>在右边生成一个加入码，然后在要映射的那台机器上执行打印出来的命令。</p>
+    <div class="nc-actions">
+      <a class="btn sm" href="/nfr/tunnels/new?server=local&amp;node={{.ID}}">新建隧道</a>
+      <button type="button" class="btn ghost sm" data-rename="{{.ID}}" data-name="{{.Name}}">改名</button>
+      <form method="post" action="/nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button class="btn danger sm" type="submit">移除</button>
+      </form>
     </div>
-    {{end}}
+    <form class="nc-rename" id="rename-{{.ID}}" hidden method="post" action="/nfr/nodes/rename">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="id" value="{{.ID}}">
+      <input name="name" value="{{.Name}}" maxlength="64" required autocomplete="off" spellcheck="false" aria-label="新的节点名称">
+      <button class="btn sm" type="submit">保存</button>
+      <button type="button" class="btn ghost sm" data-cancel-rename>取消</button>
+    </form>
   </section>
+  {{end}}
+</div>
+{{else}}
+<section class="card empty">
+  {{template "i-empty"}}
+  <b>还没有接入任何机器</b>
+  <p>生成一个加入码，然后在要映射的那台机器上执行打印出来的命令。</p>
+</section>
+{{end}}
 
+<div class="grid2" style="margin-top:14px">
   <div class="stack">
     {{if .Code}}
     <section class="card">
@@ -75,17 +63,6 @@
     </section>
     {{end}}
 
-    <form class="card form" method="post" action="/nfr/nodes">
-      <div class="card-head"><h2>接入新机器</h2></div>
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="field">
-        <label for="nname">节点名称 <span class="muted">可选</span></label>
-        <input id="nname" name="name" placeholder="nas、公司电脑、家里的树莓派">
-        <span class="hint">只用于面板里区分机器，之后可以随时改。</span>
-      </div>
-      <div class="actions"><button class="btn primary" type="submit">{{template "i-plus"}}生成加入码</button></div>
-    </form>
-
     <section class="card">
       <div class="card-head"><h2>它是怎么工作的</h2></div>
       <ol class="steps">
@@ -95,4 +72,35 @@
       </ol>
     </section>
   </div>
+
+  <form class="card form" method="post" action="/nfr/nodes">
+    <div class="card-head"><h2>接入新机器</h2></div>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <div class="field">
+      <label for="nname">节点名称 <span class="muted">可选</span></label>
+      <input id="nname" name="name" placeholder="nas、公司电脑、家里的树莓派">
+      <span class="hint">只用于面板里区分机器，之后可以随时改。</span>
+    </div>
+    <div class="actions"><button class="btn primary" type="submit">{{template "i-plus"}}生成加入码</button></div>
+  </form>
 </div>
+
+<script>
+(function () {
+  document.querySelectorAll('[data-rename]').forEach(function (btn) {
+    var card = btn.closest('.node-card');
+    var form = card.querySelector('.nc-rename');
+    btn.addEventListener('click', function () {
+      form.hidden = false;
+      var input = form.querySelector('input[name="name"]');
+      input.focus();
+      input.select();
+    });
+  });
+  document.querySelectorAll('[data-cancel-rename]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      btn.closest('.nc-rename').hidden = true;
+    });
+  });
+})();
+</script>

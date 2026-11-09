@@ -12,42 +12,27 @@
 <section class="panel">
   <div class="panel-head">
     <h2>服务器</h2>
-    <span class="card-sub">{{len .Cards}} 台</span>
+    <span class="card-sub">{{len .Cards}} 台 · 点卡片进入</span>
   </div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>名称</th>
-          <th>控制地址</th>
-          <th class="num">节点</th>
-          <th class="num">隧道</th>
-          <th>状态</th>
-          <th class="shrink"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Cards}}
-        <tr>
-          <td>
-            <span class="dot {{if or .Local .Reachable}}on{{else}}err{{end}}"></span>
-            <span class="name">{{.Name}}</span>
-            {{if .Local}}<span class="sub">本机</span>{{end}}
-          </td>
-          <td class="addr">{{.URL}}</td>
-          <td class="num">{{.Nodes}}</td>
-          <td class="num">{{.Tunnels}}</td>
-          <td>{{if .Local}}<span class="chip">本机</span>{{else if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}</td>
-          <td class="shrink"><a class="btn sm" href="/nfr/tunnels?server={{.ID}}">打开</a></td>
-        </tr>
-        {{end}}
-        <tr>
-          <td colspan="6">
-            <a class="btn ghost sm" href="/nfr/servers">＋ 纳管另一台服务器</a>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+  <div class="node-grid">
+    {{range .Cards}}
+    <a class="card srv-card" href="/nfr/tunnels?server={{.ID}}">
+      <div class="nc-top">
+        <span class="dot {{if or .Local .Reachable}}on{{else}}err{{end}}"></span>
+        <span class="nc-name">{{.Name}}</span>
+        {{if .Local}}<span class="chip">本机</span>{{else if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}
+      </div>
+      <div class="nc-meta">
+        <span>{{.Nodes}} 节点 · {{.Tunnels}} 隧道</span>
+        {{if .Version}}<span>{{.Version}}</span>{{end}}
+      </div>
+      <div class="nc-meta"><span class="mono">{{.URL}}</span></div>
+    </a>
+    {{end}}
+    <a class="card srv-card srv-add" href="/nfr/servers">
+      <div class="nc-top"><span class="nc-name">＋ 纳管另一台服务器</span></div>
+      <div class="nc-meta"><span>填控制地址和 API 密钥</span></div>
+    </a>
   </div>
 </section>
 
@@ -83,10 +68,33 @@
     <a class="btn primary" href="/nfr/tunnels/new?server={{.Current}}">{{template "i-plus"}}新建隧道</a>
   </div>
 </div>
-
 {{if .RemoteErr}}
 <div class="flash err" role="alert">无法连接这台服务器：{{.RemoteErr}}</div>
 {{else}}
+{{if .Nodes}}
+<section class="panel">
+  <div class="panel-head">
+    <h2>节点</h2>
+    <span class="card-sub">选一台机器，直接为它建隧道</span>
+  </div>
+  <div class="node-pick">
+    {{range .Nodes}}
+    <a class="np-card{{if not .Online}} np-off{{end}}" href="/nfr/tunnels/new?server={{$.Current}}&amp;node={{.ID}}">
+      <span class="np-top">
+        <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
+        <span class="np-name">{{.Name}}</span>
+      </span>
+      <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道 · {{if .Online}}在线{{else}}离线{{end}}</span>
+    </a>
+    {{end}}
+    <a class="np-card np-add" href="/nfr/nodes">
+      <span class="np-top"><span class="np-name">＋ 接入新机器</span></span>
+      <span class="np-meta">到节点页生成加入码</span>
+    </a>
+  </div>
+</section>
+{{end}}
+
 <section class="panel">
   <div class="panel-head">
     <h2>隧道</h2>
