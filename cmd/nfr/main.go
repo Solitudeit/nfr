@@ -69,7 +69,7 @@ func usage() {
   nfr join <server> <code>   join this machine and keep it connected
   nfr agent                  connect with the saved agent.toml
   nfr status                 show the local configuration
-  nfr proxy-config <domain>  print an nginx snippet (port already used by 宝塔)
+  nfr proxy-config <domain>  print an nginx snippet (80/443 already taken)
   nfr version                print the build version
 
 First run on the public server:
@@ -130,9 +130,6 @@ func cmdServer(args []string) {
   The password is shown once. Change it in Settings after signing in.
   Next: sign in, open 节点, click 生成加入码, then run the printed command
   inside your network.
-
-  Ports 80/443 already used by nginx or 宝塔? Keep them, and run:
-    nfr proxy-config your.domain.com
 `, info.PanelURL, generated, info.Pinned)
 	}
 	lg.Info("starting", "control", cfg.ControlListen, "http", cfg.HTTPListen, "https", cfg.HTTPSListen, "data", cfg.DataDir)
@@ -420,7 +417,7 @@ func resolveControl(serverArg, control string) string {
 // status
 
 // cmdProxyConfig prints an nginx server block for the case where 80/443 are
-// already owned by nginx or 宝塔, so NFR has to sit behind a reverse proxy.
+// already owned by an existing nginx, so NFR has to sit behind a reverse proxy.
 func cmdProxyConfig(args []string) {
 	fs := flag.NewFlagSet("proxy-config", flag.ExitOnError)
 	upstream := fs.String("upstream", "127.0.0.1:8080", "where nfr http_listen points")
@@ -432,16 +429,15 @@ func cmdProxyConfig(args []string) {
 		domain = fs.Arg(0)
 	}
 
-	fmt.Printf(`# NFR behind nginx / 宝塔
+	fmt.Printf(`# NFR behind an existing nginx (80/443 already taken)
 #
 # 1. keep nginx on 80/443, and in server.toml use:
 #      http_listen  = %q
 #      https_listen = "off"
-# WebSocket needs this once in the nginx http{} block
-#   (宝塔: 软件商店 -> Nginx -> 配置修改, put it above the "server" blocks):
+# WebSocket needs this once in the nginx http{} block:
 #     map $http_upgrade $connection_upgrade { default upgrade; '' close; }
 #
-# 2. paste the block below into the site for %s (宝塔: 网站 -> 设置 -> 配置文件),
+# 2. paste the block below into the site for %s,
 #    or into /etc/nginx/conf.d/nfr.conf.  SSL is terminated here by nginx.
 # 3. in the NFR console, create an HTTP tunnel whose domain is %s.
 
@@ -466,9 +462,9 @@ server {
     }
 }
 
-# TLS: after 宝塔 issues the certificate for %s, add
+# TLS: once a certificate exists for %s, add
 #   listen %s ssl http2;
-# and the usual ssl_certificate / ssl_certificate_key lines (宝塔 does this for you).
+# and the usual ssl_certificate / ssl_certificate_key lines.
 # Wildcard alternative: server_name *.example.com; then every subdomain
 # reaches NFR and the console decides which tunnel answers.
 `, *upstream, domain, domain, domain, *upstream, domain, *httpsPort)

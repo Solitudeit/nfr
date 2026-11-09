@@ -80,7 +80,7 @@ sudo nfr server
 ```
 
 第一次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码，并把面板地址
-和密码打印一次：
+（配置了域名用域名，否则自动探测本机的公网 IP）和密码打印一次：
 
 ```
   NFR control node is ready
@@ -103,9 +103,9 @@ sudo nfr server
 > 要接域名 + 80/443，或让 Let's Encrypt 签证书，改 `/etc/nfr/server.toml` 后重启即可，
 > 细节见 [docs/deploy.md](docs/deploy.md)。
 >
-> 80/443 已经被 nginx / 宝塔面板占着？把 `http_listen` 改到 `127.0.0.1:8080`、
+> 80/443 已经被 nginx 占着？把 `http_listen` 改到 `127.0.0.1:8080`、
 > `https_listen = "off"`，再跑 `nfr proxy-config app.example.com` 生成反代片段贴进站点配置，
-> 详见 [和已有的 nginx / 宝塔共存](docs/deploy.md#和已有的-nginx--宝塔共存)。
+> 详见 [和已有的 nginx 共存](docs/deploy.md#和已有的-nginx-共存)。
 
 ### 2. 内网机器
 
