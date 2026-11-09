@@ -22,38 +22,30 @@
   <h3 class="set-title">实例</h3>
   <form class="card form" method="post" action="/nfr/settings">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <div class="form-rows">
-      <div class="form-row">
-        <div class="label">实例名称</div>
-        <div class="field">
-          <input id="name" name="name" value="{{.Name}}" aria-label="实例名称">
-          <span class="hint">显示在面板左上角，用来区分不同的 NFR 节点。</span>
-        </div>
+    <div class="form-stack">
+      <div class="field">
+        <label for="name">实例名称</label>
+        <input id="name" name="name" value="{{.Name}}">
+        <span class="hint">显示在面板左上角，用来区分不同的 NFR 节点。</span>
       </div>
-      <div class="form-row">
-        <div class="label">公网域名</div>
-        <div class="field">
-          <input id="domain" name="domain" value="{{.Domain}}" placeholder="example.com" aria-label="公网域名">
-          <span class="hint">用于生成隧道的默认域名（<code>名称.example.com</code>）。没有域名可以留空。</span>
-        </div>
+      <div class="field">
+        <label for="domain">公网域名</label>
+        <input id="domain" name="domain" value="{{.Domain}}" placeholder="example.com">
+        <span class="hint">用于生成隧道的默认域名（<code>名称.example.com</code>）。没有域名可以留空。</span>
       </div>
-      <div class="form-row">
-        <div class="label">端口范围</div>
-        <div class="field">
-          <div class="field-row">
-            <input name="port_low" type="number" value="{{.PortLow}}" aria-label="起始端口">
-            <span class="range-dash">–</span>
-            <input name="port_high" type="number" value="{{.PortHigh}}" aria-label="结束端口">
-          </div>
-          <span class="hint">TCP 隧道只会分配这个区间内的端口，注意不要和系统服务冲突。</span>
+      <div class="field">
+        <label>端口范围</label>
+        <div class="field-row">
+          <input name="port_low" type="number" value="{{.PortLow}}" aria-label="起始端口">
+          <span class="range-dash">–</span>
+          <input name="port_high" type="number" value="{{.PortHigh}}" aria-label="结束端口">
         </div>
+        <span class="hint">TCP 隧道只会分配这个区间内的端口，注意不要和系统服务冲突。</span>
       </div>
-      <div class="form-row">
-        <div class="label">ACME 邮箱 <span class="muted">可选</span></div>
-        <div class="field">
-          <input id="email" name="email" value="{{.Email}}" placeholder="you@example.com" aria-label="ACME 邮箱">
-          <span class="hint">申请免费证书时使用。证书在 <code>server.toml</code> 里配置。</span>
-        </div>
+      <div class="field">
+        <label for="email">ACME 邮箱 <span class="muted">可选</span></label>
+        <input id="email" name="email" value="{{.Email}}" placeholder="you@example.com">
+        <span class="hint">申请免费证书时使用。证书在 <code>server.toml</code> 里配置。</span>
       </div>
     </div>
     <div class="actions"><button class="btn primary" type="submit">保存设置</button></div>
