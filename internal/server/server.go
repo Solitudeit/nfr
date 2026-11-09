@@ -521,13 +521,20 @@ func (s *Server) Tunnels() []api.Tunnel {
 	out := make([]api.Tunnel, 0, len(st.Tunnels))
 	for _, t := range st.Tunnels {
 		nodeName := ""
-		if n, ok := st.NodeByID(t.NodeID); ok {
+		nodeOnline := online[t.NodeID]
+		if t.NodeID == localNodeID {
+			nodeName = st.Name
+			if nodeName == "" {
+				nodeName = "本机"
+			}
+			nodeOnline = true
+		} else if n, ok := st.NodeByID(t.NodeID); ok {
 			nodeName = n.Name
 		}
 		v := api.Tunnel{
 			ID: t.ID, Name: t.Name, NodeID: t.NodeID, NodeName: nodeName,
 			Type: t.Type, Local: t.Local, RemotePort: t.RemotePort, Hosts: t.Hosts,
-			Enabled: t.Enabled, Online: online[t.NodeID],
+			Enabled: t.Enabled, Online: nodeOnline,
 			BandwidthKB: t.BandwidthKB, QuotaMB: t.QuotaMB, UsedBytes: t.UsedBytes, QuotaPaused: t.QuotaPaused,
 			CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		}
@@ -559,7 +566,7 @@ func (s *Server) Nodes() []api.Node {
 		sess[id] = a.remote
 	}
 	s.mu.Unlock()
-	out := make([]api.Node, 0, len(st.Nodes))
+	out := make([]api.Node, 0, len(st.Nodes)+1)
 	for _, n := range st.Nodes {
 		v := api.Node{
 			ID: n.ID, Name: n.Name, OS: n.OS, Arch: n.Arch, Version: n.Version,
@@ -576,6 +583,9 @@ func (s *Server) Nodes() []api.Node {
 		}
 		out = append(out, v)
 	}
+	// The built-in node goes last so callers that pick the first online node
+	// (scripts and integrations) keep choosing a real agent.
+	out = append(out, s.localNode(st))
 	return out
 }
 

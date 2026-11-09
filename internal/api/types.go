@@ -57,6 +57,7 @@ type Node struct {
 	Arch       string     `json:"arch,omitempty"`
 	Version    string     `json:"version,omitempty"`
 	Online     bool       `json:"online"`
+	Local      bool       `json:"local,omitempty"` // NFR's own host, always online
 	RemoteAddr string     `json:"remote_addr,omitempty"`
 	LastSeen   *time.Time `json:"last_seen,omitempty"`
 	Tunnels    int        `json:"tunnels"`

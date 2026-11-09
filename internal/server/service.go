@@ -200,8 +200,13 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 			return nil, errBad("name", "tunnel name may only contain letters, digits, dot, dash and underscore")
 		}
 	}
-	if _, ok := st.NodeByID(nodeID); !ok {
-		return nil, errBad("node_id", "choose a node that has joined")
+	if nodeID == "" {
+		nodeID = localNodeID
+	}
+	if nodeID != localNodeID {
+		if _, ok := st.NodeByID(nodeID); !ok {
+			return nil, errBad("node_id", "choose a node that has joined")
+		}
 	}
 	if typ == "" {
 		typ = store.TunnelTCP
@@ -586,6 +591,9 @@ func (s *Server) SetInstanceName(name string) error {
 
 // RemoveNode forgets an agent and its tunnels.
 func (s *Server) RemoveNode(id string) error {
+	if id == localNodeID {
+		return errBad("id", "the built-in node cannot be removed")
+	}
 	err := s.st.Update(func(st *store.State) error {
 		found := false
 		nodes := st.Nodes[:0]
@@ -622,6 +630,17 @@ func (s *Server) SetNodeName(id, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errBad("name", "name is required")
+	}
+	if id == localNodeID {
+		// The built-in node is named after the instance itself.
+		err := s.st.Update(func(st *store.State) error {
+			st.Name = name
+			return nil
+		})
+		if err == nil {
+			s.notify("instance renamed")
+		}
+		return err
 	}
 	err := s.st.Update(func(st *store.State) error {
 		n, ok := st.NodeByID(id)
