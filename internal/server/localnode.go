@@ -29,7 +29,7 @@ func (s *Server) localNode(st store.State) api.Node {
 		Version: version.Version, Online: true, Local: true, CreatedAt: s.started,
 	}
 	if n.Name == "" {
-		n.Name = "本机"
+		n.Name = "NFR"
 	}
 	for _, t := range st.Tunnels {
 		if t.NodeID == localNodeID {

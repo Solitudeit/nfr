@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// The console labels every instance by the country it sits in. "本机" only
-// makes sense while there is one server; once an operator runs machines in
-// several places the useful question is which country each one is in.
+// The console labels every instance by the country it sits in. A bare "this
+// host" tells an operator nothing; once machines are spread over several
+// places the useful question is which country each one is in.
 //
 // Lookups go through a public geo IP service, are cached in memory for a day
 // and stay best effort: a blocked, slow or failing lookup only leaves the
@@ -84,6 +84,11 @@ func (g *geoResolver) locate(ctx context.Context, q geoQuery) region {
 		return region{Country: e.country, Code: e.code}
 	}
 	country, code, ok := g.query(ctx, ip)
+	if !ok && ctx.Err() != nil && ip != "" && q.FallbackSelf {
+		// The budget ran out before the answer came back; waiting on the
+		// fallback lookup would only spend another timeout.
+		return region{}
+	}
 	if !ok && ip != "" && q.FallbackSelf {
 		// The name resolved to an address the service knows nothing about -
 		// a split horizon resolver, a carrier NAT or a proxy answering for a
