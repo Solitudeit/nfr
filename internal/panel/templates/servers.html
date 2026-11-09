@@ -38,8 +38,8 @@
           <td>{{if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}</td>
           <td class="shrink">
             <div class="actions">
-              <a class="btn sm" href="/_nfr/tunnels?server={{.ID}}">隧道</a>
-              <form method="post" action="/_nfr/servers" data-confirm="不再管理「{{.Name}}」？只影响这个控制台，不会动那台服务器上的东西。">
+              <a class="btn sm" href="/nfr/tunnels?server={{.ID}}">隧道</a>
+              <form method="post" action="/nfr/servers" data-confirm="不再管理「{{.Name}}」？只影响这个控制台，不会动那台服务器上的东西。">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="id" value="{{.ID}}">
@@ -62,7 +62,7 @@
 </section>
 
 <div class="grid2" style="margin-top:16px">
-  <form class="card form" method="post" action="/_nfr/servers">
+  <form class="card form" method="post" action="/nfr/servers">
     <div class="card-head"><h2>添加服务器</h2></div>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="field">

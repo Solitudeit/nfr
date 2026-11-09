@@ -94,9 +94,9 @@ class Panel:
             return e.code, e.read().decode("utf-8", "replace")
 
     def login(self, password):
-        self.request("/_nfr/login")
-        status, html = self.request("/_nfr/login", {"password": password})
-        _, page = self.request("/_nfr/nodes")
+        self.request("/nfr/login")
+        status, html = self.request("/nfr/login", {"password": password})
+        _, page = self.request("/nfr/nodes")
         m = re.search(r'name="csrf" value="([^"]+)"', page)
         self.csrf = m.group(1) if m else ""
         return status, html
@@ -173,7 +173,7 @@ def main():
         status, _ = panel.login(password)
         check("panel login", status == 200)
 
-        status, html = panel.request("/_nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
+        status, html = panel.request("/nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
         m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
         if not m:
             check("join code issued", False, "status %d" % status)
@@ -196,7 +196,7 @@ def main():
         node = None
         end = time.time() + 20
         while time.time() < end:
-            _, body = panel.request("/_nfr/api/state")
+            _, body = panel.request("/nfr/api/state")
             state = json.loads(body)
             online = [n for n in state["nodes"] if n.get("online")]
             if online:
@@ -229,13 +229,13 @@ def main():
 
         # A UDP lease must come from the UDP space.
         status, body = panel.request(
-            "/_nfr/api/allocate", {"tunnel_id": "", "type": "udp"}, {"X-CSRF": panel.csrf}
+            "/nfr/api/allocate", {"tunnel_id": "", "type": "udp"}, {"X-CSRF": panel.csrf}
         )
         alloc = json.loads(body)
         check("udp port allocated", bool(alloc.get("port")), str(alloc))
 
         status, html = panel.request(
-            "/_nfr/tunnels/save",
+            "/nfr/tunnels/save",
             {
                 "csrf": panel.csrf, "server": "local", "name": "dns",
                 "node_id": node["id"], "type": "udp",
@@ -286,14 +286,14 @@ def main():
         check("large datagram round trips", ok)
 
         # Metrics see the traffic.
-        _, body = panel.request("/_nfr/api/state")
+        _, body = panel.request("/nfr/api/state")
         tun = next((t for t in json.loads(body)["tunnels"] if t["name"] == "dns"), {})
         check("traffic counted", tun.get("in", 0) > 0 and tun.get("out", 0) > 0, str(tun)[:120])
 
         # Toggling stops and restores the datagram path.
         if tun:
             panel.request(
-                "/_nfr/tunnels/toggle",
+                "/nfr/tunnels/toggle",
                 {"csrf": panel.csrf, "server": "local", "id": tun["id"], "enabled": "false"},
             )
             ok = False
@@ -306,7 +306,7 @@ def main():
             check("disabled udp tunnel stops traffic", ok)
 
             panel.request(
-                "/_nfr/tunnels/toggle",
+                "/nfr/tunnels/toggle",
                 {"csrf": panel.csrf, "server": "local", "id": tun["id"], "enabled": "true"},
             )
             ok = False

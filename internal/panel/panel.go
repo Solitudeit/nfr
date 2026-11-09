@@ -49,7 +49,7 @@ type failState struct {
 	until time.Time
 }
 
-// Panel is the console handler mounted at /_nfr/.
+// Panel is the console handler mounted at /nfr/.
 type Panel struct {
 	srv   *server.Server
 	lg    *slog.Logger
@@ -139,26 +139,26 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 // ServeHTTP routes the console.
 func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
-	case r.URL.Path == "/_nfr":
-		http.Redirect(w, r, "/_nfr/", http.StatusMovedPermanently)
+	case r.URL.Path == "/nfr":
+		http.Redirect(w, r, "/nfr/", http.StatusMovedPermanently)
 		return
-	case r.URL.Path == "/_nfr/login":
+	case r.URL.Path == "/nfr/login":
 		p.login(w, r)
 		return
-	case strings.HasPrefix(r.URL.Path, "/_nfr/static/"):
+	case strings.HasPrefix(r.URL.Path, "/nfr/static/"):
 		p.static(w, r)
 		return
-	case r.URL.Path == "/_nfr/logout":
+	case r.URL.Path == "/nfr/logout":
 		p.logout(w, r)
 		return
 	}
 	sess := p.current(r)
 	if sess == nil {
-		if strings.HasPrefix(r.URL.Path, "/_nfr/api/") {
+		if strings.HasPrefix(r.URL.Path, "/nfr/api/") {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not signed in"})
 			return
 		}
-		http.Redirect(w, r, "/_nfr/login", http.StatusSeeOther)
+		http.Redirect(w, r, "/nfr/login", http.StatusSeeOther)
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -168,33 +168,33 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch {
-	case r.URL.Path == "/_nfr/" || r.URL.Path == "/_nfr/overview":
+	case r.URL.Path == "/nfr/" || r.URL.Path == "/nfr/overview":
 		p.overview(w, r, sess)
-	case r.URL.Path == "/_nfr/tunnels":
+	case r.URL.Path == "/nfr/tunnels":
 		p.tunnels(w, r, sess)
-	case r.URL.Path == "/_nfr/tunnels/new":
+	case r.URL.Path == "/nfr/tunnels/new":
 		p.tunnelForm(w, r, sess, nil)
-	case r.URL.Path == "/_nfr/tunnels/edit":
+	case r.URL.Path == "/nfr/tunnels/edit":
 		p.editForm(w, r, sess)
-	case r.URL.Path == "/_nfr/tunnels/save":
+	case r.URL.Path == "/nfr/tunnels/save":
 		p.tunnelSave(w, r, sess)
-	case r.URL.Path == "/_nfr/tunnels/delete":
+	case r.URL.Path == "/nfr/tunnels/delete":
 		p.tunnelDelete(w, r, sess)
-	case r.URL.Path == "/_nfr/tunnels/toggle":
+	case r.URL.Path == "/nfr/tunnels/toggle":
 		p.tunnelToggle(w, r, sess)
-	case r.URL.Path == "/_nfr/nodes":
+	case r.URL.Path == "/nfr/nodes":
 		p.nodes(w, r, sess)
-	case r.URL.Path == "/_nfr/nodes/delete":
+	case r.URL.Path == "/nfr/nodes/delete":
 		p.nodeDelete(w, r, sess)
-	case r.URL.Path == "/_nfr/servers":
+	case r.URL.Path == "/nfr/servers":
 		p.servers(w, r, sess)
-	case r.URL.Path == "/_nfr/settings":
+	case r.URL.Path == "/nfr/settings":
 		p.settings(w, r, sess)
-	case r.URL.Path == "/_nfr/keys":
-		http.Redirect(w, r, "/_nfr/settings#api", http.StatusMovedPermanently)
-	case r.URL.Path == "/_nfr/api/allocate":
+	case r.URL.Path == "/nfr/keys":
+		http.Redirect(w, r, "/nfr/settings#api", http.StatusMovedPermanently)
+	case r.URL.Path == "/nfr/api/allocate":
 		p.allocate(w, r, sess)
-	case r.URL.Path == "/_nfr/api/state":
+	case r.URL.Path == "/nfr/api/state":
 		p.state(w, r, sess)
 	default:
 		http.NotFound(w, r)
@@ -260,7 +260,7 @@ func (p *Panel) checkCSRF(r *http.Request, s *session) bool {
 func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		if p.current(r) != nil {
-			http.Redirect(w, r, "/_nfr/", http.StatusSeeOther)
+			http.Redirect(w, r, "/nfr/", http.StatusSeeOther)
 			return
 		}
 		p.render(w, r, "login", base{Title: "登录", Page: "login", Nav: "login", Error: r.URL.Query().Get("err"), Ver: version.Version})
@@ -268,7 +268,7 @@ func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := clientIP(r)
 	if !p.allowed(ip) {
-		http.Redirect(w, r, "/_nfr/login?err="+url.QueryEscape("too many attempts, try again later"), http.StatusSeeOther)
+		http.Redirect(w, r, "/nfr/login?err="+url.QueryEscape("too many attempts, try again later"), http.StatusSeeOther)
 		return
 	}
 	password := r.FormValue("password")
@@ -276,7 +276,7 @@ func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 	if hash == "" || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
 		p.failed(ip)
 		p.lg.Warn("console login failed", "remote", ip)
-		http.Redirect(w, r, "/_nfr/login?err="+url.QueryEscape("wrong password"), http.StatusSeeOther)
+		http.Redirect(w, r, "/nfr/login?err="+url.QueryEscape("wrong password"), http.StatusSeeOther)
 		return
 	}
 	id := randomToken()
@@ -288,13 +288,13 @@ func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    id,
-		Path:     "/_nfr",
+		Path:     "/nfr",
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  s.exp,
 	})
-	http.Redirect(w, r, "/_nfr/", http.StatusSeeOther)
+	http.Redirect(w, r, "/nfr/", http.StatusSeeOther)
 }
 
 func (p *Panel) logout(w http.ResponseWriter, r *http.Request) {
@@ -303,8 +303,8 @@ func (p *Panel) logout(w http.ResponseWriter, r *http.Request) {
 		delete(p.sessions, c.Value)
 		p.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/_nfr", MaxAge: -1, Secure: true, HttpOnly: true})
-	http.Redirect(w, r, "/_nfr/login", http.StatusSeeOther)
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/nfr", MaxAge: -1, Secure: true, HttpOnly: true})
+	http.Redirect(w, r, "/nfr/login", http.StatusSeeOther)
 }
 
 func (p *Panel) allowed(ip string) bool {
@@ -369,7 +369,7 @@ func (p *Panel) newBase(r *http.Request, s *session, nav, title, page string) ba
 // static serves the embedded stylesheet and script. They are public: the login
 // page needs them too, and they hold no secrets.
 func (p *Panel) static(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/_nfr/static/")
+	name := strings.TrimPrefix(r.URL.Path, "/nfr/static/")
 	if name == "" || strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, ".") {
 		http.NotFound(w, r)
 		return

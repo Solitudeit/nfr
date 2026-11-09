@@ -199,7 +199,7 @@ func (p *Panel) editForm(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	list, err := c.Tunnels(r.Context())
 	if err != nil {
-		p.backErr(w, r, "/_nfr/tunnels", err)
+		p.backErr(w, r, "/nfr/tunnels", err)
 		return
 	}
 	for i := range list {
@@ -213,7 +213,7 @@ func (p *Panel) editForm(w http.ResponseWriter, r *http.Request, s *session) {
 
 func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 	if err := r.ParseForm(); err != nil {
-		p.backErr(w, r, "/_nfr/tunnels", err)
+		p.backErr(w, r, "/nfr/tunnels", err)
 		return
 	}
 	sel := r.FormValue("server")
@@ -264,14 +264,14 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 	}
 	if err != nil {
-		p.backErr(w, r, "/_nfr/tunnels", err)
+		p.backErr(w, r, "/nfr/tunnels", err)
 		return
 	}
 	if req.Type == "http" {
-		p.ok(w, r, "/_nfr/tunnels", "隧道已保存")
+		p.ok(w, r, "/nfr/tunnels", "隧道已保存")
 		return
 	}
-	p.ok(w, r, "/_nfr/tunnels", "隧道已保存")
+	p.ok(w, r, "/nfr/tunnels", "隧道已保存")
 }
 
 func (p *Panel) tunnelDelete(w http.ResponseWriter, r *http.Request, s *session) {
@@ -290,10 +290,10 @@ func (p *Panel) tunnelDelete(w http.ResponseWriter, r *http.Request, s *session)
 		}
 	}
 	if err != nil {
-		p.backErr(w, r, "/_nfr/tunnels", err)
+		p.backErr(w, r, "/nfr/tunnels", err)
 		return
 	}
-	p.ok(w, r, "/_nfr/tunnels", "隧道已删除")
+	p.ok(w, r, "/nfr/tunnels", "隧道已删除")
 }
 
 func (p *Panel) tunnelToggle(w http.ResponseWriter, r *http.Request, s *session) {
@@ -313,10 +313,10 @@ func (p *Panel) tunnelToggle(w http.ResponseWriter, r *http.Request, s *session)
 		}
 	}
 	if err != nil {
-		p.backErr(w, r, "/_nfr/tunnels", err)
+		p.backErr(w, r, "/nfr/tunnels", err)
 		return
 	}
-	p.ok(w, r, "/_nfr/tunnels", "隧道已更新")
+	p.ok(w, r, "/nfr/tunnels", "隧道已更新")
 }
 
 type nodesData struct {
@@ -345,10 +345,10 @@ func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
 func (p *Panel) nodeDelete(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.FormValue("id")
 	if err := p.srv.RemoveNode(id); err != nil {
-		p.back(w, r, "/_nfr/nodes", err)
+		p.back(w, r, "/nfr/nodes", err)
 		return
 	}
-	p.ok(w, r, "/_nfr/nodes", "节点已移除")
+	p.ok(w, r, "/nfr/nodes", "节点已移除")
 }
 
 type serversData struct {

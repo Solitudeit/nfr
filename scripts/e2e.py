@@ -87,10 +87,10 @@ class Panel:
             return e.code, e.read().decode("utf-8", "replace")
 
     def login(self, password):
-        self.request("/_nfr/login")
-        status, html = self.request("/_nfr/login", {"password": password})
+        self.request("/nfr/login")
+        status, html = self.request("/nfr/login", {"password": password})
         # The overview has no form of its own; take the token from the nodes page.
-        _, page = self.request("/_nfr/nodes")
+        _, page = self.request("/nfr/nodes")
         m = re.search(r'name="csrf" value="([^"]+)"', page)
         self.csrf = m.group(1) if m else ""
         return status, html
@@ -193,7 +193,7 @@ def main():
         status, html = panel.login(password)
         check("panel login", status == 200 and "概览" in html, "status %d" % status)
 
-        status, html = panel.request("/_nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
+        status, html = panel.request("/nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
         m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
         check("join code issued", m is not None, "status %d" % status)
         if not m:
@@ -217,7 +217,7 @@ def main():
         node = None
         end = time.time() + 20
         while time.time() < end:
-            _, body = panel.request("/_nfr/api/state")
+            _, body = panel.request("/nfr/api/state")
             state = json.loads(body)
             online = [n for n in state["nodes"] if n.get("online")]
             if online:
@@ -232,7 +232,7 @@ def main():
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
         status, html = panel.request(
-            "/_nfr/tunnels/save",
+            "/nfr/tunnels/save",
             {
                 "csrf": panel.csrf, "server": "local", "name": "web",
                 "node_id": node["id"], "type": "http",
@@ -251,12 +251,12 @@ def main():
             time.sleep(0.2)
         check("http tunnel proxies", ok, "status %d" % st)
 
-        _, body = panel.request("/_nfr/api/allocate", {"tunnel_id": ""}, {"X-CSRF": panel.csrf})
+        _, body = panel.request("/nfr/api/allocate", {"tunnel_id": ""}, {"X-CSRF": panel.csrf})
         alloc = json.loads(body)
         check("port allocated", bool(alloc.get("port")), str(alloc))
 
         status, html = panel.request(
-            "/_nfr/tunnels/save",
+            "/nfr/tunnels/save",
             {
                 "csrf": panel.csrf, "server": "local", "name": "raw",
                 "node_id": node["id"], "type": "tcp",
@@ -290,10 +290,10 @@ def main():
         check("tcp tunnel proxies", ok, "port %s" % port)
 
         # HTTP can also be reached on a dedicated port, without any domain.
-        _, body = panel.request("/_nfr/api/allocate", {"tunnel_id": ""}, {"X-CSRF": panel.csrf})
+        _, body = panel.request("/nfr/api/allocate", {"tunnel_id": ""}, {"X-CSRF": panel.csrf})
         halloc = json.loads(body)
         status, html = panel.request(
-            "/_nfr/tunnels/save",
+            "/nfr/tunnels/save",
             {
                 "csrf": panel.csrf, "server": "local", "name": "webport",
                 "node_id": node["id"], "type": "http",
@@ -320,12 +320,12 @@ def main():
         check("http tunnel on a port proxies", ok, "port %s" % hport)
 
         # Toggling a tunnel must stop traffic without touching the agent.
-        _, body = panel.request("/_nfr/api/state")
+        _, body = panel.request("/nfr/api/state")
         tunnels = json.loads(body)["tunnels"]
         web = next((t for t in tunnels if t["name"] == "web"), None)
         if web:
             panel.request(
-                "/_nfr/tunnels/toggle",
+                "/nfr/tunnels/toggle",
                 {"csrf": panel.csrf, "server": "local", "id": web["id"], "enabled": "false"},
             )
             ok = False
@@ -338,7 +338,7 @@ def main():
             check("disabled tunnel stops traffic", ok, "status %d" % st)
 
             panel.request(
-                "/_nfr/tunnels/toggle",
+                "/nfr/tunnels/toggle",
                 {"csrf": panel.csrf, "server": "local", "id": web["id"], "enabled": "true"},
             )
             ok = False
@@ -357,11 +357,11 @@ def main():
 
         # REST API + SSE smoke test.
         panel.request(
-            "/_nfr/settings",
+            "/nfr/settings",
             {"csrf": panel.csrf, "name": "testnode", "domain": "", "api_enabled": "1",
              "port_low": "20000", "port_high": "29999", "email": ""},
         )
-        status, html = panel.request("/_nfr/settings",
+        status, html = panel.request("/nfr/settings",
                                      {"csrf": panel.csrf, "action": "key", "label": "e2e", "scope": "read"})
         m = re.search(r'data-newkey="([^"]+)"', html)
         check("api key created", m is not None, "status %d" % status)
@@ -427,7 +427,7 @@ def main():
         if web:
             for on in ("false", "true"):
                 panel.request(
-                    "/_nfr/tunnels/toggle",
+                    "/nfr/tunnels/toggle",
                     {"csrf": panel.csrf, "server": "local", "id": web["id"], "enabled": on},
                 )
         end = time.time() + 6
@@ -454,7 +454,7 @@ def main():
         ok = False
         end = time.time() + 30
         while time.time() < end:
-            _, body = panel2.request("/_nfr/api/state")
+            _, body = panel2.request("/nfr/api/state")
             state = json.loads(body)
             if any(n.get("online") for n in state["nodes"]) and len(state["tunnels"]) >= 2:
                 ok = True

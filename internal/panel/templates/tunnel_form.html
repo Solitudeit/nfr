@@ -4,11 +4,11 @@
     <p class="lead">{{if .Edit}}编辑「{{.Edit.Name}}」· 目标实例 {{.CurName}}{{else}}为 {{.CurName}} 上的内网服务建一条公网入口。{{end}}</p>
   </div>
   <div class="page-actions">
-    <a class="btn ghost" href="/_nfr/tunnels?server={{.Current}}">{{template "i-arrow-left"}}返回</a>
+    <a class="btn ghost" href="/nfr/tunnels?server={{.Current}}">{{template "i-arrow-left"}}返回</a>
   </div>
 </div>
 
-<form id="tform" method="post" action="/_nfr/tunnels/save" class="tf">
+<form id="tform" method="post" action="/nfr/tunnels/save" class="tf">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="server" value="{{.Current}}">
   {{if .Edit}}<input type="hidden" name="id" value="{{.Edit.ID}}">{{end}}
@@ -36,7 +36,7 @@
             <span class="np-name">{{.SelNode.Name}}</span>
             <span class="np-meta">{{if .SelNode.OS}}{{.SelNode.OS}} / {{.SelNode.Arch}} · {{end}}{{if .SelNode.Online}}在线{{else}}离线{{end}}</span>
           </div>
-          <span class="tf-hint">{{if .Edit}}这台机器随隧道带入，不支持在此更换；如需迁移，删除后在目标机器上重建。{{else}}已从节点页带入，无需再选；如需换一台，回到 <a href="/_nfr/nodes">节点</a> 页重新进入。{{end}}</span>
+          <span class="tf-hint">{{if .Edit}}这台机器随隧道带入，不支持在此更换；如需迁移，删除后在目标机器上重建。{{else}}已从节点页带入，无需再选；如需换一台，回到 <a href="/nfr/nodes">节点</a> 页重新进入。{{end}}</span>
           {{else if .Nodes}}
           <div class="node-pick" id="nodepick" role="radiogroup" aria-label="选择接入节点">
             {{range .Nodes}}
@@ -52,9 +52,9 @@
             {{end}}
             <input type="hidden" name="node_id" id="node_id" value="">
           </div>
-          <span class="tf-hint">点选一台内网机器作为出口；离线节点也能选，机器上线后隧道自动生效。也可以到 <a href="/_nfr/nodes">节点</a> 页从某台机器直接新建。</span>
+          <span class="tf-hint">点选一台内网机器作为出口；离线节点也能选，机器上线后隧道自动生效。也可以到 <a href="/nfr/nodes">节点</a> 页从某台机器直接新建。</span>
           {{else}}
-          <div class="flash warn" role="alert">还没有接入节点。先到 <a href="/_nfr/nodes">节点</a> 页生成加入码，在内网机器上运行 <code>nfr join</code>。</div>
+          <div class="flash warn" role="alert">还没有接入节点。先到 <a href="/nfr/nodes">节点</a> 页生成加入码，在内网机器上运行 <code>nfr join</code>。</div>
           {{end}}
         </div>
       </div>
@@ -141,7 +141,7 @@
       <span class="txt">启用这条隧道</span>
     </label>
     <span class="right"></span>
-    <a class="btn ghost" href="/_nfr/tunnels?server={{.Current}}">取消</a>
+    <a class="btn ghost" href="/nfr/tunnels?server={{.Current}}">取消</a>
     <button type="submit" class="btn primary"{{if eq (len .Nodes) 0}} disabled{{end}}>{{if .Edit}}保存修改{{else}}创建隧道{{end}}</button>
   </section>
 </form>
@@ -291,7 +291,7 @@
     var hint = document.getElementById('leasehint');
     hint.textContent = '正在申请…';
     try {
-      var res = await fetch('/_nfr/api/allocate?server=' + encodeURIComponent(server), {
+      var res = await fetch('/nfr/api/allocate?server=' + encodeURIComponent(server), {
         method: 'POST',
         headers: { 'X-CSRF': '{{.CSRF}}', 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'tunnel_id=' + encodeURIComponent(body.get('id') || '') + '&type=' + encodeURIComponent(kind())
