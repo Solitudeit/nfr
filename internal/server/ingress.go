@@ -300,7 +300,7 @@ func clientIP(r *http.Request) string {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	// Behind a local reverse proxy (nginx, Caddy, 宝塔), trust its headers.
+	// Behind a local reverse proxy (nginx, Caddy), trust its headers.
 	if isLoopback(host) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			if i := strings.IndexByte(xff, ','); i > 0 {

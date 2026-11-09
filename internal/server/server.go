@@ -250,7 +250,7 @@ func (s *Server) startControl() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.lg.Info("control listening", "addr", ln.Addr().String(), "pin", transport.FormatPin(s.pin))
+	s.lg.Debug("control listening", "addr", s.cfg.ControlListen, "pin", transport.FormatPin(s.pin))
 		for {
 			c, err := ln.Accept()
 			if err != nil {
@@ -292,10 +292,10 @@ func (s *Server) serveConsoleConn(c net.Conn) {
 	_ = srv.Serve(&oneConnListener{c: c})
 }
 
-// ingressHint explains how to coexist with a web server that already owns the
-// port, which is the usual situation on 宝塔 / nginx boxes.
+// ingressHint explains how to coexist with a web server that already owns
+// the port, which is the usual situation on nginx boxes.
 func ingressHint(addr string) string {
-	return fmt.Sprintf("if %s is already used by nginx or 宝塔, keep it running: set http_listen = \"127.0.0.1:8080\" and https_listen = \"off\" in server.toml, then run `nfr proxy-config <domain>` and paste the snippet into that site's nginx config", addr)
+	return fmt.Sprintf("if %s is already used by another nginx, keep it running: set http_listen = \"127.0.0.1:8080\" and https_listen = \"off\" in server.toml, then run `nfr proxy-config <domain>` and paste the snippet into that site's nginx config", addr)
 }
 
 func (s *Server) startHTTP() error {
@@ -312,7 +312,7 @@ func (s *Server) startHTTP() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.lg.Info("http ingress listening", "addr", ln.Addr().String())
+	s.lg.Debug("http ingress listening", "addr", s.cfg.HTTPListen)
 		_ = srv.Serve(ln)
 	}()
 	return nil
@@ -333,7 +333,7 @@ func (s *Server) startHTTPS() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.lg.Info("https ingress listening", "addr", ln.Addr().String())
+	s.lg.Debug("https ingress listening", "addr", s.cfg.HTTPSListen)
 		_ = srv.Serve(tlsLn)
 	}()
 	return nil
@@ -431,11 +431,18 @@ func (s *Server) panelURL() string {
 	if err != nil {
 		port = "8443"
 	}
-	host := s.cfg.Domain
-	if host == "" {
-		host = "localhost"
-	}
+	host := transport.BestHost(s.cfg.Domain, bindHost(s.cfg.ControlListen))
 	return "https://" + net.JoinHostPort(host, port) + "/_nfr/"
+}
+
+// bindHost extracts the host part of a listen address, resolving wildcards
+// and loopback to "" so BestHost can detect a usable interface address.
+func bindHost(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return host
 }
 
 // Tunnels renders every tunnel with live counters.
