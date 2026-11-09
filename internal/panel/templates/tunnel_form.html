@@ -34,7 +34,7 @@
           <div class="np-locked">
             <span class="dot {{if .SelNode.Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
             <span class="np-name">{{.SelNode.Name}}</span>
-            {{if .SelNode.Local}}<span class="chip loc">本机</span>{{end}}
+            {{if .SelNode.Region}}<span class="chip loc" title="按公网 IP 归属地">{{.SelNode.Region}}</span>{{end}}
             <span class="np-meta">{{if .SelNode.OS}}{{.SelNode.OS}} / {{.SelNode.Arch}} · {{end}}{{if .SelNode.Online}}在线{{else}}离线{{end}}</span>
           </div>
           <span class="tf-hint">{{if .Edit}}这台机器随隧道带入，不支持在此更换；如需迁移，删除后在目标机器上重建。{{else}}已从节点页带入，无需再选；如需换一台，回到 <a href="/nfr/nodes">节点</a> 页重新进入。{{end}}</span>
@@ -47,7 +47,7 @@
               <span class="np-top">
                 <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
                 <span class="np-name">{{.Name}}</span>
-                {{if .Local}}<span class="chip loc">本机</span>{{end}}
+                {{if .Region}}<span class="chip loc" title="按公网 IP 归属地">{{.Region}}</span>{{end}}
               </span>
               <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道</span>
             </button>
@@ -80,7 +80,7 @@
           <div class="combo">
             <input id="local_host" name="local_host" value="{{if .Edit}}{{.LocalHost}}{{end}}" placeholder="请输入或选择本地地址" autocomplete="off" spellcheck="false" required>
           </div>
-          <span class="tf-hint">相对接入节点而言，常用：<code>127.0.0.1</code>（本机）或局域网内其他机器的 IP。</span>
+          <span class="tf-hint">相对接入节点而言，常用 <code>127.0.0.1</code>（节点自己）或局域网内其他机器的 IP。</span>
         </div>
       </div>
 

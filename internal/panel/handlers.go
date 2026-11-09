@@ -13,15 +13,15 @@ import (
 
 // serverCard is one selectable instance on the tunnel screens.
 type serverCard struct {
-	ID        string
-	Name      string
-	URL       string
-	Local     bool
-	Reachable bool
-	Version   string
-	Nodes     int
-	Tunnels   int
-	Region    string // Chinese country name from the instance's address
+	ID         string
+	Name       string
+	URL        string
+	Local      bool
+	Reachable  bool
+	Version    string
+	Nodes      int
+	Tunnels    int
+	Region     string // Chinese country name from the instance's address
 	RegionCode string // ISO 3166-1 alpha-2, for the flag
 }
 
@@ -125,6 +125,38 @@ func (p *Panel) region(parent context.Context, rawURL string, local bool) string
 	return p.geo.locate(ctx, geoQuery{Host: rawURL, FallbackSelf: local}).Country
 }
 
+// labelNodes fills in the country every node sits in, so the console never has
+// to say "this host" to tell the built-in node apart: the card carries the same
+// kind of country label the instances get. An agent is located by the address
+// it connects from; the built-in node falls back to this machine's own exit
+// address when its public URL is a LAN name.
+func (p *Panel) labelNodes(parent context.Context, nodes []api.Node) {
+	if len(nodes) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, geoBudget)
+	defer cancel()
+	regions := make([]region, len(nodes))
+	var wg sync.WaitGroup
+	for i := range nodes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			q := geoQuery{Host: nodes[i].RemoteAddr, FallbackSelf: nodes[i].Local}
+			if q.Host == "" && !q.FallbackSelf {
+				// An agent that has never connected leaves no address to
+				// look up; the card simply goes without a country.
+				return
+			}
+			regions[i] = p.geo.locate(ctx, q)
+		}(i)
+	}
+	wg.Wait()
+	for i := range nodes {
+		nodes[i].Region = regions[i].Country
+	}
+}
+
 func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 	sel := r.URL.Query().Get("server")
 	d := tunnelsData{
@@ -147,6 +179,7 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		d.CurURL = p.srv.Info().PanelURL
 		d.Tunnels = p.srv.Tunnels()
 		d.Nodes = p.srv.Nodes()
+		p.labelNodes(r.Context(), d.Nodes)
 		d.CurRegion = p.region(r.Context(), d.CurURL, true)
 	} else {
 		c, rec, err := p.srv.RemoteClient(sel)
@@ -165,6 +198,7 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 			d.Tunnels = tunnels
 			if nodes, err := c.Nodes(ctx); err == nil {
 				d.Nodes = nodes
+				p.labelNodes(r.Context(), d.Nodes)
 			}
 		}
 	}
@@ -193,6 +227,8 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 	if d.IsLocal {
 		d.CurName = p.srv.Info().Name
 		d.Nodes = p.srv.Nodes()
+		p.labelNodes(r.Context(), d.Nodes)
+		d.CurRegion = p.region(r.Context(), p.srv.Info().PanelURL, true)
 	} else {
 		c, rec, err := p.srv.RemoteClient(sel)
 		if err != nil {
@@ -200,8 +236,10 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 			return
 		}
 		d.CurName = rec.Name
+		d.CurRegion = p.region(r.Context(), rec.URL, false)
 		if nodes, err := c.Nodes(r.Context()); err == nil {
 			d.Nodes = nodes
+			p.labelNodes(r.Context(), d.Nodes)
 		}
 	}
 	// The node is picked outside the form: either it is a property of the
@@ -376,6 +414,7 @@ type nodesData struct {
 
 func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
 	d := nodesData{base: p.newBase(r, s, "nodes", "节点", "nodes"), Nodes: p.srv.Nodes()}
+	p.labelNodes(r.Context(), d.Nodes)
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		req := api.JoinCodeRequest{Name: strings.TrimSpace(r.FormValue("name"))}

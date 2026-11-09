@@ -525,7 +525,7 @@ func (s *Server) Tunnels() []api.Tunnel {
 		if t.NodeID == localNodeID {
 			nodeName = st.Name
 			if nodeName == "" {
-				nodeName = "本机"
+				nodeName = "NFR"
 			}
 			nodeOnline = true
 		} else if n, ok := st.NodeByID(t.NodeID); ok {

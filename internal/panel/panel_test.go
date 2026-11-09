@@ -188,3 +188,35 @@ func extractCSRF(t *testing.T, body string) string {
 	}
 	return rest[:j]
 }
+
+func TestNodesShowCountryNotThisHost(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	// The built-in node is a node like any other on screen: it has to be
+	// selectable and labelled by its country, never by the words "this host".
+	for _, path := range []string{"/nfr/nodes", "/nfr/tunnels?server=local", "/nfr/tunnels/new?server=local"} {
+		rec := do(p, http.MethodGet, path, nil, cookies)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d", path, rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "香港") {
+			t.Fatalf("%s carries no country label for the built-in node", path)
+		}
+		if strings.Contains(body, "本机") {
+			t.Fatalf("%s still calls the instance local", path)
+		}
+	}
+}
+
+func TestTunnelFormOffersTheBuiltInNode(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-id="local"`) {
+		t.Fatal("the built-in node is missing from the node picker")
+	}
+}

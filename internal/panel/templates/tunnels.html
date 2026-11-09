@@ -36,8 +36,8 @@
 {{else}}
 <div class="page-head">
   <div>
-    <h1 class="cur-head">{{.CurName}}{{if .IsLocal}}<span class="chip loc">本机</span>{{end}}{{if .CurRegion}}<span class="chip loc">{{.CurRegion}}</span>{{end}}</h1>
-    <p class="lead">运行控制端的这台机器<span class="sep">·</span><span class="mono">{{.CurURL}}</span></p>
+    <h1 class="cur-head">{{.CurName}}{{if .CurRegion}}<span class="chip loc">{{.CurRegion}}</span>{{end}}</h1>
+    <p class="lead"><span class="mono">{{.CurURL}}</span></p>
   </div>
   <div class="page-actions">
     {{if .IsLocal}}
@@ -63,7 +63,7 @@
       <span class="np-top">
         <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
         <span class="np-name">{{.Name}}</span>
-        {{if .Local}}<span class="chip loc">本机</span>{{end}}
+        {{if .Region}}<span class="chip loc" title="按公网 IP 归属地">{{.Region}}</span>{{end}}
       </span>
       <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道 · {{if .Online}}在线{{else}}离线{{end}}</span>
     </a>
@@ -144,7 +144,7 @@
   {{else}}
   <div class="empty">
     {{template "i-empty"}}
-    <b>这台服务器还没有隧道</b>
+    <b>还没有隧道</b>
     <p>指定一个内网地址，NFR 会把它映射到公网。</p>
     <a class="btn primary" href="/nfr/tunnels/new?server={{.Current}}">{{template "i-plus"}}新建隧道</a>
   </div>
