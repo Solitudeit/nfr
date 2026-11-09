@@ -265,6 +265,7 @@ code { background: var(--surface-3); border-radius: var(--r-xs); padding: 1px 5p
 }
 .page-head > div { min-width: 0; }
 .cur-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lead .sep { margin: 0 7px; color: var(--text-3); }
 .lead { color: var(--text-3); font-size: 12.5px; margin-top: 2px; }
 .page-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 
@@ -882,6 +883,8 @@ label.ctl-row { cursor: pointer; }
 /* 隧道页 / 节点页的节点与服务器卡片。.np-card 不带 .sel 时的圆点圈只在表单里出现 */
 .node-pick a.np-card { text-decoration: none; color: inherit; }
 .node-pick a.np-card::after { display: none; }
+/* 表单里的点选卡右上角有单选圈，给地区/本机标签留出位置 */
+.node-pick button.np-card { padding-right: 32px; }
 .node-pick { max-width: none; }
 .np-add { border-style: dashed; color: var(--text-2); }
 
@@ -902,6 +905,7 @@ a.srv-card:active { transform: scale(.994); }
 .nc-meta .mono { font-family: var(--mono); font-size: 11.5px; }
 .nc-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .nc-rename { display: flex; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
+.nc-rename[hidden] { display: none; }
 .nc-rename input { flex: 1; min-width: 0; }
 
 /* 接入节点：外部已选定时的只读确认 */

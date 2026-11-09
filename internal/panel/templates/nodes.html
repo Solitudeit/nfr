@@ -1,7 +1,7 @@
 <div class="page-head">
   <div>
     <h1>节点</h1>
-    <p class="lead">已接入的内网机器。每台只保持一条主动外连，不需要公网 IP，也不需要在路由器上开端口。</p>
+    <p class="lead">运行控制端的这台机器自带一个节点，可以直接为它建隧道；接入别的内网机器时，每台只保持一条主动外连，不需要公网 IP，也不需要开端口。</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="/nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
@@ -15,21 +15,24 @@
     <div class="nc-top">
       <span class="dot {{if .Online}}on{{else}}off{{end}}"></span>
       <span class="nc-name">{{.Name}}</span>
+      {{if .Local}}<span class="chip loc">本机</span>{{end}}
       <span class="chip {{if .Online}}on{{else}}off{{end}}" data-live-chip>{{if .Online}}在线{{else}}离线{{end}}</span>
     </div>
     <div class="nc-meta">
       <span>{{if .OS}}{{.OS}} / {{.Arch}}{{if .Version}} · {{vshort .Version}}{{end}}{{else}}系统未知{{end}}</span>
       <span>{{.Tunnels}} 条隧道</span>
-      <span>最后在线 <span data-live-seen>{{if .Online}}刚刚{{else}}{{ago .LastSeen}}{{end}}</span></span>
+      <span>{{if .Local}}运行控制端的这台机器{{else}}最后在线 <span data-live-seen>{{if .Online}}刚刚{{else}}{{ago .LastSeen}}{{end}}</span>{{end}}</span>
     </div>
     <div class="nc-actions">
       <a class="btn sm" href="/nfr/tunnels/new?server=local&amp;node={{.ID}}">新建隧道</a>
       <button type="button" class="btn ghost sm" data-rename="{{.ID}}" data-name="{{.Name}}">改名</button>
+      {{if not .Local}}
       <form method="post" action="/nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         <input type="hidden" name="id" value="{{.ID}}">
         <button class="btn danger sm" type="submit">移除</button>
       </form>
+      {{end}}
     </div>
     <form class="nc-rename" id="rename-{{.ID}}" hidden method="post" action="/nfr/nodes/rename">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -41,12 +44,6 @@
   </section>
   {{end}}
 </div>
-{{else}}
-<section class="card empty">
-  {{template "i-empty"}}
-  <b>还没有接入任何机器</b>
-  <p>生成一个加入码，然后在要映射的那台机器上执行打印出来的命令。</p>
-</section>
 {{end}}
 
 <div class="grid2" style="margin-top:14px">

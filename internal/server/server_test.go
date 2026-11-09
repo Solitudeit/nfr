@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -348,5 +350,95 @@ func TestSetNodeName(t *testing.T) {
 	}
 	if err := s.SetNodeName("missing", "x"); err == nil {
 		t.Fatal("unknown node accepted")
+	}
+}
+
+func TestLocalNodeIsAlwaysAvailable(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+
+	nodes := s.Nodes()
+	if len(nodes) != 1 || nodes[0].ID != localNodeID || !nodes[0].Online || !nodes[0].Local {
+		t.Fatalf("built-in node missing from Nodes(): %+v", nodes)
+	}
+
+	// A tunnel can be created for the built-in node without joining anything.
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "self", NodeID: localNodeID, Type: "tcp", Local: "127.0.0.1:9"})
+	if err != nil {
+		t.Fatalf("create tunnel on the built-in node: %v", err)
+	}
+	if tun.NodeName == "" {
+		t.Fatal("tunnel has no node name for the built-in node")
+	}
+
+	// An empty node_id means "this host", which is what the panel sends when
+	// nothing has joined yet.
+	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "self2", Type: "tcp", Local: "127.0.0.1:9"}); err != nil {
+		t.Fatalf("create tunnel without a node id: %v", err)
+	}
+
+	if err := s.RemoveNode(localNodeID); err == nil {
+		t.Fatal("built-in node was removable")
+	}
+	if err := s.SetNodeName(localNodeID, "home"); err != nil {
+		t.Fatalf("rename the built-in node: %v", err)
+	}
+	if got := s.Nodes()[0].Name; got != "home" {
+		t.Fatalf("built-in node name = %q, want home", got)
+	}
+}
+
+func TestLocalNodeForwardsTraffic(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Backend", "local")
+		_, _ = io.WriteString(w, "hello from the built-in node")
+	}))
+	defer backend.Close()
+
+	port := 0
+	for p := 25100; p < 25200; p++ {
+		if canListen("tcp", p) {
+			port = p
+			break
+		}
+	}
+	if port == 0 {
+		t.Skip("no free port in the default range")
+	}
+	addr := strings.TrimPrefix(backend.URL, "http://")
+	if _, err := s.CreateTunnel(api.TunnelRequest{
+		Name: "localtcp", NodeID: localNodeID, Type: "tcp", Local: addr, RemotePort: port,
+	}); err != nil {
+		t.Fatalf("create tunnel: %v", err)
+	}
+
+	// reconcile() opens the public listener asynchronously enough that a short
+	// retry loop is the simplest reliable way to wait for it.
+	var conn net.Conn
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
+		if err == nil {
+			conn = c
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("public port never opened: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	defer conn.Close()
+
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	body, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if !strings.Contains(string(body), "hello from the built-in node") {
+		t.Fatalf("unexpected response: %q", body)
 	}
 }

@@ -36,11 +36,15 @@
 {{else}}
 <div class="page-head">
   <div>
-    <h1 class="cur-head">{{.CurName}}{{if .CurRegion}}<span class="chip loc">{{.CurRegion}}</span>{{end}}</h1>
-    <p class="lead"><span class="mono">{{.CurURL}}</span></p>
+    <h1 class="cur-head">{{.CurName}}{{if .IsLocal}}<span class="chip loc">本机</span>{{end}}{{if .CurRegion}}<span class="chip loc">{{.CurRegion}}</span>{{end}}</h1>
+    <p class="lead">运行控制端的这台机器<span class="sep">·</span><span class="mono">{{.CurURL}}</span></p>
   </div>
   <div class="page-actions">
+    {{if .IsLocal}}
+    <a class="btn ghost" href="/nfr/nodes">{{template "i-nodes"}}管理节点</a>
+    {{else}}
     <a class="btn ghost" href="/nfr/tunnels">{{template "i-arrow-left"}}切换服务器</a>
+    {{end}}
     <a class="btn primary" href="/nfr/tunnels/new?server={{.Current}}">{{template "i-plus"}}新建隧道</a>
   </div>
 </div>
@@ -59,6 +63,7 @@
       <span class="np-top">
         <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
         <span class="np-name">{{.Name}}</span>
+        {{if .Local}}<span class="chip loc">本机</span>{{end}}
       </span>
       <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道 · {{if .Online}}在线{{else}}离线{{end}}</span>
     </a>

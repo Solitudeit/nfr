@@ -385,8 +385,12 @@ func (s *Server) dropSession(nodeID string, a *agentSession) {
 	s.mu.Unlock()
 }
 
-// openStream dials one stream to the named node's agent.
+// openStream dials one stream to the named node's agent. The built-in node has
+// no agent, so its streams go straight to the local service.
 func (s *Server) openStream(nodeID string, h *proto.StreamHeader) (net.Conn, error) {
+	if nodeID == localNodeID {
+		return s.localStream(h)
+	}
 	a := s.sessionFor(nodeID)
 	if a == nil || a.sess == nil {
 		return nil, fmt.Errorf("node offline")
