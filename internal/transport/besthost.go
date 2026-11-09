@@ -16,7 +16,7 @@ func BestHost(domain, listenHost string) string {
 	default:
 		return listenHost // explicit bind address wins
 	}
-	global, private, loopback := "", "", ""
+	var v4pub, v4priv, v6pub, v6priv, other string
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
 		for _, a := range addrs {
@@ -29,30 +29,37 @@ func BestHost(domain, listenHost string) string {
 				continue
 			}
 			s := ip.String()
+			v4 := ip.To4() != nil
 			switch {
+			case isPublicUnicast(ip) && v4:
+				if v4pub == "" {
+					v4pub = s
+				}
+			case ip.IsPrivate() && v4:
+				if v4priv == "" {
+					v4priv = s
+				}
 			case isPublicUnicast(ip):
-				if global == "" {
-					global = s
+				if v6pub == "" {
+					v6pub = s
 				}
 			case ip.IsPrivate() || isCGNAT(ip) || ip.IsLinkLocalUnicast():
-				if private == "" {
-					private = s
+				if v6priv == "" {
+					v6priv = s
 				}
 			default:
-				if loopback == "" {
-					loopback = s
+				if other == "" {
+					other = s
 				}
 			}
 		}
 	}
-	if global != "" {
-		return global
-	}
-	if private != "" {
-		return private
-	}
-	if loopback != "" {
-		return loopback
+	// IPv4 wins over IPv6: a bare v6 literal in a printed command is awkward
+	// to paste and unreachable from networks without v6.
+	for _, candidate := range []string{v4pub, v4priv, v6pub, v6priv, other} {
+		if candidate != "" {
+			return candidate
+		}
 	}
 	return "localhost"
 }
