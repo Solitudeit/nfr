@@ -442,3 +442,31 @@ func TestLocalNodeForwardsTraffic(t *testing.T) {
 		t.Fatalf("unexpected response: %q", body)
 	}
 }
+
+func TestJoinCommandIsDialable(t *testing.T) {
+	s, _ := newTestServer(t, func(c *config.Server) {
+		c.Domain = "nfr.example.com"
+		c.ControlListen = ":8443"
+	})
+	resp, err := s.CreateJoinCode(api.JoinCodeRequest{Name: "edge"})
+	if err != nil {
+		t.Fatalf("join code: %v", err)
+	}
+	if want := "nfr join nfr.example.com:8443 " + resp.Code; resp.Command != want {
+		t.Errorf("command=%q want %q", resp.Command, want)
+	}
+
+	// A wildcard bind with no domain must still print an address another
+	// machine can actually dial, never the useless "localhost".
+	s2, _ := newTestServer(t, func(c *config.Server) { c.ControlListen = ":8443" })
+	resp2, err := s2.CreateJoinCode(api.JoinCodeRequest{Name: "edge"})
+	if err != nil {
+		t.Fatalf("join code: %v", err)
+	}
+	if strings.Contains(resp2.Command, "localhost") {
+		t.Errorf("command=%q must not point at localhost", resp2.Command)
+	}
+	if !strings.HasSuffix(resp2.Command, ":8443 "+resp2.Code) {
+		t.Errorf("command=%q should keep the control port and code", resp2.Command)
+	}
+}

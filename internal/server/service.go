@@ -11,6 +11,7 @@ import (
 	"github.com/solitudeit/nfr/internal/auth"
 	"github.com/solitudeit/nfr/internal/federation"
 	"github.com/solitudeit/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/transport"
 )
 
 // CreateTunnel validates and stores a new tunnel, then tells the agent.
@@ -390,16 +391,14 @@ func (s *Server) CreateJoinCode(req api.JoinCodeRequest) (api.JoinCodeResponse, 
 
 // joinHost renders the address an operator should type on the agent machine.
 func (s *Server) joinHost() string {
-	if s.cfg.Domain != "" {
-		return s.cfg.Domain
-	}
 	host, port, err := net.SplitHostPort(s.cfg.ControlListen)
 	if err != nil {
-		return "localhost"
+		host, port = "", "8443"
 	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "localhost"
-	}
+	// The default control_listen is a wildcard bind, which says nothing about
+	// which address a machine on the internet should dial; BestHost falls back
+	// to this host's interface addresses so the printed command works as is.
+	host = transport.BestHost(s.cfg.Domain, host)
 	if port == "443" {
 		return host
 	}
