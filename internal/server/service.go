@@ -615,3 +615,24 @@ func (s *Server) RemoveNode(id string) error {
 	}
 	return err
 }
+
+// SetNodeName renames an agent node. The name is cosmetic: it only shows up in
+// the panel and the tunnel list, so agents do not need to be reconfigured.
+func (s *Server) SetNodeName(id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errBad("name", "name is required")
+	}
+	err := s.st.Update(func(st *store.State) error {
+		n, ok := st.NodeByID(id)
+		if !ok {
+			return errNotFound("node not found")
+		}
+		n.Name = name
+		return nil
+	})
+	if err == nil {
+		s.notify("node renamed")
+	}
+	return err
+}

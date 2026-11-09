@@ -38,6 +38,7 @@ func (s *Server) buildAPI() http.Handler {
 	mux.HandleFunc("POST /api/v1/ports/allocate", s.needScope("write", s.apiAllocate))
 
 	mux.HandleFunc("GET /api/v1/nodes", s.needScope("read", s.apiListNodes))
+	mux.HandleFunc("PATCH /api/v1/nodes/{id}", s.needScope("write", s.apiRenameNode))
 	mux.HandleFunc("DELETE /api/v1/nodes/{id}", s.needScope("write", s.apiDeleteNode))
 	mux.HandleFunc("POST /api/v1/nodes/join-codes", s.needScope("write", s.apiJoinCode))
 
@@ -350,6 +351,27 @@ func (s *Server) apiDeleteNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.RemoveNode(r.PathValue("id")); err != nil {
+		writeErr2(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) apiRenameNode(w http.ResponseWriter, r *http.Request) {
+	if _, c, err := s.target(r); err != nil {
+		writeErr2(w, err)
+		return
+	} else if c != nil {
+		writeErr(w, http.StatusBadRequest, "unsupported", "manage nodes on the instance that owns them")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if err := s.SetNodeName(r.PathValue("id"), req.Name); err != nil {
 		writeErr2(w, err)
 		return
 	}

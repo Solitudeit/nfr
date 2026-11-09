@@ -184,6 +184,8 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.tunnelToggle(w, r, sess)
 	case r.URL.Path == "/nfr/nodes":
 		p.nodes(w, r, sess)
+	case r.URL.Path == "/nfr/nodes/rename":
+		p.nodeRename(w, r, sess)
 	case r.URL.Path == "/nfr/nodes/delete":
 		p.nodeDelete(w, r, sess)
 	case r.URL.Path == "/nfr/servers":

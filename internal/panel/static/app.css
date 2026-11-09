@@ -819,6 +819,31 @@ select { appearance: none; background-image: none; padding-right: 10px; }
 }
 .dot { flex: none; }
 
+/* 隧道页 / 节点页的节点与服务器卡片。.np-card 不带 .sel 时的圆点圈只在表单里出现 */
+.node-pick a.np-card { text-decoration: none; color: inherit; }
+.node-pick a.np-card::after { display: none; }
+.node-pick { max-width: none; }
+.np-add { border-style: dashed; color: var(--text-2); }
+
+/* 节点页卡片与隧道页服务器卡片 */
+.node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.node-card, .srv-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+a.srv-card { text-decoration: none; color: inherit; }
+a.srv-card:hover { border-color: var(--text-3); }
+.nc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nc-top .chip { margin-left: auto; }
+.nc-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nc-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  font-size: 12px; color: var(--text-3);
+}
+.nc-meta .mono { font-family: var(--mono); font-size: 11.5px; }
+.nc-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nc-rename { display: flex; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
+.nc-rename input { flex: 1; min-width: 0; }
+.srv-add { border-style: dashed; color: var(--text-2); }
+.srv-add .nc-name { color: var(--text-2); font-weight: 500; }
+
 /* 接入节点：外部已选定时的只读确认 */
 .np-locked {
   display: inline-flex; align-items: center; gap: 8px;

@@ -320,3 +320,33 @@ func TestCreateTunnelUDP(t *testing.T) {
 		t.Fatalf("udp tunnel could not consume the udp lease: %v", err)
 	}
 }
+
+func TestSetNodeName(t *testing.T) {
+	s, st := newTestServer(t, nil)
+	addNode(t, st, "n1")
+
+	if err := s.SetNodeName("n1", "  office-nas  "); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	var node store.Node
+	var ok bool
+	if err := st.View(func(s *store.State) error {
+		n, found := s.NodeByID("n1")
+		if found {
+			node, ok = *n, true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	if !ok || node.Name != "office-nas" {
+		t.Fatalf("node not renamed: %q ok=%v", node.Name, ok)
+	}
+
+	if err := s.SetNodeName("n1", "   "); err == nil {
+		t.Fatal("blank name accepted")
+	}
+	if err := s.SetNodeName("missing", "x"); err == nil {
+		t.Fatal("unknown node accepted")
+	}
+}

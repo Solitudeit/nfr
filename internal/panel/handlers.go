@@ -89,8 +89,14 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		PortRange: p.srv.Settings().PortRange,
 	}
 	if sel == "" {
+		cards := p.cards()
+		// One instance total: skip the server picker and go straight in.
+		if len(cards) == 1 {
+			http.Redirect(w, r, "/nfr/tunnels?server=local", http.StatusSeeOther)
+			return
+		}
 		p.refreshRemotes(r.Context())
-		d.Cards = p.cards()
+		d.Cards = cards
 		p.render(w, r, "tunnels", d)
 		return
 	}
@@ -340,6 +346,17 @@ func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 	}
 	p.render(w, r, "nodes", d)
+}
+
+func (p *Panel) nodeRename(w http.ResponseWriter, r *http.Request, s *session) {
+	_ = r.ParseForm()
+	id := r.FormValue("id")
+	name := r.FormValue("name")
+	if err := p.srv.SetNodeName(id, name); err != nil {
+		p.back(w, r, "/nfr/nodes", err)
+		return
+	}
+	p.ok(w, r, "/nfr/nodes", "节点已改名")
 }
 
 func (p *Panel) nodeDelete(w http.ResponseWriter, r *http.Request, s *session) {
