@@ -35,9 +35,13 @@
   /* chart series */
   --series-2: #0e9a8a;
 
-  --r: 8px;
-  --r-sm: 6px;
-  --r-xs: 4px;
+  /* 圆角档位：连续曲率（corner-shape: squircle）会让角部看起来更方，
+     所以数值比传统圆角略大 5%~10% 作为观感补偿。 */
+  --r-lg: 20px;
+  --r: 14px;
+  --r-sm: 10px;
+  --r-xs: 7px;
+  --ease: cubic-bezier(.22, .8, .24, 1);
   --focus-ring: 0 0 0 3px rgba(9, 105, 218, .25);
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
           "Hiragino Sans GB", "Microsoft YaHei", Roboto, Arial, sans-serif;
@@ -103,7 +107,7 @@ a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
-h1 { font-size: 19px; line-height: 1.3; }
+h1 { font-size: 19px; line-height: 1.3; letter-spacing: -.018em; }
 h2 { font-size: 13.5px; }
 h3 { font-size: 13px; }
 
@@ -116,6 +120,18 @@ code { background: var(--surface-3); border-radius: var(--r-xs); padding: 1px 5p
 .muted, .dim { color: var(--text-3); }
 .right { margin-left: auto; }
 .strong { font-weight: 600; }
+
+/* ── 连续曲率圆角 ──────────────────────────────────────────────────────
+   普通圆角在直边与圆弧交界处曲率从 0 直接跳到 1/r，看起来像"一把打死方向盘"，
+   这就是"生硬"的来源。corner-shape: squircle 让曲率连续上升，交界处曲率为 0。
+   不支持该属性的浏览器（Safari / iOS）自动忽略，退回普通圆角，布局不变。 */
+.card, .panel, .panel-head, .btn, .icon-btn, .tbtn, .side-act, .side-nav a,
+.chip, .pill, .copyfield, .stepper, .np-card, .np-locked, .combo-list,
+.combo-list button, .seg label, .flash, .join-code, .login-card, .node-card,
+.srv-card, .tf-card, .meter, .flash .x, input, select, textarea, code {
+  corner-shape: squircle;
+}
+/* 小尺寸元素维持同等曲率语义，只是半径小，视觉差异本就微弱 */
 
 /* ── shell ─────────────────────────────────────────────────────────── */
 
@@ -397,10 +413,9 @@ code { background: var(--surface-3); border-radius: var(--r-xs); padding: 1px 5p
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color .1s ease;
+  transition: background-color .12s var(--ease), transform .12s var(--ease);
 }
 .btn:hover { background: var(--surface-3); text-decoration: none; }
-.btn:active { transform: translateY(1px); }
 .btn svg { width: 14px; height: 14px; flex: none; }
 .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
 .btn.primary:hover { background: var(--brand-strong); border-color: var(--brand-strong); }
@@ -409,6 +424,7 @@ code { background: var(--surface-3); border-radius: var(--r-xs); padding: 1px 5p
 .btn.danger { color: var(--err); border-color: var(--line-strong); background: var(--surface); }
 .btn.danger:hover { background: var(--err-bg); }
 .btn.sm { height: 28px; padding: 0 9px; font-size: 12px; }
+.btn:active:not([disabled]) { transform: scale(.975); transition-duration: .06s; }
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
 .btn.copied { color: var(--ok); border-color: var(--ok); }
 
@@ -461,20 +477,11 @@ select { appearance: none; background-image: none; padding-right: 10px; }
 
 .actions { display: flex; align-items: center; gap: 8px; }
 
-/* two-column definition rows — the settings idiom */
-.form-rows { display: flex; flex-direction: column; }
-.form-row {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-  padding: 14px 0;
-  border-top: 1px solid var(--line);
-}
-.form-row:first-child { border-top: 0; padding-top: 0; }
-.form-row > .label { padding-top: 6px; }
-.form-row .field { max-width: 460px; }
-.form-row .hint { display: block; margin-top: 4px; }
+/* 输入型表单：标签在上、输入占满一行（填进去的东西一律上下排） */
+.form-stack { display: flex; flex-direction: column; gap: 16px; max-width: 560px; }
+.form-stack .field { gap: 7px; }
+.form-stack .hint { display: block; }
+.form-stack .field-row { max-width: 260px; }
 
 /* segmented choice */
 .seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -569,8 +576,8 @@ select { appearance: none; background-image: none; padding-right: 10px; }
 
 /* ── 设置页：分组 + 控件行 ─────────────────────────────────────────── */
 
-.set-grp { display: flex; flex-direction: column; gap: 10px; }
-.set-grp + .set-grp { margin-top: 26px; }
+.set-grp { display: flex; flex-direction: column; gap: 8px; }
+.set-grp + .set-grp { margin-top: 28px; }
 .set-title {
   margin: 0;
   font-size: 12px;
@@ -712,7 +719,7 @@ label.ctl-row { cursor: pointer; }
   max-width: 360px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   box-shadow: 0 1px 3px rgba(0, 0, 0, .04), 0 8px 24px rgba(0, 0, 0, .04);
   padding: 26px;
 }
@@ -750,8 +757,7 @@ label.ctl-row { cursor: pointer; }
   .content { padding: 18px 16px 96px; }
   .page-head { flex-direction: column; align-items: stretch; }
   .page-actions { flex-wrap: wrap; }
-  .form-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .form-row > .label { padding-top: 0; }
+  .form-stack { max-width: none; }
   .ctl-row { flex-wrap: wrap; }
   .ctl-col { flex: 1 1 auto; justify-content: flex-end; }
   .key-create { align-items: stretch; }
@@ -812,7 +818,7 @@ label.ctl-row { cursor: pointer; }
 }
 
 /* ===== 隧道表单：行式布局 + combobox + 步进器 ========================== */
-.tf-card { padding: 26px 28px 30px; border-radius: 14px; }
+.tf-card { padding: 26px 28px 30px; border-radius: var(--r); }
 .tf-head { font-size: 19px; font-weight: 700; letter-spacing: .01em; margin-bottom: 22px; }
 .tf-rows { display: flex; flex-direction: column; gap: 20px; }
 .tf-row { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 14px; align-items: start; }
@@ -821,7 +827,7 @@ label.ctl-row { cursor: pointer; }
 .tf-label .req { color: var(--err); font-style: normal; margin-left: 1px; }
 .tf-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .tf-field input, .tf-field select, .tf-field textarea {
-  min-height: 44px; padding: 9px 13px; border-radius: 10px;
+  min-height: 44px; padding: 9px 13px; border-radius: var(--r-sm);
   background: var(--surface-2); border-color: var(--line-strong);
   font-size: 14px;
 }
@@ -839,7 +845,7 @@ label.ctl-row { cursor: pointer; }
 .tf-inline { display: flex; align-items: center; gap: 8px; }
 .tf-inline input { flex: 0 1 220px; }
 .tf-unit { font-size: 13px; color: var(--text-3); }
-.tf .grab-btn { align-self: flex-start; min-height: 38px; padding: 0 16px; border-radius: 10px; }
+.tf .grab-btn { align-self: flex-start; min-height: 38px; padding: 0 16px; border-radius: var(--r-sm); }
 
 /* 接入节点：小卡片点选 */
 .node-pick {
@@ -850,7 +856,7 @@ label.ctl-row { cursor: pointer; }
   position: relative; display: flex; flex-direction: column; gap: 4px;
   text-align: left; font: inherit; color: inherit; cursor: pointer;
   padding: 10px 12px; border: 1px solid var(--line-strong);
-  border-radius: 10px; background: var(--surface-2);
+  border-radius: var(--r-sm); background: var(--surface-2);
 }
 .np-card:hover { border-color: var(--text-3); }
 .np-card:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -883,7 +889,9 @@ label.ctl-row { cursor: pointer; }
 .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
 .node-card, .srv-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
 a.srv-card { text-decoration: none; color: inherit; }
-a.srv-card:hover { border-color: var(--text-3); }
+a.srv-card { transition: border-color .14s var(--ease), transform .14s var(--ease), box-shadow .14s var(--ease); }
+a.srv-card:hover { border-color: var(--line-strong); text-decoration: none; box-shadow: 0 2px 10px rgba(0, 0, 0, .05); }
+a.srv-card:active { transform: scale(.994); }
 .nc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .nc-top .chip { margin-left: auto; }
 .nc-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -895,14 +903,12 @@ a.srv-card:hover { border-color: var(--text-3); }
 .nc-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .nc-rename { display: flex; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
 .nc-rename input { flex: 1; min-width: 0; }
-.srv-add { border-style: dashed; color: var(--text-2); }
-.srv-add .nc-name { color: var(--text-2); font-weight: 500; }
 
 /* 接入节点：外部已选定时的只读确认 */
 .np-locked {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 9px 14px; border: 1px solid var(--line-strong);
-  border-radius: 10px; background: var(--surface-2);
+  border-radius: var(--r-sm); background: var(--surface-2);
   max-width: 100%; overflow: hidden;
 }
 .np-locked .np-name { font-size: 13.5px; font-weight: 600; }
@@ -913,12 +919,12 @@ a.srv-card:hover { border-color: var(--text-3); }
 .combo-list {
   position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0;
   background: var(--surface); border: 1px solid var(--line-strong);
-  border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .16);
+  border-radius: var(--r-sm); box-shadow: 0 10px 28px rgba(0, 0, 0, .16);
   padding: 5px; max-height: 220px; overflow: auto;
 }
 .combo-list button {
   display: block; width: 100%; text-align: left; border: 0; background: none;
-  padding: 8px 10px; border-radius: 7px; font: inherit; font-size: 13.5px;
+  padding: 8px 10px; border-radius: var(--r-xs); font: inherit; font-size: 13.5px;
   color: var(--text); cursor: pointer;
 }
 .combo-list button:hover, .combo-list button:focus-visible { background: var(--brand-soft); outline: none; }
@@ -927,7 +933,7 @@ a.srv-card:hover { border-color: var(--text-3); }
 .stepper {
   display: flex; align-items: stretch; width: 100%;
   background: var(--surface-2); border: 1px solid var(--line-strong);
-  border-radius: 10px; overflow: hidden;
+  border-radius: var(--r-sm); overflow: hidden;
 }
 .stepper input { flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; background: none; padding: 9px 13px; }
 .stepper input:focus { outline: none; box-shadow: none; }
@@ -940,7 +946,7 @@ a.srv-card:hover { border-color: var(--text-3); }
 
 /* ===== pill 徽标：描边彩色 ============================================== */
 .pill {
-  display: inline-block; padding: 0 7px; line-height: 18px; border-radius: 6px;
+  display: inline-block; padding: 0 7px; line-height: 18px; border-radius: var(--r-xs);
   font-size: 11px; font-weight: 600; letter-spacing: .02em;
   border: 1px solid; background: transparent; vertical-align: 1px;
 }

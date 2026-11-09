@@ -30,33 +30,8 @@
       <div class="nc-meta"><span class="mono">{{.URL}}</span></div>
     </a>
     {{end}}
-    <a class="card srv-card srv-add" href="/nfr/servers">
-      <div class="nc-top"><span class="nc-name">＋ 纳管另一台服务器</span></div>
-      <div class="nc-meta"><span>填控制地址和 API 密钥</span></div>
-    </a>
   </div>
 </section>
-
-<div class="grid2" style="margin-top:16px">
-  <section class="card">
-    <div class="card-head"><h2>HTTP 站点</h2><span class="card-sub">端口直连，或按域名分流</span></div>
-    <p class="note">分配一个公网端口，访客直接访问 <code>http://服务器IP:端口</code>；也可以绑定域名，复用 80 / 443 按 Host 分流。</p>
-    <ul class="bullets">
-      <li>端口模式不需要域名和证书</li>
-      <li>域名模式需要把域名解析到这台服务器</li>
-      <li>自动补 <code>X-Forwarded-*</code>，支持 WebSocket</li>
-    </ul>
-  </section>
-  <section class="card">
-    <div class="card-head"><h2>TCP 端口</h2><span class="card-sub">独立端口，适合任意协议</span></div>
-    <p class="note">从端口池里分配一个公网端口，原样转发 TCP 字节。适合 SSH、数据库和远程桌面。</p>
-    <ul class="bullets">
-      <li>端口从设置里的区间分配，用完为止</li>
-      <li>支持任意 TCP 协议，包括长连接</li>
-      <li>不需要域名，也不需要证书</li>
-    </ul>
-  </section>
-</div>
 
 {{else}}
 <div class="page-head">
