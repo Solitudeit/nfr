@@ -85,9 +85,9 @@ class Panel:
             return e.code, e.read().decode("utf-8", "replace")
 
     def login(self, password):
-        self.request("/_nfr/login")
-        status, _ = self.request("/_nfr/login", {"password": password})
-        _, page = self.request("/_nfr/nodes")
+        self.request("/nfr/login")
+        status, _ = self.request("/nfr/login", {"password": password})
+        _, page = self.request("/nfr/nodes")
         m = re.search(r'name="csrf" value="([^"]+)"', page)
         self.csrf = m.group(1) if m else ""
         return status
@@ -218,7 +218,7 @@ def main():
         status = panel.login(password)
         check("panel login", status == 200)
 
-        status, html = panel.request("/_nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
+        status, html = panel.request("/nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
         m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
         if not m:
             check("join code issued", False, "status %d" % status)
@@ -241,7 +241,7 @@ def main():
         node = None
         end = time.time() + 20
         while time.time() < end:
-            _, body = panel.request("/_nfr/api/state")
+            _, body = panel.request("/nfr/api/state")
             state = json.loads(body)
             online = [n for n in state["nodes"] if n.get("online")]
             if online:
@@ -261,10 +261,10 @@ def main():
                 "local": "127.0.0.1:%d" % echo_port, "enabled": "1",
             }
             form.update(extra)
-            return panel.request("/_nfr/tunnels/save", form)
+            return panel.request("/nfr/tunnels/save", form)
 
         def find_tunnel(name):
-            _, body = panel.request("/_nfr/api/state")
+            _, body = panel.request("/nfr/api/state")
             return next((t for t in json.loads(body)["tunnels"] if t["name"] == name), None)
 
         # ------------------------------------------------------------------
@@ -333,7 +333,7 @@ def main():
         check("paused tunnel refuses traffic", refused)
 
         # The panel marks the pause.
-        _, html = panel.request("/_nfr/tunnels?server=local")
+        _, html = panel.request("/nfr/tunnels?server=local")
         check("panel shows quota pause", "配额停用" in html)
 
         # Clearing the quota and re-enabling restores service.
@@ -341,7 +341,7 @@ def main():
             "metered", id=tun["id"], remote_port=str(tun["remote_port"]), quota_mb="0"
         )
         check("edit tunnel clears quota", status == 200, "status %d" % status)
-        panel.request("/_nfr/tunnels/toggle",
+        panel.request("/nfr/tunnels/toggle",
                       {"csrf": panel.csrf, "server": "local", "id": tun["id"], "enabled": "true"})
         ok = False
         end = time.time() + 10

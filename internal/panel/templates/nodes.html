@@ -4,7 +4,7 @@
     <p class="lead">已接入的内网机器。每台只保持一条主动外连，不需要公网 IP，也不需要在路由器上开端口。</p>
   </div>
   <div class="page-actions">
-    <a class="btn" href="/_nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
+    <a class="btn" href="/nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
   </div>
 </div>
 
@@ -40,8 +40,8 @@
             <td class="item-num" data-live-seen>{{ago .LastSeen}}</td>
             <td class="shrink">
               <div class="actions">
-                <a class="btn sm" href="/_nfr/tunnels/new?server=local&amp;node={{.ID}}">新建隧道</a>
-                <form method="post" action="/_nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
+                <a class="btn sm" href="/nfr/tunnels/new?server=local&amp;node={{.ID}}">新建隧道</a>
+                <form method="post" action="/nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
                   <input type="hidden" name="csrf" value="{{$.CSRF}}">
                   <input type="hidden" name="id" value="{{.ID}}">
                   <button class="btn danger sm" type="submit">移除</button>
@@ -75,7 +75,7 @@
     </section>
     {{end}}
 
-    <form class="card form" method="post" action="/_nfr/nodes">
+    <form class="card form" method="post" action="/nfr/nodes">
       <div class="card-head"><h2>接入新机器</h2></div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="field">

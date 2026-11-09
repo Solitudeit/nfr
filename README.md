@@ -15,7 +15,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
   访客 ──▶ :20612 ────┐              ┌── nfr agent ── localhost:8080
   访客 ──▶ :20613 ────┤              │
   浏览器 ─▶ :8443 ──▶ nfr server ────┤
-  面板   ◀─ /_nfr/    │   TLS+yamux  └── nfr agent ── localhost:22
+  面板   ◀─ /nfr/    │   TLS+yamux  └── nfr agent ── localhost:22
                       └─ 端口池 20000-29999 ──▶ 访客直连
   域名访问（可选）：:80/:443 按 Host / SNI 分流
 ```
@@ -85,7 +85,7 @@ NFR 就转入后台运行，终端直接还给你：
 ```
   NFR 控制节点已就绪
   ────────────────────
-  面板      https://203.0.113.10:8443/_nfr/
+  面板      https://203.0.113.10:8443/nfr/
   密码      k3m9xw2p
   证书指纹  3f:0e:...
 
@@ -160,7 +160,7 @@ data_dir       = "/tmp/nfr-demo"
 TOML
 
 go run ./cmd/nfr server -c /tmp/nfr-demo.toml &     # 记下打印出来的密码
-# 打开 https://127.0.0.1:18443/_nfr/ ，节点页生成加入码 ABC123，然后：
+# 打开 https://127.0.0.1:18443/nfr/ ，节点页生成加入码 ABC123，然后：
 go run ./cmd/nfr join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123 &
 
 python3 -m http.server 8080 &                       # 一个假的内网服务
@@ -170,7 +170,7 @@ curl http://127.0.0.1:20612/
 
 ## 自托管面板
 
-同一个进程，`/_nfr/`：
+同一个进程，`/nfr/`：
 
 - **概览**：在线节点、启用隧道、进出流量、实时速率曲线
 - **隧道**：先按服务器卡片选一台，再新建 / 编辑 / 启停 / 删除，改完立即推送

@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <title>{{.Title}} · NFR</title>
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzE3NDU3ZiIvPjxwYXRoIGQ9Ik0xMCA5LjV2MTNoMi4ydi04LjZsNi4xIDguNmgxLjJ2LTEzaC0yLjJ2OC42TDEyLjIgOS41SHEweiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==">
-<link rel="stylesheet" href="/_nfr/static/app.css?v={{.Ver}}">
+<link rel="stylesheet" href="/nfr/static/app.css?v={{.Ver}}">
 <script>try{var t=localStorage.getItem("nfr-theme");if(t!=="light"&&t!=="dark"){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 </head>
 <body{{if ne .Page "login"}} data-live{{end}}>
@@ -15,7 +15,7 @@
 {{else}}
 <div class="app">
   <aside class="side">
-    <a class="side-brand" href="/_nfr/">
+    <a class="side-brand" href="/nfr/">
       <span class="brand-name">{{.Info.Name}}</span>
     </a>
     <div class="side-group">工作台</div>
@@ -25,7 +25,7 @@
         <button class="side-act" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
           {{template "i-moon"}}{{template "i-sun"}}
         </button>
-        <a class="side-act" href="/_nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
+        <a class="side-act" href="/nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
       </div>
       {{if .Info.Domain}}<div class="side-ver">{{.Info.Domain}}</div>{{end}}
       <div class="side-ver">{{.Info.Version}} · rev {{.Info.Revision}}</div>
@@ -39,7 +39,7 @@
         <button class="tbtn" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
           {{template "i-moon"}}{{template "i-sun"}}
         </button>
-        <a class="tbtn" href="/_nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
+        <a class="tbtn" href="/nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
       </div>
     </header>
     <header class="mhead">
@@ -48,7 +48,7 @@
       <button class="side-act" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
         {{template "i-moon"}}{{template "i-sun"}}
       </button>
-      <a class="side-act" href="/_nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
+      <a class="side-act" href="/nfr/logout" title="退出登录" aria-label="退出登录">{{template "i-logout"}}</a>
     </header>
     <main class="content">
       {{if .Error}}<div class="flash err" role="alert">{{.Error}}<button type="button" class="x" data-dismiss aria-label="关闭">×</button></div>{{end}}
@@ -59,16 +59,16 @@
 </div>
 <nav class="tabbar">{{template "nav" .}}</nav>
 {{end}}
-<script src="/_nfr/static/app.js?v={{.Ver}}" defer></script>
+<script src="/nfr/static/app.js?v={{.Ver}}" defer></script>
 </body>
 </html>{{end}}
 
 {{define "nav"}}
-<a href="/_nfr/overview" class="{{if eq .Nav "overview"}}active{{end}}">{{template "i-grid"}}<span>概览</span></a>
-<a href="/_nfr/tunnels" class="{{if eq .Nav "tunnels"}}active{{end}}">{{template "i-tunnels"}}<span>隧道</span></a>
-<a href="/_nfr/nodes" class="{{if eq .Nav "nodes"}}active{{end}}">{{template "i-nodes"}}<span>节点</span></a>
-<a href="/_nfr/servers" class="{{if eq .Nav "servers"}}active{{end}}">{{template "i-servers"}}<span>服务器</span></a>
-<a href="/_nfr/settings" class="{{if eq .Nav "settings"}}active{{end}}">{{template "i-settings"}}<span>设置</span></a>
+<a href="/nfr/overview" class="{{if eq .Nav "overview"}}active{{end}}">{{template "i-grid"}}<span>概览</span></a>
+<a href="/nfr/tunnels" class="{{if eq .Nav "tunnels"}}active{{end}}">{{template "i-tunnels"}}<span>隧道</span></a>
+<a href="/nfr/nodes" class="{{if eq .Nav "nodes"}}active{{end}}">{{template "i-nodes"}}<span>节点</span></a>
+<a href="/nfr/servers" class="{{if eq .Nav "servers"}}active{{end}}">{{template "i-servers"}}<span>服务器</span></a>
+<a href="/nfr/settings" class="{{if eq .Nav "settings"}}active{{end}}">{{template "i-settings"}}<span>设置</span></a>
 {{end}}
 
 {{define "i-grid"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>{{end}}

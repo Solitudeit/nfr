@@ -44,7 +44,7 @@ firewall-cmd --permanent --add-port=8443/tcp --add-port=80/tcp --add-port=443/tc
 然后二选一：
 
 **A. 自签证书（默认，零配置）**
-面板地址是 `https://IP:8443/_nfr/`，浏览器会警告一次。
+面板地址是 `https://IP:8443/nfr/`，浏览器会警告一次。
 `nfr join` 和纳管服务器会自动钉指纹，所以命令行侧不会报错。
 
 **B. Let's Encrypt**

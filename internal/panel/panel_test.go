@@ -53,7 +53,7 @@ func do(p *Panel, method, path string, form url.Values, cookies []*http.Cookie) 
 
 func login(t *testing.T, p *Panel, password string) []*http.Cookie {
 	t.Helper()
-	rec := do(p, http.MethodPost, "/_nfr/login", url.Values{"password": {password}}, nil)
+	rec := do(p, http.MethodPost, "/nfr/login", url.Values{"password": {password}}, nil)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("login status = %d", rec.Code)
 	}
@@ -70,12 +70,12 @@ func login(t *testing.T, p *Panel, password string) []*http.Cookie {
 
 func TestRequiresLogin(t *testing.T) {
 	p, _ := newPanel(t)
-	rec := do(p, http.MethodGet, "/_nfr/", nil, nil)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/_nfr/login" {
+	rec := do(p, http.MethodGet, "/nfr/", nil, nil)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/nfr/login" {
 		t.Fatalf("unauthenticated request = %d %s", rec.Code, rec.Header().Get("Location"))
 	}
 	// Login page itself is public.
-	if rec := do(p, http.MethodGet, "/_nfr/login", nil, nil); rec.Code != http.StatusOK {
+	if rec := do(p, http.MethodGet, "/nfr/login", nil, nil); rec.Code != http.StatusOK {
 		t.Fatalf("login page = %d", rec.Code)
 	}
 }
@@ -84,7 +84,7 @@ func TestLoginAndOverview(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
 
-	rec := do(p, http.MethodGet, "/_nfr/", nil, cookies)
+	rec := do(p, http.MethodGet, "/nfr/", nil, cookies)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overview = %d", rec.Code)
 	}
@@ -93,14 +93,14 @@ func TestLoginAndOverview(t *testing.T) {
 		t.Fatalf("overview does not show the instance: %s", body[:200])
 	}
 	// The session is required on every page, not just the overview.
-	if rec := do(p, http.MethodGet, "/_nfr/tunnels", nil, nil); rec.Code != http.StatusSeeOther {
+	if rec := do(p, http.MethodGet, "/nfr/tunnels", nil, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("tunnels without a session = %d", rec.Code)
 	}
 }
 
 func TestWrongPasswordIsRejected(t *testing.T) {
 	p, _ := newPanel(t)
-	rec := do(p, http.MethodPost, "/_nfr/login", url.Values{"password": {"nope"}}, nil)
+	rec := do(p, http.MethodPost, "/nfr/login", url.Values{"password": {"nope"}}, nil)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -115,7 +115,7 @@ func TestWrongPasswordIsRejected(t *testing.T) {
 func TestCSRFRequired(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
-	rec := do(p, http.MethodPost, "/_nfr/settings", url.Values{
+	rec := do(p, http.MethodPost, "/nfr/settings", url.Values{
 		"action": {"general"}, "name": {"renamed"},
 	}, cookies)
 	if rec.Code != http.StatusForbidden {
@@ -128,13 +128,13 @@ func TestCreateJoinCode(t *testing.T) {
 	cookies := login(t, p, password)
 
 	// The nodes page carries the csrf token and minting needs it.
-	page := do(p, http.MethodGet, "/_nfr/nodes", nil, cookies)
+	page := do(p, http.MethodGet, "/nfr/nodes", nil, cookies)
 	if page.Code != http.StatusOK {
 		t.Fatalf("nodes page = %d", page.Code)
 	}
 	token := extractCSRF(t, page.Body.String())
 
-	rec := do(p, http.MethodPost, "/_nfr/nodes", url.Values{"csrf": {token}}, cookies)
+	rec := do(p, http.MethodPost, "/nfr/nodes", url.Values{"csrf": {token}}, cookies)
 	if rec.Code != http.StatusOK && rec.Code != http.StatusSeeOther {
 		t.Fatalf("mint join code = %d", rec.Code)
 	}

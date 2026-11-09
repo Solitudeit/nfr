@@ -19,7 +19,7 @@
 {{end}}
 
 <div class="grid2">
-  <form class="card form" method="post" action="/_nfr/settings">
+  <form class="card form" method="post" action="/nfr/settings">
     <div class="card-head"><h2>常规</h2><span class="card-sub">保存后立即生效，无需重启</span></div>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="form-rows">
@@ -88,7 +88,7 @@
       {{end}}
     </section>
 
-    <form class="card form" method="post" action="/_nfr/settings">
+    <form class="card form" method="post" action="/nfr/settings">
       <div class="card-head"><h2>面板密码</h2></div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="action" value="password">
@@ -111,7 +111,7 @@
     <span class="card-sub">给别的面板或脚本使用；只保存哈希，明文仅显示一次</span>
   </div>
 
-  <form class="hstack" method="post" action="/_nfr/settings">
+  <form class="hstack" method="post" action="/nfr/settings">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input type="hidden" name="action" value="key">
     <div class="field" style="flex:1;min-width:180px">
@@ -151,7 +151,7 @@
           <td class="item-num">{{short .CreatedAt}}</td>
           <td class="item-num">{{ago .LastUsed}}</td>
           <td class="shrink">
-            <form method="post" action="/_nfr/settings" data-confirm="吊销密钥「{{.Label}}」？使用它的面板会立刻失去访问权。">
+            <form method="post" action="/nfr/settings" data-confirm="吊销密钥「{{.Label}}」？使用它的面板会立刻失去访问权。">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
               <input type="hidden" name="action" value="revoke">
               <input type="hidden" name="id" value="{{.ID}}">

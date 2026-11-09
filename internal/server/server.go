@@ -356,10 +356,10 @@ func (s *Server) serveConsole(w http.ResponseWriter, r *http.Request) {
 		s.api.ServeHTTP(w, r)
 	case r.URL.Path == "/metrics":
 		s.metrics.ServeHTTP(w, r)
-	case s.panel != nil && (r.URL.Path == "/_nfr" || strings.HasPrefix(r.URL.Path, "/_nfr/")):
+	case s.panel != nil && (r.URL.Path == "/nfr" || strings.HasPrefix(r.URL.Path, "/nfr/")):
 		s.panel.ServeHTTP(w, r)
 	case r.URL.Path == "/":
-		http.Redirect(w, r, "/_nfr/", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/nfr/", http.StatusTemporaryRedirect)
 	default:
 		http.NotFound(w, r)
 	}
@@ -442,7 +442,7 @@ func PanelBaseURL(cfg config.Server) string {
 	if host == "" {
 		host = firstSiteHost()
 	}
-	return "https://" + net.JoinHostPort(host, port) + "/_nfr/"
+	return "https://" + net.JoinHostPort(host, port) + "/nfr/"
 }
 
 // ConsoleCandidates lists the addresses a user may realistically paste into a
@@ -455,13 +455,13 @@ func ConsoleCandidates(cfg config.Server) []string {
 	}
 	var out []string
 	if cfg.Domain != "" {
-		out = append(out, "https://"+net.JoinHostPort(cfg.Domain, port)+"/_nfr/")
+		out = append(out, "https://"+net.JoinHostPort(cfg.Domain, port)+"/nfr/")
 	}
 	for _, ip := range siteIPs() {
-		out = append(out, "https://"+net.JoinHostPort(ip, port)+"/_nfr/")
+		out = append(out, "https://"+net.JoinHostPort(ip, port)+"/nfr/")
 	}
 	if len(out) == 0 {
-		out = append(out, "https://"+net.JoinHostPort("localhost", port)+"/_nfr/")
+		out = append(out, "https://"+net.JoinHostPort("localhost", port)+"/nfr/")
 	}
 	return out
 }

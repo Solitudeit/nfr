@@ -316,7 +316,7 @@
     var timer = null, stop = false;
     function tick() {
       if (stop) return;
-      fetch("/_nfr/api/state", { credentials: "same-origin", cache: "no-store" })
+      fetch("/nfr/api/state", { credentials: "same-origin", cache: "no-store" })
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (state) { if (state) apply(state); })
         .catch(function () { /* offline for a moment; the next tick will retry */ })

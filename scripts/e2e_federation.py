@@ -84,9 +84,9 @@ class Panel:
             return e.code, e.read().decode("utf-8", "replace")
 
     def login(self, password):
-        self.request("/_nfr/login")
-        status, html = self.request("/_nfr/login", {"password": password})
-        _, page = self.request("/_nfr/nodes")
+        self.request("/nfr/login")
+        status, html = self.request("/nfr/login", {"password": password})
+        _, page = self.request("/nfr/nodes")
         m = re.search(r'name="csrf" value="([^"]+)"', page)
         self.csrf = m.group(1) if m else ""
         return status, html
@@ -177,7 +177,7 @@ def main():
 
         # B: enable the API, then mint an admin key.
         status, html = B.request(
-            "/_nfr/settings",
+            "/nfr/settings",
             {
                 "csrf": B.csrf, "name": "node-b", "domain": "",
                 "api_enabled": "1", "port_low": "20000", "port_high": "29999", "email": "",
@@ -185,7 +185,7 @@ def main():
         )
         check("B API enabled", status == 200 and "设置已保存" in html, "status %d" % status)
 
-        status, html = B.request("/_nfr/settings",
+        status, html = B.request("/nfr/settings",
                                  {"csrf": B.csrf, "action": "key", "label": "console-a", "scope": "admin"})
         m = re.search(r'data-newkey="([^"]+)"', html)
         check("B admin key created", m is not None, "status %d" % status)
@@ -195,7 +195,7 @@ def main():
 
         # A: add B with TOFU (no pin supplied).
         status, html = A.request(
-            "/_nfr/servers",
+            "/nfr/servers",
             {"csrf": A.csrf, "url": "https://127.0.0.1:%d" % b_ctl, "api_key": key, "name": "Node B", "pin": ""},
         )
         err = re.search(r'class="flash err"[^>]*>\s*([^<]+)', html)
@@ -203,14 +203,14 @@ def main():
               "status %d err=%s" % (status, err.group(1).strip() if err else "?"))
         check("A card shows B online", "在线" in html and "Node B" in html)
 
-        m = re.search(r'href="/_nfr/tunnels\?server=([0-9a-z]+)"', html)
+        m = re.search(r'href="/nfr/tunnels\?server=([0-9a-z]+)"', html)
         check("B appears as a server card", m is not None)
         if not m:
             return 1
         b_id = m.group(1)
 
         # B: join an agent so B can actually forward traffic.
-        status, html = B.request("/_nfr/nodes", {"csrf": B.csrf, "name": "node-b-agent"})
+        status, html = B.request("/nfr/nodes", {"csrf": B.csrf, "name": "node-b-agent"})
         m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
         check("B join code issued", m is not None)
         if not m:
@@ -231,7 +231,7 @@ def main():
         b_node = None
         end = time.time() + 20
         while time.time() < end:
-            _, body = B.request("/_nfr/api/state")
+            _, body = B.request("/nfr/api/state")
             online = [n for n in json.loads(body)["nodes"] if n.get("online")]
             if online:
                 b_node = online[0]
@@ -247,7 +247,7 @@ def main():
 
         # Create a tunnel on B through A's console.
         status, html = A.request(
-            "/_nfr/tunnels/save",
+            "/nfr/tunnels/save",
             {
                 "csrf": A.csrf, "server": b_id, "name": "on-b", "node_id": b_node["id"],
                 "type": "http", "local": "127.0.0.1:%d" % local,
@@ -267,7 +267,7 @@ def main():
 
         # Wrong pin must be rejected.
         status, html = A.request(
-            "/_nfr/servers",
+            "/nfr/servers",
             {
                 "csrf": A.csrf, "url": "https://127.0.0.1:%d" % b_ctl, "api_key": key,
                 "name": "B wrong pin",
@@ -278,13 +278,13 @@ def main():
 
         # Turning the API off on B must surface as unreachable on A.
         B.request(
-            "/_nfr/settings",
+            "/nfr/settings",
             {
                 "csrf": B.csrf, "name": "node-b", "domain": "",
                 "port_low": "20000", "port_high": "29999", "email": "",
             },
         )
-        status, html = A.request("/_nfr/servers")
+        status, html = A.request("/nfr/servers")
         check("A reports B unreachable after API off", "不可达" in html, "status %d" % status)
 
     finally:

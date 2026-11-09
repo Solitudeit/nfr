@@ -4,8 +4,8 @@
     <p class="lead">数据每 4 秒自动刷新</p>
   </div>
   <div class="page-actions">
-    <a class="btn" href="/_nfr/nodes">{{template "i-nodes"}}接入机器</a>
-    <a class="btn primary" href="/_nfr/tunnels">{{template "i-plus"}}新建隧道</a>
+    <a class="btn" href="/nfr/nodes">{{template "i-nodes"}}接入机器</a>
+    <a class="btn primary" href="/nfr/tunnels">{{template "i-plus"}}新建隧道</a>
   </div>
 </div>
 
@@ -32,7 +32,7 @@
   <section class="panel">
     <div class="panel-head">
       <h2>隧道</h2>
-      <a class="right btn ghost sm" href="/_nfr/tunnels">管理</a>
+      <a class="right btn ghost sm" href="/nfr/tunnels">管理</a>
     </div>
     {{if .Tunnels}}
     <div class="tbl-wrap">
@@ -52,7 +52,7 @@
           <tr data-tid="{{.ID}}">
             <td>
               <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
-              <a class="name" href="/_nfr/tunnels/edit?id={{.ID}}&amp;server=local">{{.Name}}</a>
+              <a class="name" href="/nfr/tunnels/edit?id={{.ID}}&amp;server=local">{{.Name}}</a>
               <div class="sub">
                 <span class="pill {{if eq .Type "http"}}pill-http{{else if eq .Type "udp"}}pill-udp{{else}}pill-tcp{{end}}">{{if eq .Type "http"}}HTTP{{else if eq .Type "udp"}}UDP{{else}}TCP{{end}}</span>
                 {{if .BandwidthKB}}<span class="pill pill-cap">≤{{.BandwidthKB}}KB/s</span>{{end}}
@@ -81,7 +81,7 @@
       {{template "i-empty"}}
       <b>还没有隧道</b>
       <p>隧道把内网服务映射到公网。先接入一台内网机器，再为它的服务建一条隧道。</p>
-      <a class="btn primary" href="/_nfr/tunnels">{{template "i-plus"}}新建隧道</a>
+      <a class="btn primary" href="/nfr/tunnels">{{template "i-plus"}}新建隧道</a>
     </div>
     {{end}}
   </section>
@@ -104,5 +104,5 @@
 
 <div class="quickstart">
   <span class="qs-k">快速开始</span>
-  <span>内网机执行 <code>nfr join</code> 接入 <span class="qs-arrow">→</span> <a href="/_nfr/tunnels">新建隧道</a> 即可发布服务</span>
+  <span>内网机执行 <code>nfr join</code> 接入 <span class="qs-arrow">→</span> <a href="/nfr/tunnels">新建隧道</a> 即可发布服务</span>
 </div>
