@@ -112,12 +112,12 @@
           <td>
             <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
             <a class="name" href="/_nfr/tunnels/edit?id={{.ID}}&amp;server={{$.Current}}">{{.Name}}</a>
-            <span class="sub">{{if eq .Type "http"}}HTTP{{else}}TCP{{end}} · 入 {{bytes .In}} / 出 {{bytes .Out}}</span>
+            <span class="sub">{{if eq .Type "http"}}HTTP{{else if eq .Type "udp"}}UDP{{else}}TCP{{end}} · 入 {{bytes .In}} / 出 {{bytes .Out}}{{if .BandwidthKB}} · ≤{{.BandwidthKB}}KB/s{{end}}{{if .QuotaMB}} · 本月 {{bytes .UsedBytes}} / {{.QuotaMB}}MB{{end}}</span>
           </td>
           <td>{{.NodeName}}</td>
           <td class="addr">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}}</td>
           <td class="addr">{{.Local}}</td>
-          <td><span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}已停用{{else if .Online}}在线{{else}}节点离线{{end}}</span></td>
+          <td><span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}{{if .QuotaPaused}}配额停用{{else}}已停用{{end}}{{else if .Online}}在线{{else}}节点离线{{end}}</span></td>
           <td class="num" data-live-rate>{{rate .InRate}} / {{rate .OutRate}}</td>
           <td class="shrink">
             <div class="actions">

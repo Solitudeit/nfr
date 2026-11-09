@@ -58,6 +58,8 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 		cur.RemotePort = next.RemotePort
 		cur.Hosts = next.Hosts
 		cur.Enabled = next.Enabled
+		cur.BandwidthKB = next.BandwidthKB
+		cur.QuotaMB = next.QuotaMB
 		cur.UpdatedAt = time.Now().UTC()
 		node = cur.NodeID
 		return nil
@@ -98,6 +100,7 @@ func (s *Server) DeleteTunnel(id string) error {
 		return err
 	}
 	s.met.Drop(id)
+	s.dropLimit(id)
 	s.reconcile()
 	s.notify("tunnel deleted: " + name)
 	return nil
@@ -161,6 +164,30 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 	if req.Enabled != nil {
 		t.Enabled = *req.Enabled
 	}
+
+	// Bandwidth and quota follow the pointer protocol: nil keeps the current
+	// value (also the default for creation), 0 explicitly removes the cap.
+	bw := 0
+	var quota int64 = 0
+	if existing != nil {
+		bw = existing.BandwidthKB
+		quota = existing.QuotaMB
+	}
+	if req.BandwidthKB != nil {
+		bw = *req.BandwidthKB
+	}
+	if req.QuotaMB != nil {
+		quota = *req.QuotaMB
+	}
+	if bw < 0 || bw > 4<<20 {
+		return nil, errBad("bandwidth_kb", "bandwidth must be between 0 and 4194304 KB/s")
+	}
+	if quota < 0 || quota > 10<<20 {
+		return nil, errBad("quota_mb", "quota must be between 0 and 10485760 MB")
+	}
+	t.BandwidthKB = bw
+	t.QuotaMB = quota
+
 	if name == "" {
 		return nil, errBad("name", "tunnel name is required")
 	}
@@ -179,8 +206,8 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 	if typ == "" {
 		typ = store.TunnelTCP
 	}
-	if typ != store.TunnelTCP && typ != store.TunnelHTTP {
-		return nil, errBad("type", "type must be tcp or http")
+	if typ != store.TunnelTCP && typ != store.TunnelHTTP && typ != store.TunnelUDP {
+		return nil, errBad("type", "type must be tcp, http or udp")
 	}
 	normLocal, err := normalizeLocal(local)
 	if err != nil {
@@ -199,7 +226,7 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 
 	switch typ {
 	case store.TunnelTCP:
-		p, err := bindPort(st, port, existing, req.LeaseID)
+		p, err := bindPort(st, port, existing, req.LeaseID, "tcp")
 		if err != nil {
 			return nil, err
 		}
@@ -209,7 +236,7 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 		norm := normalizeHosts(hosts)
 		if port > 0 {
 			// Port based HTTP: reachable as http://<server-ip>:<port>/ .
-			p, err := bindPort(st, port, existing, req.LeaseID)
+			p, err := bindPort(st, port, existing, req.LeaseID, "tcp")
 			if err != nil {
 				return nil, err
 			}
@@ -248,20 +275,33 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 		if req.LeaseID != "" {
 			return nil, errBad("lease", "domain tunnels do not need a port reservation")
 		}
+	case store.TunnelUDP:
+		// UDP has no Host header or SNI, so it is always a plain forwarded
+		// port: DNS, WireGuard, game servers, syslog and friends.
+		if len(normalizeHosts(hosts)) > 0 {
+			return nil, errBad("hosts", "udp tunnels are port based only and cannot use domains")
+		}
+		p, err := bindPort(st, port, existing, req.LeaseID, "udp")
+		if err != nil {
+			return nil, err
+		}
+		t.RemotePort = p
+		t.Hosts = nil
 	}
 	return t, nil
 }
 
-// bindPort validates and reserves a public port for either TCP or port based
-// HTTP tunnels: it must be inside the configured range, free in the store, not
-// already bound on this host, and match any lease handed out earlier.
-func bindPort(st *store.State, port int, existing *store.Tunnel, leaseID string) (int, error) {
+// bindPort validates and reserves a public port for TCP, HTTP and UDP
+// tunnels: it must be inside the configured range, free in the store within
+// the same port space, not already bound on this host, and match any lease
+// handed out earlier.
+func bindPort(st *store.State, port int, existing *store.Tunnel, leaseID, network string) (int, error) {
 	lo, hi := st.Settings.PortRange[0], st.Settings.PortRange[1]
 	if lo == 0 {
 		lo, hi = 20000, 29999
 	}
 	if port == 0 {
-		p, err := pickPort(st, idOf(existing))
+		p, err := pickPort(st, idOf(existing), network)
 		if err != nil {
 			return 0, err
 		}
@@ -274,15 +314,17 @@ func bindPort(st *store.State, port int, existing *store.Tunnel, leaseID string)
 		if existing != nil && o.ID == existing.ID {
 			continue
 		}
-		if o.RemotePort == port {
+		// TCP/HTTP and UDP listen in independent spaces, so a clash only
+		// matters within the same protocol.
+		if o.RemotePort == port && store.TunnelNetwork(o.Type) == network {
 			return 0, errConflict("port_taken", fmt.Sprintf("port %d is already used by %s", port, o.Name))
 		}
 	}
 	samePort := existing != nil && existing.RemotePort == port
-	if !samePort && !canListen(port) {
+	if !samePort && !canListen(network, port) {
 		return 0, errConflict("port_busy", fmt.Sprintf("port %d is already in use on this host", port))
 	}
-	if err := consumeLease(st, leaseID, port, idOf(existing)); err != nil {
+	if err := consumeLease(st, leaseID, port, idOf(existing), network); err != nil {
 		return 0, err
 	}
 	return port, nil

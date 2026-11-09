@@ -61,7 +61,7 @@ type Frame struct {
 type TunnelSpec struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
-	Type  string `json:"type"` // tcp | http
+	Type  string `json:"type"` // tcp | http | udp
 	Local string `json:"local"`
 }
 

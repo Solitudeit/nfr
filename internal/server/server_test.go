@@ -87,7 +87,8 @@ func TestCreateTunnelHTTP(t *testing.T) {
 		{Name: "", NodeID: "n1", Type: "http", Local: "8080", Hosts: []string{"x.example.com"}},
 		{Name: "bad name!", NodeID: "n1", Type: "http", Local: "8080", Hosts: []string{"y.example.com"}},
 		{Name: "ghost", NodeID: "missing", Type: "http", Local: "8080", Hosts: []string{"z.example.com"}},
-		{Name: "weird", NodeID: "n1", Type: "udp", Local: "8080"},
+		{Name: "weird", NodeID: "n1", Type: "grpc", Local: "8080"},
+		{Name: "udpdomain", NodeID: "n1", Type: "udp", Local: "8080", Hosts: []string{"dns.example.com"}},
 	} {
 		if _, err := s.CreateTunnel(req); err == nil {
 			t.Fatalf("request %+v was accepted", req)
@@ -100,7 +101,7 @@ func TestCreateTunnelHTTPOnPort(t *testing.T) {
 	addNode(t, st, "n1")
 	port := 0
 	for p := 25000; p < 25100; p++ {
-		if canListen(p) {
+		if canListen("tcp", p) {
 			port = p
 			break
 		}
@@ -154,7 +155,7 @@ func TestAllocatePortAndLease(t *testing.T) {
 	s, st := newTestServer(t, func(c *config.Server) { c.PortRange = [2]int{base, base + 40} })
 	addNode(t, st, "n1")
 
-	first, err := s.AllocatePort("")
+	first, err := s.AllocatePort("", "tcp")
 	if err != nil {
 		t.Fatalf("allocate: %v", err)
 	}
@@ -164,7 +165,7 @@ func TestAllocatePortAndLease(t *testing.T) {
 	if first.LeaseID == "" || first.ExpiresAt.Before(time.Now()) {
 		t.Fatalf("incomplete lease: %+v", first)
 	}
-	second, err := s.AllocatePort("")
+	second, err := s.AllocatePort("", "tcp")
 	if err != nil {
 		t.Fatalf("second allocate: %v", err)
 	}
@@ -215,7 +216,7 @@ func TestAllocatePortRangeExhausted(t *testing.T) {
 	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "one", NodeID: "n1", Type: "tcp", Local: "9000", RemotePort: base}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := s.AllocatePort(""); err == nil {
+	if _, err := s.AllocatePort("", "tcp"); err == nil {
 		t.Fatal("allocation succeeded in a range with no free port")
 	}
 }
@@ -271,5 +272,51 @@ func TestForwardedHeadersFromLocalProxy(t *testing.T) {
 	}
 	if got := schemeOf(r); got != "http" {
 		t.Fatalf("schemeOf = %q, want http", got)
+	}
+}
+
+func TestCreateTunnelUDP(t *testing.T) {
+	s, st := newTestServer(t, nil)
+	addNode(t, st, "n1")
+
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "dns", NodeID: "n1", Type: "udp", Local: "127.0.0.1:53"})
+	if err != nil {
+		t.Fatalf("create udp tunnel: %v", err)
+	}
+	if tun.RemotePort == 0 {
+		t.Fatal("udp tunnel did not get a public port")
+	}
+
+	// TCP and UDP listen in independent port spaces: the same number works.
+	tcpTwin, err := s.CreateTunnel(api.TunnelRequest{Name: "sshd", NodeID: "n1", Type: "tcp", Local: "127.0.0.1:22", RemotePort: tun.RemotePort})
+	if err != nil {
+		t.Fatalf("tcp tunnel on the same port number was rejected: %v", err)
+	}
+	if tcpTwin.RemotePort != tun.RemotePort {
+		t.Fatalf("tcp twin port = %d, want %d", tcpTwin.RemotePort, tun.RemotePort)
+	}
+
+	// A second UDP tunnel cannot claim the same UDP port.
+	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "dns2", NodeID: "n1", Type: "udp", Local: "127.0.0.1:54", RemotePort: tun.RemotePort}); err == nil {
+		t.Fatal("duplicate udp public port accepted")
+	}
+
+	// UDP tunnels cannot use domains.
+	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "dnsw", NodeID: "n1", Type: "udp", Local: "8053", Hosts: []string{"dns.example.com"}}); err == nil {
+		t.Fatal("udp tunnel with domains accepted")
+	}
+
+	// Leases remember their port space.
+	first, err := s.AllocatePort("", "udp")
+	if err != nil {
+		t.Fatalf("allocate udp port: %v", err)
+	}
+	_, err = s.CreateTunnel(api.TunnelRequest{Name: "leased", NodeID: "n1", Type: "tcp", Local: "80", RemotePort: first.Port, LeaseID: first.LeaseID})
+	if err == nil {
+		t.Fatal("a tcp tunnel consumed a udp lease")
+	}
+	_, err = s.CreateTunnel(api.TunnelRequest{Name: "leased-udp", NodeID: "n1", Type: "udp", Local: "8054", RemotePort: first.Port, LeaseID: first.LeaseID})
+	if err != nil {
+		t.Fatalf("udp tunnel could not consume the udp lease: %v", err)
 	}
 }

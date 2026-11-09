@@ -309,7 +309,7 @@ func (s *Server) apiAllocate(w http.ResponseWriter, r *http.Request) {
 		writeErr2(w, err)
 		return
 	} else if c != nil {
-		resp, err := c.Allocate(r.Context(), req.TunnelID)
+		resp, err := c.Allocate(r.Context(), req.TunnelID, req.Network)
 		if err != nil {
 			writeErr(w, http.StatusBadGateway, "remote_error", err.Error())
 			return
@@ -317,7 +317,7 @@ func (s *Server) apiAllocate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	resp, err := s.AllocatePort(req.TunnelID)
+	resp, err := s.AllocatePort(req.TunnelID, req.Network)
 	if err != nil {
 		writeErr2(w, err)
 		return

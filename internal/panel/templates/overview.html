@@ -1,7 +1,7 @@
 <div class="page-head">
   <div>
-    <h1>{{.Info.Name}}</h1>
-    <p class="lead">{{len .Nodes}} 个节点 · {{len .Tunnels}} 条隧道 · 每 4 秒刷新</p>
+    <h1>概览</h1>
+    <p class="lead">数据每 4 秒自动刷新</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="/_nfr/nodes">{{template "i-nodes"}}接入机器</a>
@@ -11,32 +11,27 @@
 
 <div class="stats">
   <div class="stat">
-    <span class="stat-k">在线节点</span>
     <span class="stat-v" data-stat="nodes-online">{{.Online}} / {{len .Nodes}}</span>
-    <span class="stat-c">内网机器已接入</span>
+    <span class="stat-k">在线节点</span>
   </div>
   <div class="stat">
-    <span class="stat-k">启用隧道</span>
     <span class="stat-v" data-stat="tunnels-enabled">{{.Enabled}} / {{len .Tunnels}}</span>
-    <span class="stat-c">共 {{len .Tunnels}} 条</span>
+    <span class="stat-k">启用隧道</span>
   </div>
   <div class="stat">
-    <span class="stat-k">入站流量</span>
     <span class="stat-v" data-stat="total-in">{{bytes .In}}</span>
-    <span class="stat-c">访客 → 服务</span>
+    <span class="stat-k">入站流量</span>
   </div>
   <div class="stat">
-    <span class="stat-k">出站流量</span>
     <span class="stat-v" data-stat="total-out">{{bytes .Out}}</span>
-    <span class="stat-c">服务 → 访客</span>
+    <span class="stat-k">出站流量</span>
   </div>
 </div>
 
-<div class="grid2">
+<div class="grid2 overview-grid">
   <section class="panel">
     <div class="panel-head">
       <h2>隧道</h2>
-      <span class="card-sub">实时状态</span>
       <a class="right btn ghost sm" href="/_nfr/tunnels">管理</a>
     </div>
     {{if .Tunnels}}
@@ -58,12 +53,12 @@
             <td>
               <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
               <a class="name" href="/_nfr/tunnels/edit?id={{.ID}}&amp;server=local">{{.Name}}</a>
-              <span class="sub">{{if eq .Type "http"}}HTTP{{else}}TCP{{end}}</span>
+              <span class="sub">{{if eq .Type "http"}}HTTP{{else if eq .Type "udp"}}UDP{{else}}TCP{{end}}{{if .BandwidthKB}} · ≤{{.BandwidthKB}}KB/s{{end}}{{if .QuotaMB}} · 本月 {{bytes .UsedBytes}} / {{.QuotaMB}}MB{{end}}</span>
             </td>
             <td>{{.NodeName}}</td>
             <td class="addr">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}}</td>
             <td class="addr">{{.Local}}</td>
-            <td><span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}已停用{{else if .Online}}在线{{else}}节点离线{{end}}</span></td>
+            <td><span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}{{if .QuotaPaused}}配额停用{{else}}已停用{{end}}{{else if .Online}}在线{{else}}节点离线{{end}}</span></td>
             <td class="num" data-live-rate>{{rate .InRate}} / {{rate .OutRate}}</td>
           </tr>
           {{end}}
@@ -83,7 +78,7 @@
   <section class="panel">
     <div class="panel-head">
       <h2>实时流量</h2>
-      <span class="card-sub" data-peak>最近几分钟</span>
+      <span class="right card-sub" data-peak>最近几分钟</span>
     </div>
     <div class="chart" data-chart>
       <div class="chart-empty">正在采样…</div>
@@ -94,4 +89,9 @@
       <span class="right dim">每 4 秒采样</span>
     </div>
   </section>
+</div>
+
+<div class="quickstart">
+  <span class="qs-k">快速开始</span>
+  <span>内网机执行 <code>nfr join</code> 接入 <span class="qs-arrow">→</span> <a href="/_nfr/tunnels">新建隧道</a> 即可发布服务</span>
 </div>

@@ -55,6 +55,11 @@
               <span class="d">一个公网端口，原样转发任意 TCP 协议</span>
             </label>
             <label>
+              <input type="radio" name="type" value="udp" {{if .Edit}}{{if eq .Edit.Type "udp"}}checked{{end}}{{end}}>
+              <span class="t">UDP 端口</span>
+              <span class="d">DNS、WireGuard、游戏、Syslog 等非 HTTP 协议</span>
+            </label>
+            <label>
               <input type="radio" name="type" value="http" {{if .Edit}}{{if eq .Edit.Type "http"}}checked{{end}}{{end}}>
               <span class="t">HTTP 站点</span>
               <span class="d">用公网端口直连，或复用 80 / 443 按域名分流</span>
@@ -84,6 +89,30 @@
         <div class="field">
           <textarea id="hosts" name="hosts" placeholder="留空则只通过上面的公网端口访问" aria-label="域名">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
           <span class="hint">填了域名就按 Host / SNI 分流；不填也能用，访客直接访问 <code>http://服务器IP:端口</code>。</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card form" style="margin-top:16px">
+    <div class="card-head"><h2>限速与配额</h2><span class="card-sub">两项都留空表示不限</span></div>
+    <div class="form-rows">
+      <div class="form-row">
+        <div class="label">带宽限速 <span class="muted">可选</span></div>
+        <div class="field">
+          <div class="field-row">
+            <input type="number" name="bandwidth_kb" min="0" step="1" value="{{if .Edit}}{{if .Edit.BandwidthKB}}{{.Edit.BandwidthKB}}{{end}}{{end}}" placeholder="不限" aria-label="带宽限速 KB/s">
+          </div>
+          <span class="hint">单位 KB/s，上下行各自限到这个速度，整条隧道所有连接共享。512 KB/s 约等于 4 Mbps。</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="label">月流量配额 <span class="muted">可选</span></div>
+        <div class="field">
+          <div class="field-row">
+            <input type="number" name="quota_mb" min="0" step="1" value="{{if .Edit}}{{if .Edit.QuotaMB}}{{.Edit.QuotaMB}}{{end}}{{end}}" placeholder="不限" aria-label="月流量配额 MB">
+          </div>
+          <span class="hint">单位 MB，按自然月统计、月初清零。超出后隧道自动停用，下月自动恢复。</span>
         </div>
       </div>
     </div>
@@ -125,7 +154,7 @@
       var res = await fetch('/_nfr/api/allocate?server=' + encodeURIComponent(server), {
         method: 'POST',
         headers: { 'X-CSRF': '{{.CSRF}}', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'tunnel_id=' + encodeURIComponent(body.get('id') || '')
+        body: 'tunnel_id=' + encodeURIComponent(body.get('id') || '') + '&type=' + encodeURIComponent(kind())
       });
       var j = await res.json();
       if (!res.ok) { hint.textContent = j.error || '暂时拿不到端口，请重试。'; return; }

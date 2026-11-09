@@ -51,11 +51,15 @@ type Server struct {
 	started    time.Time
 	ctx        context.Context
 
-	mu        sync.Mutex
-	agents    map[string]*agentSession
-	listeners map[int]net.Listener
-	attempts  map[string]*attempt
-	lastUsed  map[string]time.Time
+	mu           sync.Mutex
+	agents       map[string]*agentSession
+	listeners    map[int]net.Listener
+	udpListeners map[int]*net.UDPConn
+	udpSess      map[string]*udpSession
+	attempts     map[string]*attempt
+	lastUsed     map[string]time.Time
+	limits       map[string]*tunnelLimit // per tunnel bandwidth shaping
+	flushed      map[string]int64        // quota accounting: metrics total already folded into the store
 
 	httpSrv  *http.Server
 	httpsSrv *http.Server
@@ -83,19 +87,23 @@ func New(opts Options) (*Server, string, error) {
 		return nil, "", fmt.Errorf("load certificate: %w", err)
 	}
 	s := &Server{
-		cfg:        opts.Config,
-		st:         opts.Store,
-		lg:         lg,
-		met:        metrics.New(),
-		hub:        newHub(),
-		tls:        tc,
-		pin:        pin,
-		certMode:   mode,
-		certSource: source,
-		agents:     make(map[string]*agentSession),
-		listeners:  make(map[int]net.Listener),
-		attempts:   make(map[string]*attempt),
-		lastUsed:   make(map[string]time.Time),
+		cfg:          opts.Config,
+		st:           opts.Store,
+		lg:           lg,
+		met:          metrics.New(),
+		hub:          newHub(),
+		tls:          tc,
+		pin:          pin,
+		certMode:     mode,
+		certSource:   source,
+		agents:       make(map[string]*agentSession),
+		listeners:    make(map[int]net.Listener),
+		udpListeners: make(map[int]*net.UDPConn),
+		udpSess:      make(map[string]*udpSession),
+		attempts:     make(map[string]*attempt),
+		lastUsed:     make(map[string]time.Time),
+		limits:       make(map[string]*tunnelLimit),
+		flushed:      make(map[string]int64),
 	}
 	if err := seedSettings(opts.Store, opts.Config); err != nil {
 		return nil, "", fmt.Errorf("seed settings: %w", err)
@@ -184,6 +192,8 @@ func (s *Server) loop(ctx context.Context) {
 				st.PruneJoins(now)
 				return nil
 			})
+			s.flushQuotas()
+			s.pruneUDPSessions()
 		}
 	}
 }
@@ -203,6 +213,10 @@ func (s *Server) shutdown() error {
 		ln.Close()
 		delete(s.listeners, port)
 	}
+	for port, conn := range s.udpListeners {
+		conn.Close()
+		delete(s.udpListeners, port)
+	}
 	agents := make([]*agentSession, 0, len(s.agents))
 	for _, a := range s.agents {
 		agents = append(agents, a)
@@ -213,6 +227,7 @@ func (s *Server) shutdown() error {
 	for _, a := range agents {
 		a.close()
 	}
+	s.closeUDPSessions()
 	if s.httpSrv != nil {
 		s.httpSrv.Close()
 	}
@@ -446,6 +461,7 @@ func (s *Server) Tunnels() []api.Tunnel {
 			ID: t.ID, Name: t.Name, NodeID: t.NodeID, NodeName: nodeName,
 			Type: t.Type, Local: t.Local, RemotePort: t.RemotePort, Hosts: t.Hosts,
 			Enabled: t.Enabled, Online: online[t.NodeID],
+			BandwidthKB: t.BandwidthKB, QuotaMB: t.QuotaMB, UsedBytes: t.UsedBytes, QuotaPaused: t.QuotaPaused,
 			CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		}
 		if m, ok := stats[t.ID]; ok {

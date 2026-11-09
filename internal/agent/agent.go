@@ -35,13 +35,19 @@ type Options struct {
 	Logger *slog.Logger
 }
 
+// tunnelRoute is the local destination of one tunnel plus how to talk to it.
+type tunnelRoute struct {
+	local string
+	kind  string // store.TunnelTCP / store.TunnelHTTP / store.TunnelUDP
+}
+
 // Agent keeps a single connection alive.
 type Agent struct {
 	opt Options
 	lg  *slog.Logger
 
 	mu     sync.Mutex
-	routes map[string]string // tunnel id -> local host:port
+	routes map[string]tunnelRoute // tunnel id -> local destination
 	sess   *yamux.Session
 }
 
@@ -51,7 +57,7 @@ func New(opt Options) *Agent {
 	if lg == nil {
 		lg = slog.Default()
 	}
-	return &Agent{opt: opt, lg: lg, routes: map[string]string{}}
+	return &Agent{opt: opt, lg: lg, routes: map[string]tunnelRoute{}}
 }
 
 // Local returns the address currently bound to a tunnel.
@@ -59,7 +65,10 @@ func (a *Agent) Local(tunnelID string) (string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	v, ok := a.routes[tunnelID]
-	return v, ok
+	if !ok {
+		return "", false
+	}
+	return v.local, true
 }
 
 // Run dials the server until the context is cancelled.
@@ -192,7 +201,7 @@ func (a *Agent) session(ctx context.Context) error {
 	defer func() {
 		a.mu.Lock()
 		a.sess = nil
-		a.routes = map[string]string{}
+		a.routes = map[string]tunnelRoute{}
 		a.mu.Unlock()
 	}()
 
@@ -219,9 +228,9 @@ func (a *Agent) session(ctx context.Context) error {
 }
 
 func (a *Agent) applyConfig(f *proto.Frame) {
-	next := make(map[string]string, len(f.Tunnels))
+	next := make(map[string]tunnelRoute, len(f.Tunnels))
 	for _, t := range f.Tunnels {
-		next[t.ID] = t.Local
+		next[t.ID] = tunnelRoute{local: t.Local, kind: t.Type}
 	}
 	a.mu.Lock()
 	old := a.routes
@@ -260,16 +269,20 @@ func (a *Agent) handleStream(ctx context.Context, st net.Conn) {
 	}
 	_ = st.SetReadDeadline(time.Time{})
 	a.mu.Lock()
-	local, ok := a.routes[h.Tunnel]
+	route, ok := a.routes[h.Tunnel]
 	a.mu.Unlock()
 	if !ok {
 		a.lg.Warn("stream for unknown tunnel", "tunnel", h.Tunnel)
 		return
 	}
+	if route.kind == "udp" {
+		a.serveUDPStream(st, h.Tunnel, route.local)
+		return
+	}
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	hc, err := dialer.DialContext(ctx, "tcp", local)
+	hc, err := dialer.DialContext(ctx, "tcp", route.local)
 	if err != nil {
-		a.lg.Warn("cannot reach local service", "tunnel", h.Tunnel, "local", local, "err", err)
+		a.lg.Warn("cannot reach local service", "tunnel", h.Tunnel, "local", route.local, "err", err)
 		return
 	}
 	defer hc.Close()
