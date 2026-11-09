@@ -16,6 +16,7 @@
       <thead>
         <tr>
           <th>名称</th>
+          <th>地区</th>
           <th>控制地址</th>
           <th>版本</th>
           <th class="num">节点</th>
@@ -31,6 +32,7 @@
             <span class="dot {{if .Reachable}}on{{else}}err{{end}}"></span>
             <span class="name">{{.Name}}</span>
           </td>
+          <td>{{if .Region}}<span class="chip loc">{{.Region}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="addr">{{.URL}}</td>
           <td>{{if .Version}}<span class="chip key">{{.Version}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="num">{{.Nodes}}</td>
@@ -100,7 +102,7 @@
     {{if .Pin}}
     <div class="divider"></div>
     <div>
-      <div class="label" style="margin-bottom:8px">本机证书指纹</div>
+      <div class="label" style="margin-bottom:8px">这台服务器的证书指纹</div>
       <div class="copyfield">
         <code>{{.Pin}}</code>
         <button type="button" class="btn sm" data-copy="{{.Pin}}">复制</button>

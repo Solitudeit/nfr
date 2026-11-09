@@ -54,6 +54,7 @@ type Panel struct {
 	srv   *server.Server
 	lg    *slog.Logger
 	pages map[string]*template.Template
+	geo   locator
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -130,7 +131,7 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 		pages[strings.TrimSuffix(name, ".html")] = t
 	}
 	return &Panel{
-		srv: srv, lg: lg, pages: pages,
+		srv: srv, lg: lg, pages: pages, geo: newGeoResolver(),
 		sessions: map[string]*session{},
 		fails:    map[string]*failState{},
 	}
