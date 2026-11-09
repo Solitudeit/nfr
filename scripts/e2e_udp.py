@@ -155,7 +155,7 @@ def main():
 
         server_log = open(os.path.join(tmp, "server.log"), "wb")
         server = subprocess.Popen(
-            [binary, "server", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
+            [binary, "server", "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
         )
         procs.append(server)
         if not wait_port(control):
@@ -163,7 +163,7 @@ def main():
             return 1
 
         text = open(os.path.join(tmp, "server.log"), errors="replace").read()
-        m = re.search(r"Password\s+(\S+)", text)
+        m = re.search(r"密码\s+(\S+)", text)
         if not m:
             print("could not find the first-run password in the banner")
             return 1

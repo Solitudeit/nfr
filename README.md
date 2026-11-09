@@ -25,7 +25,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 | | frp | NFR |
 |---|---|---|
 | 客户端配置 | 手写 `frpc.toml`，每台机器拷一份 | 一条 `nfr join` 命令，配置由服务端下发 |
-| 加入方式 | 永久 token 明文写在文件里 | 6 位一次性加入码，5 分钟有效，泄露后移除节点即可失效 |
+| 加入方式 | 永久 token 明文写在文件里 | 6 位一次性加入码，5 分钟有效，可吊销 |
 | 管理入口 | 无面板，改 TOML 重启 | 内置面板，改完立即生效，不用重启 |
 | 多机管理 | 一台一台改配置文件 | 面板纳管多台服务器，卡片式切换 |
 | HTTP 访问 | 要绑域名或另配 vhost | 默认 `http://服务器IP:端口`，域名可选 |
@@ -39,7 +39,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 浅色侧栏 + 1px 分隔线、内联统计条（不摆卡片）、紧凑表格为主角、8px 圆角、无阴影渐变，
 层级靠字重和灰度表达；主色 `#0969da`，语义绿/红/橙只出现在状态上。所有颜色走 CSS
 变量，深浅主题只换 token、不改组件结构；文字对比度按 WCAG 2.1 AA 校准。
-右上角可切深色并记住选择，手机上是底部标签栏，数据前台每 4 秒、后台每 15 秒自动刷新。
+右上角可切深色并记住选择，手机上是底部标签栏，数据每 4 秒自己刷新。
 
 ![概览](docs/screenshots/overview.png)
 
@@ -79,18 +79,24 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
 sudo nfr server
 ```
 
-第一次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码，并把面板地址
-（配置了域名用域名，否则自动探测本机的公网 IP）和密码打印一次：
+第一次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码；启动信息打印完，
+NFR 就转入后台运行，终端直接还给你：
 
 ```
-  NFR control node is ready
-  ─────────────────────────
-  Console   https://203.0.113.10:8443/_nfr/
-  Password  k3m9xw2p
-  Cert      3f:0e:...
-  Next: sign in, open 节点, click 生成加入码, then run the printed command
-  inside your network.
+  NFR 控制节点已就绪
+  ────────────────────
+  面板      https://203.0.113.10:8443/_nfr/
+  密码      k3m9xw2p
+  证书指纹  3f:0e:...
+
+  密码只显示这一次，登录后请在「设置」里修改。
+
+  已在后台运行  PID 4231
+  日志          /var/lib/nfr/nfr.log
+  停止          nfr stop
 ```
+
+要盯着日志前台跑（systemd / 调试），加 `--foreground`。
 
 > 也可以用 Docker 起，同样一条命令：
 >
@@ -103,9 +109,9 @@ sudo nfr server
 > 要接域名 + 80/443，或让 Let's Encrypt 签证书，改 `/etc/nfr/server.toml` 后重启即可，
 > 细节见 [docs/deploy.md](docs/deploy.md)。
 >
-> 80/443 已经被 nginx 占着？把 `http_listen` 改到 `127.0.0.1:8080`、
+> 80/443 已经被 nginx / Caddy 占着？把 `http_listen` 改到 `127.0.0.1:8080`、
 > `https_listen = "off"`，再跑 `nfr proxy-config app.example.com` 生成反代片段贴进站点配置，
-> 详见 [和已有的 nginx 共存](docs/deploy.md#和已有的-nginx-共存)。
+> 详见 [和已有的 nginx / Caddy 共存](docs/deploy.md#和已有的-nginx--caddy-共存)。
 
 ### 2. 内网机器
 
@@ -135,7 +141,7 @@ Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfr agent` 作�
 **限速与配额**（表单里的「限速与配额」区块）：
 
 - **带宽限速**：单位 KB/s，上下行各自限到这个速度，整条隧道所有连接共享。
-  512 KB/s ≈ 4 Mbps。GCRA 调度在服务端整形（允许 1 秒突发），不限速时零开销
+  512 KB/s ≈ 4 Mbps。令牌桶在服务端整形，不限速时零开销
 - **月流量配额**：单位 MB，按自然月统计、月初自动清零。超出后隧道自动停用
   （列表里标「配额停用」），下月自动恢复——把服务器带宽借给朋友用，
   不用天天盯着账
@@ -166,13 +172,12 @@ curl http://127.0.0.1:20612/
 
 同一个进程，`/_nfr/`：
 
-- **概览**：在线节点、启用隧道、入站 / 出站流量、实时速率曲线
+- **概览**：在线节点、启用隧道、进出流量、实时速率曲线
 - **隧道**：先按服务器卡片选一台，再新建 / 编辑 / 启停 / 删除，改完立即推送
-- **节点**：生成一次性加入码、在线状态、最后在线时间，可随时移除
+- **节点**：加入码、在线状态、最后心跳，可随时移除
 - **服务器**：纳管其它 NFR 实例（填地址 + API 密钥即可）
-- **设置**：实例名称、公网域名、端口范围、证书来源与到期、面板密码、
-  开放 REST API，以及 API 密钥（给自动化用的 read / write / admin 密钥，
-  明文只显示一次）
+- **设置**：实例名、域名、端口池、证书来源与到期、面板密码，以及 API 密钥
+  （给自动化用的 read / write / admin 密钥，明文只显示一次）
 
 ## 多服务器纳管
 
@@ -187,7 +192,7 @@ B 不用改配置，也不用信任 A 的数据库——B 的 state 永远在自
 ## 安全模型
 
 - 传输：TCP + TLS 1.3 + [yamux](https://github.com/hashicorp/yamux)，ALPN 区分隧道流量
-  和普通 HTTPS
+  和普通 HTTPS；隧道流量也可以走 QUIC（预留，未启用）
 - 身份：加入码一次性 + 5 分钟过期 + 同 IP 错 5 次锁 15 分钟；长期令牌只存 SHA-256，
   校验用 HMAC 挑战应答，令牌本身不过网、不落盘明文
 - 证书：自签默认 TOFU 钉指纹；配了域名可以走 ACME，对端改用系统根证书校验
@@ -231,20 +236,19 @@ pin     = "3f0e..."
 
 面板用的就是这一套 API，`Authorization: Bearer nfr_...`：
 
-| 方法 | 路径 | 权限 | 说明 |
-|---|---|---|---|
-| GET | `/api/v1/info` | read | 实例信息、在线节点与隧道 |
-| GET | `/api/v1/health` | read | 健康检查 |
-| GET | `/api/v1/certs` | read | 证书来源、指纹、到期时间 |
-| GET/POST | `/api/v1/tunnels` | read / write | 列表 / 创建 |
-| GET/PATCH/DELETE | `/api/v1/tunnels/{id}` | read / write | 详情 / 修改 / 删除 |
-| POST | `/api/v1/ports/allocate` | write | 申请一个公网端口（10 分钟租约） |
-| GET/DELETE | `/api/v1/nodes[/{id}]` | read / write | 节点 |
-| POST | `/api/v1/nodes/join-codes` | write | 生成一次性加入码 |
-| GET/POST/DELETE | `/api/v1/servers[/{id}]` | admin | 纳管实例 |
-| GET/POST/DELETE | `/api/v1/api-keys[/{id}]` | admin | API 密钥 |
-| GET/PATCH | `/api/v1/settings` | admin | 域名、端口范围、API 开关 |
-| GET | `/api/v1/events` | read | SSE 事件流 |
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/info` | 实例信息、在线节点与隧道 |
+| GET | `/api/v1/certs` | 证书来源、指纹、到期时间 |
+| GET/POST | `/api/v1/tunnels` | 列表 / 创建 |
+| GET/PATCH/DELETE | `/api/v1/tunnels/{id}` | 详情 / 修改 / 删除 |
+| POST | `/api/v1/ports/allocate` | 申请一个公网端口（10 分钟租约） |
+| GET/DELETE | `/api/v1/nodes[/{id}]` | 节点 |
+| POST | `/api/v1/nodes/join-codes` | 生成一次性加入码 |
+| GET/POST/DELETE | `/api/v1/servers[/{id}]` | 纳管实例 |
+| GET/POST/DELETE | `/api/v1/api-keys[/{id}]` | API 密钥 |
+| GET/PATCH | `/api/v1/settings` | 域名、端口池、API 开关 |
+| GET | `/api/v1/events` | SSE 事件流 |
 
 ```bash
 curl -H "Authorization: Bearer $NFR_KEY" https://example.com:8443/api/v1/tunnels
@@ -255,26 +259,20 @@ curl -H "Authorization: Bearer $NFR_KEY" https://example.com:8443/api/v1/tunnels
 
 ## 观测
 
-`GET /metrics`（Prometheus 文本。需先在设置里开放 REST API，再用 read 及以上权限的 key 访问）：
+`GET /metrics`（Prometheus 文本，需要 read 权限的 key）：
 
 ```
 nfr_up 1
 nfr_nodes_online 2
 nfr_tunnel_bytes_total{id="k3m9",name="blog",direction="out"} 1.2e+06
 nfr_tunnel_active{id="k3m9",name="blog"} 3
-nfr_tunnel_bytes_per_second{id="k3m9",name="blog",direction="in"} 20480
 ```
-
-完整指标：`nfr_up`、`nfr_build_info`、`nfr_revision`、`nfr_uptime_seconds`、
-`nfr_nodes_online`、`nfr_tunnels`、`nfr_tunnels_enabled`、`nfr_tunnels_online`、
-`nfr_tunnel_bytes_total`、`nfr_tunnel_connections_total`、`nfr_tunnel_errors_total`、
-`nfr_tunnel_active`、`nfr_tunnel_bytes_per_second`。
 
 ## 构建
 
 ```bash
 make build            # 本机
-make cross            # linux/amd64, linux/arm64, linux/armv7, darwin/amd64+arm64, windows/amd64
+make cross            # linux/amd64, linux/arm64, darwin/arm64, windows/amd64
 make test             # go test ./...
 python3 scripts/e2e.py            # 单实例端到端
 python3 scripts/e2e_udp.py        # UDP 隧道端到端
@@ -287,26 +285,16 @@ python3 scripts/e2e_federation.py # 双实例纳管端到端
 ## 状态与版本
 
 - 状态：`<data_dir>/state.json`（0600，原子写入），统计只在内存里
-- 版本：`nfr version`，构建时 `-ldflags "-X .../version.Version=vX.Y.Z"`
+- 版本：`nfr version`，构建时 `-ldflags "-X .../version.Version=v0.1.0"`
 - 兼容性：`state.json` 带 schema 版本，升级不会丢数据
-
-## 升级
-
-```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo systemctl restart nfr-server nfr-agent
-```
-
-小版本升级直接覆盖二进制即可；保险起见先备份状态：
-`cp /var/lib/nfr/state.json /var/lib/nfr/state.json.bak`。
 
 ## 路线图
 
 - [x] 单端口多协议入口、面板、端口租约、加入码、多机纳管、Prometheus
 - [x] UDP 隧道（每访客会话 + 空闲回收，TCP/UDP 端口空间独立）
-- [x] 带宽限速（每隧道 GCRA 整形，上下行各自封顶）与月流量配额（超额自动停用、跨月恢复）
+- [x] 带宽限速（每隧道令牌桶，上下行各自封顶）与月流量配额（超额自动停用、跨月恢复）
 - [ ] WebSocket / gRPC 长连接的更多测试用例
-- [ ] QUIC 传输
+- [ ] QUIC 传输（代码里已留接口，默认不启用）
 - [ ] STCP 类私密隧道（访客侧也需要 agent）
 - [ ] 多用户面板（注册、按用户隔离隧道与配额）
 

@@ -17,44 +17,61 @@ import (
 
 const throttleChunk = 32 << 10 // slice large writes so the bucket shapes the flow
 
-// bucket paces bytes with a GCRA style schedule: it keeps the earliest time
-// the next byte may leave, and a call waits only when that time is further in
-// the future than one burst of credit. Scheduling on an absolute time (instead
-// of accumulating token debt) keeps the rate exact even when time.Sleep
-// overshoots, which a naive token bucket would refund as free bandwidth.
+// bucket is a byte oriented token bucket.
 type bucket struct {
-	mu    sync.Mutex
-	rate  float64       // bytes per second
-	burst time.Duration // how much traffic may run ahead of the schedule
-	tat   time.Time     // theoretical arrival time of the next byte
+	mu     sync.Mutex
+	rate   float64 // refill speed in bytes per second
+	burst  float64 // capacity: one second of slack
+	tokens float64
+	last   time.Time
 }
 
 func newBucket(rateKB int) *bucket {
-	return &bucket{
-		rate:  float64(rateKB) * 1024,
-		burst: time.Second,
-		tat:   time.Now(),
-	}
+	r := float64(rateKB) * 1024
+	return &bucket{rate: r, burst: r, tokens: r, last: time.Now()}
 }
 
-// take accounts for n bytes, sleeping until the schedule allows them to leave.
+// take accounts for n bytes, sleeping as long as the bucket needs to refill.
 // A nil bucket is an unlimited bucket.
 func (b *bucket) take(n int) {
 	if b == nil || n <= 0 {
 		return
 	}
-	need := time.Duration(float64(n) / b.rate * float64(time.Second))
+	for remain := n; remain > 0; {
+		chunk := remain
+		if float64(chunk) > b.burst {
+			chunk = int(b.burst)
+		}
+		if d := b.reserve(chunk); d > 0 {
+			time.Sleep(d)
+		}
+		remain -= chunk
+	}
+}
+
+// reserve consumes n tokens and returns how long to wait before sending.
+// The wait covers the current shortfall only; the n bytes are charged in
+// full regardless, so a writer that outruns the bucket does not loop hot:
+// its next bytes are already paid for by future refills, and concurrent
+// writers on the same tunnel queue behind the same debt. Charging the
+// shortfall instead (tokens -= need) would compound the debt on every
+// already-overdrawn call and let traffic run faster than the rate.
+func (b *bucket) reserve(n int) time.Duration {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	now := time.Now()
-	if b.tat.Before(now) {
-		b.tat = now
+	b.tokens += now.Sub(b.last).Seconds() * b.rate
+	if b.tokens > b.burst {
+		b.tokens = b.burst
 	}
-	b.tat = b.tat.Add(need)
-	wait := b.tat.Sub(now) - b.burst
-	b.mu.Unlock()
-	if wait > 0 {
-		time.Sleep(wait)
+	b.last = now
+	if b.tokens >= float64(n) {
+		b.tokens -= float64(n)
+		return 0
 	}
+	wait := (float64(n) - b.tokens) / b.rate
+	b.tokens -= float64(n)
+	return time.Duration(wait * float64(time.Second))
 }
 
 // tunnelLimit is one tunnel's shared per direction budget.

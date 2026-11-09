@@ -129,11 +129,11 @@ def start_server(binary, tmp, name):
             'log_level = "debug"\n' % (control, ingress, os.path.join(base, "data"))
         )
     log = open(os.path.join(base, "server.log"), "wb")
-    proc = subprocess.Popen([binary, "server", "-c", cfg], stdout=log, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen([binary, "server", "--foreground", "-c", cfg], stdout=log, stderr=subprocess.STDOUT)
     if not wait_port(control):
         raise RuntimeError("server " + name + " never listened on " + str(control))
     text = open(os.path.join(base, "server.log"), errors="replace").read()
-    m = re.search(r"Password\s+(\S+)", text)
+    m = re.search(r"密码\s+(\S+)", text)
     if not m:
         raise RuntimeError("no first-run password for " + name)
     return proc, control, ingress, m.group(1)

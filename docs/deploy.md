@@ -79,7 +79,7 @@ docker logs nfr          # 首次启动的面板地址与密码在这里
 注意：容器默认以 root 运行，否则绑不了 80/443。想降权就把
 `http_listen` / `https_listen` 换成高位端口，再用端口映射或反代转发。
 
-## 和已有的 nginx 共存
+## 和已有的 nginx / Caddy 共存
 
 只有「域名模式」才需要 80/443；端口模式的 HTTP 隧道和 TCP 隧道都不经过 nginx，
 直接跳过这一节。nginx 已经占着 80/443 时，改成 **nginx 在前、NFR 在后**：
@@ -100,10 +100,8 @@ https_listen   = "off"
 nfr proxy-config app.example.com        # 换成你的域名
 ```
 
-把打印出来的 `server { … }` 粘到该站点的配置里，或者写到
-`/etc/nginx/conf.d/nfr.conf`。片段里已经带好 `Host`、`X-Forwarded-*` 和 WebSocket 的升级头；
-其中 `map $http_upgrade $connection_upgrade` 需要放在 nginx 的 `http {}` 里，
-否则 `nginx -t` 会报未知变量。
+把打印出来的 `server { … }` 粘到该站点的配置里，或者写到 `/etc/nginx/conf.d/nfr.conf`。片段里已经带好 `Host`、`X-Forwarded-*` 和 WebSocket 的升级头；
+其中 `map $http_upgrade $connection_upgrade` 需要放在 nginx 的 `http {}` 里，否则 `nginx -t` 会报未知变量。
 
 **3. 重载并建隧道**
 

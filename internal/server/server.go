@@ -250,7 +250,7 @@ func (s *Server) startControl() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-	s.lg.Debug("control listening", "addr", s.cfg.ControlListen, "pin", transport.FormatPin(s.pin))
+		s.lg.Info("control listening", "addr", ln.Addr().String(), "pin", transport.FormatPin(s.pin))
 		for {
 			c, err := ln.Accept()
 			if err != nil {
@@ -292,10 +292,10 @@ func (s *Server) serveConsoleConn(c net.Conn) {
 	_ = srv.Serve(&oneConnListener{c: c})
 }
 
-// ingressHint explains how to coexist with a web server that already owns
-// the port, which is the usual situation on nginx boxes.
+// ingressHint explains how to coexist with a web server that already owns the
+// port, which is the usual situation on nginx / Caddy boxes.
 func ingressHint(addr string) string {
-	return fmt.Sprintf("if %s is already used by another nginx, keep it running: set http_listen = \"127.0.0.1:8080\" and https_listen = \"off\" in server.toml, then run `nfr proxy-config <domain>` and paste the snippet into that site's nginx config", addr)
+	return fmt.Sprintf("if %s is already used by nginx or Caddy, keep it running: set http_listen = \"127.0.0.1:8080\" and https_listen = \"off\" in server.toml, then run `nfr proxy-config <domain>` and paste the snippet into that site's reverse-proxy config", addr)
 }
 
 func (s *Server) startHTTP() error {
@@ -312,7 +312,7 @@ func (s *Server) startHTTP() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-	s.lg.Debug("http ingress listening", "addr", s.cfg.HTTPListen)
+		s.lg.Info("http ingress listening", "addr", ln.Addr().String())
 		_ = srv.Serve(ln)
 	}()
 	return nil
@@ -333,7 +333,7 @@ func (s *Server) startHTTPS() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-	s.lg.Debug("https ingress listening", "addr", s.cfg.HTTPSListen)
+		s.lg.Info("https ingress listening", "addr", ln.Addr().String())
 		_ = srv.Serve(tlsLn)
 	}()
 	return nil
@@ -427,23 +427,83 @@ func (s *Server) Info() api.Info {
 }
 
 func (s *Server) panelURL() string {
-	_, port, err := net.SplitHostPort(s.cfg.ControlListen)
+	return PanelBaseURL(s.cfg)
+}
+
+// PanelBaseURL builds the console address for a configuration: the configured
+// domain when present, otherwise the first real network address of this
+// machine — "localhost" is useless on a headless public server.
+func PanelBaseURL(cfg config.Server) string {
+	_, port, err := net.SplitHostPort(cfg.ControlListen)
 	if err != nil {
 		port = "8443"
 	}
-	host := transport.BestHost(s.cfg.Domain, bindHost(s.cfg.ControlListen))
+	host := cfg.Domain
+	if host == "" {
+		host = firstSiteHost()
+	}
 	return "https://" + net.JoinHostPort(host, port) + "/_nfr/"
 }
 
-// bindHost extracts the host part of a listen address, resolving wildcards
-// and loopback to "" so BestHost can detect a usable interface address.
-func bindHost(addr string) string {
-	host, _, err := net.SplitHostPort(addr)
+// ConsoleCandidates lists the addresses a user may realistically paste into a
+// browser: the configured domain first, then every interface address, then
+// localhost as the last resort.
+func ConsoleCandidates(cfg config.Server) []string {
+	_, port, err := net.SplitHostPort(cfg.ControlListen)
 	if err != nil {
-		return addr
+		port = "8443"
 	}
-	return host
+	var out []string
+	if cfg.Domain != "" {
+		out = append(out, "https://"+net.JoinHostPort(cfg.Domain, port)+"/_nfr/")
+	}
+	for _, ip := range siteIPs() {
+		out = append(out, "https://"+net.JoinHostPort(ip, port)+"/_nfr/")
+	}
+	if len(out) == 0 {
+		out = append(out, "https://"+net.JoinHostPort("localhost", port)+"/_nfr/")
+	}
+	return out
 }
+
+// firstSiteHost returns the first usable public-facing address, cached.
+func firstSiteHost() string {
+	ips := siteIPs()
+	if len(ips) == 0 {
+		return "localhost"
+	}
+	return ips[0]
+}
+
+// siteIPs enumerates IPv4 addresses of up, non-loopback, non-link-local
+// interfaces, most likely to be reachable from the outside first.
+var siteIPs = sync.OnceValue(func() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ip, _, err := net.ParseCIDR(a.String())
+			if err != nil || ip.To4() == nil {
+				continue
+			}
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				continue
+			}
+			out = append(out, ip.String())
+		}
+	}
+	return out
+})
 
 // Tunnels renders every tunnel with live counters.
 func (s *Server) Tunnels() []api.Tunnel {

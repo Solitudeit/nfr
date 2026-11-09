@@ -8,111 +8,127 @@
   </div>
 </div>
 
-<form id="tform" method="post" action="/_nfr/tunnels/save">
+<form id="tform" method="post" action="/_nfr/tunnels/save" class="tf">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="server" value="{{.Current}}">
   {{if .Edit}}<input type="hidden" name="id" value="{{.Edit.ID}}">{{end}}
   <input type="hidden" name="lease_id" id="lease" value="">
+  <input type="hidden" name="local" id="local" value="">
 
-  <section class="card form">
-    <div class="card-head"><h2>基本信息</h2></div>
-    <div class="form-rows">
-      <div class="form-row">
-        <div class="label">名称</div>
-        <div class="field">
-          <input id="name" name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" placeholder="nas-web" required aria-label="名称">
-          <span class="hint">只用于在面板里识别，不会出现在公网地址中。</span>
+  <section class="card tf-card">
+    <div class="tf-head">隧道配置</div>
+
+    <div class="tf-rows">
+      <div class="tf-row">
+        <label class="tf-label" for="name">隧道名称 <i class="req">*</i></label>
+        <div class="tf-field">
+          <input id="name" name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" placeholder="请输入隧道名称" required autocomplete="off">
         </div>
       </div>
-      <div class="form-row">
-        <div class="label">接入节点</div>
-        <div class="field">
-          {{if .Nodes}}
-          <select id="node_id" name="node_id" required aria-label="接入节点">
-            {{$edit := .Edit}}{{range .Nodes}}
-            <option value="{{.ID}}" {{if $edit}}{{if eq $edit.NodeID .ID}}selected{{end}}{{end}}>{{.Name}}{{if .Online}} · 在线{{else}} · 离线{{end}}</option>
+
+      <div class="tf-row">
+        <label class="tf-label">接入节点 <i class="req">*</i></label>
+        <div class="tf-field">
+          {{if .SelNode}}
+          <input type="hidden" name="node_id" value="{{.SelNode.ID}}">
+          <div class="np-locked">
+            <span class="dot {{if .SelNode.Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
+            <span class="np-name">{{.SelNode.Name}}</span>
+            <span class="np-meta">{{if .SelNode.OS}}{{.SelNode.OS}} / {{.SelNode.Arch}} · {{end}}{{if .SelNode.Online}}在线{{else}}离线{{end}}</span>
+          </div>
+          <span class="tf-hint">{{if .Edit}}这台机器随隧道带入，不支持在此更换；如需迁移，删除后在目标机器上重建。{{else}}已从节点页带入，无需再选；如需换一台，回到 <a href="/_nfr/nodes">节点</a> 页重新进入。{{end}}</span>
+          {{else if .Nodes}}
+          <div class="node-pick" id="nodepick" role="radiogroup" aria-label="选择接入节点">
+            {{range .Nodes}}
+            <button type="button" class="np-card{{if not .Online}} np-off{{end}}"
+                    role="radio" aria-checked="false"
+                    data-id="{{.ID}}">
+              <span class="np-top">
+                <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
+                <span class="np-name">{{.Name}}</span>
+              </span>
+              <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道</span>
+            </button>
             {{end}}
-          </select>
-          <span class="hint">隧道由这台机器的 agent 发起连接，指向它所在的局域网。</span>
+            <input type="hidden" name="node_id" id="node_id" value="">
+          </div>
+          <span class="tf-hint">点选一台内网机器作为出口；离线节点也能选，机器上线后隧道自动生效。也可以到 <a href="/_nfr/nodes">节点</a> 页从某台机器直接新建。</span>
           {{else}}
-          <div class="flash warn" role="alert">这台实例上还没有接入节点。先到 <a href="/_nfr/nodes">节点</a> 页生成加入码，在内网机器上运行 <code>nfr join</code>。</div>
+          <div class="flash warn" role="alert">还没有接入节点。先到 <a href="/_nfr/nodes">节点</a> 页生成加入码，在内网机器上运行 <code>nfr join</code>。</div>
           {{end}}
         </div>
       </div>
-    </div>
-  </section>
 
-  <section class="card form" style="margin-top:16px">
-    <div class="card-head"><h2>映射</h2></div>
-    <div class="form-rows">
-      <div class="form-row">
-        <div class="label">类型</div>
-        <div class="field">
-          <div class="seg">
-            <label>
-              <input type="radio" name="type" value="tcp" {{if .Edit}}{{if eq .Edit.Type "tcp"}}checked{{end}}{{else}}checked{{end}}>
-              <span class="t">TCP 端口</span>
-              <span class="d">一个公网端口，原样转发任意 TCP 协议</span>
-            </label>
-            <label>
-              <input type="radio" name="type" value="udp" {{if .Edit}}{{if eq .Edit.Type "udp"}}checked{{end}}{{end}}>
-              <span class="t">UDP 端口</span>
-              <span class="d">DNS、WireGuard、游戏、Syslog 等非 HTTP 协议</span>
-            </label>
-            <label>
-              <input type="radio" name="type" value="http" {{if .Edit}}{{if eq .Edit.Type "http"}}checked{{end}}{{end}}>
-              <span class="t">HTTP 站点</span>
-              <span class="d">用公网端口直连，或复用 80 / 443 按域名分流</span>
-            </label>
+      <div class="tf-row">
+        <label class="tf-label" for="type">协议类型 <i class="req">*</i></label>
+        <div class="tf-field">
+          <select id="type">
+            <option value="tcp" data-name="tcp" {{if .Edit}}{{if eq .Edit.Type "tcp"}}selected{{end}}{{else}}selected{{end}}>TCP</option>
+            <option value="udp" data-name="udp" {{if .Edit}}{{if eq .Edit.Type "udp"}}selected{{end}}{{end}}>UDP</option>
+            <option value="http" data-name="http" {{if .Edit}}{{if eq .Edit.Type "http"}}selected{{end}}{{end}}>HTTP</option>
+          </select>
+          <input type="hidden" name="type" id="type_field" value="{{if .Edit}}{{.Edit.Type}}{{else}}tcp{{end}}">
+          <span class="tf-hint" id="typehint">公网端口原样转发任意 TCP 协议，适合 SSH、数据库、远程桌面。</span>
+        </div>
+      </div>
+
+      <div class="tf-row">
+        <label class="tf-label" for="local_host">本地地址 <i class="req">*</i></label>
+        <div class="tf-field">
+          <div class="combo">
+            <input id="local_host" name="local_host" value="{{if .Edit}}{{.LocalHost}}{{end}}" placeholder="请输入或选择本地地址" autocomplete="off" spellcheck="false" required>
+          </div>
+          <span class="tf-hint">相对接入节点而言，常用：<code>127.0.0.1</code>（本机）或局域网内其他机器的 IP。</span>
+        </div>
+      </div>
+
+      <div class="tf-row">
+        <label class="tf-label" for="local_port">本地端口 <i class="req">*</i></label>
+        <div class="tf-field">
+          <div class="combo">
+            <input id="local_port" name="local_port" value="{{if .Edit}}{{.LocalPort}}{{end}}" placeholder="请输入或选择本地端口" inputmode="numeric" autocomplete="off" required>
           </div>
         </div>
       </div>
-      <div class="form-row">
-        <div class="label">内网地址</div>
-        <div class="field">
-          <input id="local" name="local" value="{{if .Edit}}{{.Edit.Local}}{{end}}" placeholder="127.0.0.1:8080" required aria-label="内网地址">
-          <span class="hint">相对接入节点而言的地址，例如 <code>127.0.0.1:8080</code> 或 <code>192.168.1.10:22</code>。</span>
-        </div>
-      </div>
-      <div class="form-row" id="portrow">
-        <div class="label">公网端口 <span class="muted">可选</span></div>
-        <div class="field">
-          <div class="field-row">
-            <input id="port" name="remote_port" type="number" value="{{if .Edit}}{{if .Edit.RemotePort}}{{.Edit.RemotePort}}{{end}}{{end}}" placeholder="留空自动分配" aria-label="公网端口">
-            <button type="button" class="btn" onclick="grab()">获取端口</button>
+
+      <div class="tf-row">
+        <label class="tf-label" for="port">远程端口 <i class="req">*</i></label>
+        <div class="tf-field">
+          <div class="stepper" data-lo="{{index .PortRange 0}}" data-hi="{{index .PortRange 1}}">
+            <button type="button" class="step" data-step="-1" aria-label="端口减一">−</button>
+            <input id="port" name="remote_port" type="number" inputmode="numeric" min="0" value="{{if .Edit}}{{if .Edit.RemotePort}}{{.Edit.RemotePort}}{{end}}{{end}}" placeholder="请输入远程端口">
+            <button type="button" class="step" data-step="1" aria-label="端口加一">＋</button>
           </div>
-          <span class="hint" id="leasehint">可分配范围 {{index .PortRange 0}}–{{index .PortRange 1}}。留空则在保存时自动分配一个空闲端口。</span>
+          <button type="button" class="btn grab-btn" onclick="grab()">获取空闲端口</button>
+          <span class="tf-hint" id="leasehint">可分配范围 {{index .PortRange 0}}–{{index .PortRange 1}}；留空则在保存时自动分配。</span>
         </div>
       </div>
-      <div class="form-row" id="hostrow">
-        <div class="label">域名 <span class="muted">可选</span></div>
-        <div class="field">
-          <textarea id="hosts" name="hosts" placeholder="留空则只通过上面的公网端口访问" aria-label="域名">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
-          <span class="hint">填了域名就按 Host / SNI 分流；不填也能用，访客直接访问 <code>http://服务器IP:端口</code>。</span>
+
+      <div class="tf-row" id="hostrow" hidden>
+        <label class="tf-label" for="hosts">绑定域名</label>
+        <div class="tf-field">
+          <textarea id="hosts" name="hosts" rows="2" placeholder="多个用逗号分隔，如 nas.example.com"></textarea>
+          <span class="tf-hint">填了就按 Host / SNI 分流走 80 / 443；不填则通过上面的公网端口访问。</span>
         </div>
       </div>
     </div>
-  </section>
 
-  <section class="card form" style="margin-top:16px">
-    <div class="card-head"><h2>限速与配额</h2><span class="card-sub">两项都留空表示不限</span></div>
-    <div class="form-rows">
-      <div class="form-row">
-        <div class="label">带宽限速 <span class="muted">可选</span></div>
-        <div class="field">
-          <div class="field-row">
-            <input type="number" name="bandwidth_kb" min="0" step="1" value="{{if .Edit}}{{if .Edit.BandwidthKB}}{{.Edit.BandwidthKB}}{{end}}{{end}}" placeholder="不限" aria-label="带宽限速 KB/s">
-          </div>
-          <span class="hint">单位 KB/s，上下行各自限到这个速度，整条隧道所有连接共享。512 KB/s 约等于 4 Mbps。</span>
+    <div class="tf-div"></div>
+
+    <div class="tf-sub">可选：限速与配额</div>
+    <div class="tf-rows">
+      <div class="tf-row">
+        <label class="tf-label" for="bw">带宽限速</label>
+        <div class="tf-field">
+          <div class="tf-inline"><input id="bw" name="bandwidth_kb" type="number" min="0" step="1" value="{{if .Edit}}{{if .Edit.BandwidthKB}}{{.Edit.BandwidthKB}}{{end}}{{end}}" placeholder="不限"><span class="tf-unit">KB/s</span></div>
+          <span class="tf-hint">上下行各自限到这个速度，整条隧道共享；512 KB/s ≈ 4 Mbps。</span>
         </div>
       </div>
-      <div class="form-row">
-        <div class="label">月流量配额 <span class="muted">可选</span></div>
-        <div class="field">
-          <div class="field-row">
-            <input type="number" name="quota_mb" min="0" step="1" value="{{if .Edit}}{{if .Edit.QuotaMB}}{{.Edit.QuotaMB}}{{end}}{{end}}" placeholder="不限" aria-label="月流量配额 MB">
-          </div>
-          <span class="hint">单位 MB，按自然月统计、月初清零。超出后隧道自动停用，下月自动恢复。</span>
+      <div class="tf-row">
+        <label class="tf-label" for="quota">月流量配额</label>
+        <div class="tf-field">
+          <div class="tf-inline"><input id="quota" name="quota_mb" type="number" min="0" step="1" value="{{if .Edit}}{{if .Edit.QuotaMB}}{{.Edit.QuotaMB}}{{end}}{{end}}" placeholder="不限"><span class="tf-unit">MB</span></div>
+          <span class="tf-hint">按自然月统计、月初清零；超出后隧道自动停用，下月自动恢复。</span>
         </div>
       </div>
     </div>
@@ -133,23 +149,147 @@
 <script>
 (function () {
   var form = document.getElementById('tform');
-  function kind() {
-    var r = form.querySelector('input[name="type"]:checked');
-    return r ? r.value : 'tcp';
-  }
-  function sync() {
-    var http = kind() === 'http';
-    document.getElementById('hostrow').style.display = http ? '' : 'none';
-  }
-  form.querySelectorAll('input[name="type"]').forEach(function (r) {
-    r.addEventListener('change', sync);
-  });
-  sync();
+  var typeSel = document.getElementById('type');
+  var typeField = document.getElementById('type_field');
+  var typeHint = document.getElementById('typehint');
+  var hints = {
+    tcp: '公网端口原样转发任意 TCP 协议，适合 SSH、数据库、远程桌面。',
+    udp: '公网端口转发 UDP 数据报，适合 DNS、WireGuard、游戏联机。',
+    http: '按 HTTP 转发并自动补 X-Forwarded-*，支持 WebSocket；可绑定域名分流。'
+  };
 
+  function kind() { return typeSel.value; }
+
+  function sync() {
+    var k = kind();
+    typeField.value = k;
+    typeHint.textContent = hints[k];
+    document.getElementById('hostrow').hidden = k !== 'http';
+  }
+  typeSel.addEventListener('change', sync);
+
+  // ---- 接入节点：小卡片点选 ----------------------------------------------
+  var pick = document.getElementById('nodepick');
+  var nodeInput = document.getElementById('node_id');
+  if (pick && nodeInput) {
+    var cards = Array.prototype.slice.call(pick.querySelectorAll('.np-card'));
+
+    function selectNode(card) {
+      cards.forEach(function (c) {
+        var on = c === card;
+        c.classList.toggle('sel', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+      nodeInput.value = card ? card.dataset.id : '';
+    }
+
+    cards.forEach(function (c) {
+      c.addEventListener('click', function () { selectNode(c); });
+      c.addEventListener('keydown', function (ev) {
+        var i = cards.indexOf(c);
+        if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') {
+          ev.preventDefault(); cards[(i + 1) % cards.length].focus();
+        }
+        if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') {
+          ev.preventDefault(); cards[(i - 1 + cards.length) % cards.length].focus();
+        }
+        if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); selectNode(c); }
+      });
+    });
+
+    // 新建时默认选第一台（优先在线的）；编辑回填已由模板标好
+    if (!nodeInput.value && cards.length) {
+      var first = cards.filter(function (c) { return !c.classList.contains('np-off'); })[0] || cards[0];
+      selectNode(first);
+    }
+  }
+
+  // ---- combobox：可输入 + 从常用值中选择 --------------------------------
+  var SUGGEST = {
+    local_host: ['127.0.0.1', 'localhost', '192.168.1.1', '192.168.1.4', '192.168.31.2', '10.0.0.2'],
+    local_port: ['80', '443', '8080', '8081', '3000', '5000', '22', '3389', '5900', '3306', '5432', '6379', '9090', '8096', '53']
+  };
+
+  function combobox(input) {
+    var wrap = input.parentNode; // .combo
+    var panel = document.createElement('div');
+    panel.className = 'combo-list';
+    panel.hidden = true;
+    wrap.appendChild(panel);
+    var items = [];
+
+    function render(q) {
+      var src = SUGGEST[input.id] || [];
+      q = (q || '').toLowerCase();
+      items = src.filter(function (s) { return !q || s.toLowerCase().indexOf(q) >= 0; });
+      if (!items.length) { panel.hidden = true; return; }
+      panel.innerHTML = '';
+      items.forEach(function (s) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = s;
+        b.addEventListener('pointerdown', function (ev) {
+          ev.preventDefault(); // 让 input 不失焦，避免先收起面板
+          input.value = s;
+          close();
+        });
+        panel.appendChild(b);
+      });
+      panel.hidden = false;
+    }
+    function close() { panel.hidden = true; }
+
+    input.addEventListener('focus', function () { render(input.value); });
+    input.addEventListener('input', function () { render(input.value); });
+    input.addEventListener('blur', function () { setTimeout(close, 120); });
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') { close(); return; }
+      if (ev.key === 'ArrowDown' && !panel.hidden) {
+        ev.preventDefault();
+        var first = panel.querySelector('button');
+        if (first) first.focus();
+      }
+    });
+    panel.addEventListener('keydown', function (ev) {
+      var btns = Array.prototype.slice.call(panel.querySelectorAll('button'));
+      var i = btns.indexOf(document.activeElement);
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); (btns[i + 1] || btns[0]).focus(); }
+      if (ev.key === 'ArrowUp') { ev.preventDefault(); (btns[i - 1] || btns[btns.length - 1]).focus(); }
+      if (ev.key === 'Escape') { input.focus(); close(); }
+    });
+  }
+  combobox(document.getElementById('local_host'));
+  combobox(document.getElementById('local_port'));
+
+  // ---- 端口步进器 --------------------------------------------------------
+  var stepper = document.querySelector('.stepper');
+  var port = document.getElementById('port');
+  stepper.querySelectorAll('.step').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var lo = parseInt(stepper.dataset.lo, 10) || 20000;
+      var hi = parseInt(stepper.dataset.hi, 10) || 29999;
+      var v = parseInt(port.value, 10);
+      if (isNaN(v)) { v = lo; if (b.dataset.step === '-1') v = hi; }
+      else { v += parseInt(b.dataset.step, 10); }
+      if (v < 0) v = 0;
+      if (v > 65535) v = 65535;
+      port.value = v;
+    });
+  });
+
+  // ---- 提交前把 地址:端口 合成 local ------------------------------------
+  form.addEventListener('submit', function () {
+    var h = document.getElementById('local_host').value.trim() || '127.0.0.1';
+    var p = document.getElementById('local_port').value.trim();
+    document.getElementById('local').value = p ? h + ':' + p : h;
+  });
+
+  // ---- 获取空闲端口 ------------------------------------------------------
   window.grab = async function () {
     var body = new FormData(form);
     var server = body.get('server') || 'local';
     var hint = document.getElementById('leasehint');
+    hint.textContent = '正在申请…';
     try {
       var res = await fetch('/_nfr/api/allocate?server=' + encodeURIComponent(server), {
         method: 'POST',
@@ -158,12 +298,14 @@
       });
       var j = await res.json();
       if (!res.ok) { hint.textContent = j.error || '暂时拿不到端口，请重试。'; return; }
-      document.getElementById('port').value = j.port;
+      port.value = j.port;
       document.getElementById('lease').value = j.lease_id;
       hint.textContent = '已保留到 ' + new Date(j.expires_at).toLocaleTimeString() + '，保存后即为该隧道的固定端口。';
     } catch (e) {
       hint.textContent = '请求失败：' + e;
     }
   };
+
+  sync();
 })();
 </script>
