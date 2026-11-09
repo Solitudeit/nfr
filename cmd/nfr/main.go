@@ -136,6 +136,9 @@ func cmdServer(args []string) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if generated == "" {
+		fmt.Printf("  running in the foreground; press Ctrl-C to stop.\n  Install as a service (survives reboot / runs in background):\n    curl -fsSL https://github.com/Solitudeit/nfr/raw/main/deploy/systemd/nfr-server.service -o /etc/systemd/system/nfr-server.service\n    sudo systemctl enable --now nfr-server\n")
+	}
 	if err := srv.Run(ctx); err != nil {
 		fatal("run: %v", err)
 	}
@@ -259,7 +262,9 @@ func cmdJoin(args []string) {
 	}
 
 	lg := log.New(cfg.LogLevel, cfg.LogFile)
-	fmt.Print("\n  Keeping it connected; press Ctrl-C to stop.\n\n")
+	fmt.Print("\n  Keeping it connected in the foreground; press Ctrl-C to stop.\n")
+	fmt.Printf("  Logs go to %s when log_file is set in the config; otherwise stderr.\n", *cfgPath)
+	fmt.Print("  Install as a service (survives reboot / runs in background):\n    curl -fsSL https://github.com/Solitudeit/nfr/raw/main/deploy/systemd/nfr-agent.service -o /etc/systemd/system/nfr-agent.service\n    sudo systemctl enable --now nfr-agent\n\n")
 	runAgents(cfg, lg)
 }
 
