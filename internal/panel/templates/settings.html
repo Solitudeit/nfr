@@ -6,7 +6,7 @@
 </div>
 
 {{if .NewKey}}
-<section class="card" data-newkey="{{.NewKey}}" style="margin-bottom:16px">
+<section class="card" data-newkey="{{.NewKey}}" style="margin-bottom:20px">
   <div class="hstack">
     <span class="chip on">新密钥</span>
     <span class="card-sub">离开本页后将无法再次查看，请现在复制</span>
@@ -18,9 +18,9 @@
 </section>
 {{end}}
 
-<div class="grid2">
+<section class="set-grp">
+  <h3 class="set-title">实例</h3>
   <form class="card form" method="post" action="/nfr/settings">
-    <div class="card-head"><h2>常规</h2><span class="card-sub">保存后立即生效，无需重启</span></div>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="form-rows">
       <div class="form-row">
@@ -42,6 +42,7 @@
         <div class="field">
           <div class="field-row">
             <input name="port_low" type="number" value="{{.PortLow}}" aria-label="起始端口">
+            <span class="range-dash">–</span>
             <input name="port_high" type="number" value="{{.PortHigh}}" aria-label="结束端口">
           </div>
           <span class="hint">TCP 隧道只会分配这个区间内的端口，注意不要和系统服务冲突。</span>
@@ -54,121 +55,139 @@
           <span class="hint">申请免费证书时使用。证书在 <code>server.toml</code> 里配置。</span>
         </div>
       </div>
-      <div class="form-row">
-        <div class="label">开放 REST API</div>
-        <div class="field">
+    </div>
+    <div class="actions"><button class="btn primary" type="submit">保存设置</button></div>
+  </form>
+</section>
+
+<section class="set-grp">
+  <h3 class="set-title">REST API</h3>
+  <form class="card" method="post" action="/nfr/settings" id="api">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <div class="ctl-rows">
+      <label class="ctl-row">
+        <span class="lbl">开放 REST API
+          <span class="row-sub">开启后别的面板才能用 API 密钥管理这台机器</span>
+        </span>
+        <span class="ctl-col">
           <label class="switch">
             <input type="checkbox" name="api_enabled" value="1" {{if .APIEnabled}}checked{{end}}>
             <span class="track" aria-hidden="true"></span>
-            <span class="txt">{{if .APIEnabled}}已开启{{else}}已关闭{{end}}</span>
           </label>
-          <span class="hint">开启后别的面板才能用 API 密钥管理这台机器。默认关闭。</span>
-        </div>
-      </div>
+        </span>
+      </label>
     </div>
-    <div class="actions" style="margin-top:16px"><button class="btn primary" type="submit">保存设置</button></div>
+    <div class="actions set-foot"><button class="btn sm" type="submit">应用</button></div>
   </form>
 
-  <div class="stack">
-    <section class="card">
-      <div class="card-head"><h2>证书</h2>
-        {{if eq .CertMode "ca"}}<span class="chip on">公共 CA</span>{{else}}<span class="chip">自签 · TOFU</span>{{end}}
-      </div>
-      <div class="note">
-        来源：<b>{{.CertSource}}</b>{{if .CertExpiry}} · 到期 {{.CertExpiry}}{{end}}
-      </div>
-      {{if eq .CertMode "ca"}}
-      <p class="note" style="margin-top:10px">由公共 CA 签发，其他节点使用系统根证书校验，不需要手动确认指纹。</p>
-      {{else}}
-      <div class="copyfield" style="margin-top:12px">
-        <code>{{.Pin}}</code>
-        <button type="button" class="btn sm" data-copy="{{.Pin}}">复制</button>
-      </div>
-      <p class="note" style="margin-top:10px">agent 与纳管面板首次连接时应当核对这个指纹。</p>
-      {{end}}
-    </section>
-
-    <form class="card form" method="post" action="/nfr/settings">
-      <div class="card-head"><h2>面板密码</h2></div>
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="action" value="password">
-      <div class="field">
-        <label for="old">当前密码</label>
-        <input id="old" name="old_password" type="password" autocomplete="current-password" required>
-      </div>
-      <div class="field" style="margin-top:12px">
-        <label for="new">新密码</label>
-        <input id="new" name="new_password" type="password" autocomplete="new-password" required>
-      </div>
-      <div class="actions" style="margin-top:16px"><button class="btn" type="submit">修改密码</button></div>
-    </form>
-  </div>
-</div>
-
-<section class="card form" id="api" style="margin-top:16px">
-  <div class="card-head">
-    <h2>API 密钥</h2>
-    <span class="card-sub">给别的面板或脚本使用；只保存哈希，明文仅显示一次</span>
-  </div>
-
-  <form class="hstack" method="post" action="/nfr/settings">
+  <form class="card form" method="post" action="/nfr/settings">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input type="hidden" name="action" value="key">
-    <div class="field" style="flex:1;min-width:180px">
-      <label for="label">用途备注</label>
-      <input id="label" name="label" placeholder="香港面板">
+    <div class="key-create">
+      <div class="field">
+        <label for="label">用途备注</label>
+        <input id="label" name="label" placeholder="香港面板">
+      </div>
+      <div class="field key-scope">
+        <label for="scope">权限</label>
+        <select id="scope" name="scope">
+          <option value="read">read · 只读</option>
+          <option value="write">write · 读写</option>
+          <option value="admin">admin · 全部</option>
+        </select>
+      </div>
+      <button class="btn primary" type="submit">创建密钥</button>
     </div>
-    <div class="field" style="width:150px">
-      <label for="scope">权限</label>
-      <select id="scope" name="scope">
-        <option value="read">read · 只读</option>
-        <option value="write">write · 读写</option>
-        <option value="admin">admin · 全部</option>
-      </select>
-    </div>
-    <button class="btn primary" type="submit" style="align-self:flex-end">{{template "i-plus"}}创建密钥</button>
+    <p class="note">只保存哈希，明文仅显示一次；调用时带 <code>Authorization: Bearer nfr_…</code>。</p>
   </form>
 
   {{if .Keys}}
-  <div class="tbl-wrap" style="margin-top:16px">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>备注</th>
-          <th>权限</th>
-          <th>密钥 ID</th>
-          <th>创建于</th>
-          <th>最近使用</th>
-          <th class="shrink"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Keys}}
-        <tr>
-          <td class="name">{{.Label}}</td>
-          <td><span class="chip key">{{.Scope}}</span></td>
-          <td class="addr">{{.ID}}</td>
-          <td class="item-num">{{short .CreatedAt}}</td>
-          <td class="item-num">{{ago .LastUsed}}</td>
-          <td class="shrink">
-            <form method="post" action="/nfr/settings" data-confirm="吊销密钥「{{.Label}}」？使用它的面板会立刻失去访问权。">
-              <input type="hidden" name="csrf" value="{{$.CSRF}}">
-              <input type="hidden" name="action" value="revoke">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button class="btn danger sm" type="submit">吊销</button>
-            </form>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+  <div class="card pad0 tbl-card">
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>备注</th>
+            <th>权限</th>
+            <th>密钥 ID</th>
+            <th>创建于</th>
+            <th>最近使用</th>
+            <th class="shrink"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Keys}}
+          <tr>
+            <td class="name">{{.Label}}</td>
+            <td><span class="chip key">{{.Scope}}</span></td>
+            <td class="addr">{{.ID}}</td>
+            <td class="item-num">{{short .CreatedAt}}</td>
+            <td class="item-num">{{ago .LastUsed}}</td>
+            <td class="shrink">
+              <form method="post" action="/nfr/settings" data-confirm="吊销密钥「{{.Label}}」？使用它的面板会立刻失去访问权。">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="action" value="revoke">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <button class="btn danger sm" type="submit">吊销</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   </div>
   {{else}}
-  <p class="note" style="margin-top:16px">还没有密钥。需要从另一台 NFR 面板管理这台机器，或者写脚本调用 REST API 时再创建。</p>
+  <p class="note set-aside">还没有密钥。需要从另一台 NFR 面板管理这台机器，或者写脚本调用 REST API 时再创建。</p>
   {{end}}
+</section>
 
-  <p class="note" style="margin-top:16px">
-    密钥只在开放 REST API 后生效——上面的「开放 REST API」开关控制这一点。
-    调用时带上 <code>Authorization: Bearer nfr_…</code>。
-  </p>
+<section class="set-grp">
+  <h3 class="set-title">安全</h3>
+  <form class="card form" method="post" action="/nfr/settings">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="action" value="password">
+    <div class="field">
+      <label for="old">当前密码</label>
+      <input id="old" name="old_password" type="password" autocomplete="current-password" required>
+    </div>
+    <div class="field">
+      <label for="new">新密码</label>
+      <input id="new" name="new_password" type="password" autocomplete="new-password" required>
+      <span class="hint">至少 8 个字符。</span>
+    </div>
+    <div class="actions"><button class="btn" type="submit">修改密码</button></div>
+  </form>
+</section>
+
+<section class="set-grp">
+  <h3 class="set-title">证书</h3>
+  <section class="card">
+    <div class="ctl-rows">
+      <div class="ctl-row">
+        <span class="lbl">来源
+          <span class="row-sub">{{.CertSource}}{{if .CertExpiry}} · 到期 {{.CertExpiry}}{{end}}</span>
+        </span>
+        <span class="ctl-col">
+          {{if eq .CertMode "ca"}}<span class="chip on">公共 CA</span>{{else}}<span class="chip">自签 · TOFU</span>{{end}}
+        </span>
+      </div>
+      {{if ne .CertMode "ca"}}
+      <div class="ctl-row">
+        <span class="lbl">指纹
+          <span class="row-sub">agent 与纳管面板首次连接时应当核对</span>
+        </span>
+        <span class="ctl-col">
+          <span class="copyfield pin-copy">
+            <code>{{.Pin}}</code>
+            <button type="button" class="btn sm" data-copy="{{.Pin}}">复制</button>
+          </span>
+        </span>
+      </div>
+      {{end}}
+    </div>
+    {{if eq .CertMode "ca"}}
+    <p class="note">由公共 CA 签发，其他节点使用系统根证书校验，不需要手动确认指纹。</p>
+    {{end}}
+  </section>
 </section>
