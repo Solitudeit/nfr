@@ -149,7 +149,7 @@ func daemonize(cfgPath string, cfg config.Server) {
 
 	cmd := exec.Command(exe, "server", "-c", cfgPath, "--daemon-child")
 	cmd.Stdout, cmd.Stderr = lf, lf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = daemonSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		fatal("start background process: %v", err)
 	}
