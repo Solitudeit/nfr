@@ -653,6 +653,12 @@ label.ctl-row { cursor: pointer; }
   text-align: center;
 }
 
+/* ── awaiting tunnel card: join command shown before any device joins ── */
+.await-box { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.await-hint { font-size: 13px; color: var(--text-2); margin-bottom: 6px; }
+.await-meta { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
+.await-meta .join-code { margin: 0; font-size: 18px; padding: 8px 12px; }
+
 /* ── steps ─────────────────────────────────────────────────────────── */
 
 .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; display: flex; flex-direction: column; gap: 12px; }
