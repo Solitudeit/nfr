@@ -13,7 +13,11 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/etc/nfr
+# Created and kept writable by systemd. Listing /etc/nfr in ReadWritePaths
+# instead would fail the unit (226/NAMESPACE) when the directory does not
+# exist yet, which is the case on a machine that has not run `nfrc join`.
+ConfigurationDirectory=nfr
+ConfigurationDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target

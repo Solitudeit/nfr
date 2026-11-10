@@ -22,9 +22,11 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
 `nfr-server.service` 到 `/etc/systemd/system` 并 `daemon-reload`；`enable --now`
 后把 `systemctl status` 打出来。首次启动会自己写 `/etc/nfr/server.toml`、
 生成自签证书和数据目录，并把面板地址、一次性密码、证书指纹打进日志
-（`sudo journalctl -u nfr-server -n 15` 可再看）。unit 已放行
-`CAP_NET_BIND_SERVICE` 与 `/etc/nfr`、`/var/lib/nfr` 的写权限，所以
-`ProtectSystem=strict` 下也能写自己的配置。
+（`sudo journalctl -u nfr-server -n 15` 可再看）。unit 用
+`StateDirectory=nfr` / `ConfigurationDirectory=nfr` 让 systemd 先建好
+`/var/lib/nfr` 与 `/etc/nfr` 并保持可写，所以全新机器上首次启动就能写出配置。
+别把它们改成 `ReadWritePaths=`——目录不存在时那个选项会让 unit 以
+`status=226/NAMESPACE` 直接失败。
 
 不想用 systemd，就只装二进制、手动前台起一次（打印完转后台，`nfrs stop` 停）：
 
