@@ -4,3 +4,4 @@
 *.log
 /nfr
 .DS_Store
+.worktrees/
