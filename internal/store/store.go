@@ -388,3 +388,28 @@ func (st *State) PruneJoins(now time.Time) {
 	}
 	st.Joins = kept
 }
+
+// FindJoinCodeByTunnel finds the first unused, unexpired join code bound to a
+// tunnel.
+func FindJoinCodeByTunnel(st *State, tunnelID string) (*auth.JoinCode, bool) {
+	now := time.Now()
+	for i := range st.Joins {
+		j := &st.Joins[i]
+		if j.TunnelID == tunnelID && j.UsedAt == nil && j.Valid(now) == nil {
+			return j, true
+		}
+	}
+	return nil, false
+}
+
+// DeleteJoinsByTunnel removes every join code bound to a tunnel.
+func DeleteJoinsByTunnel(st *State, tunnelID string) {
+	kept := st.Joins[:0]
+	for _, j := range st.Joins {
+		if j.TunnelID == tunnelID {
+			continue
+		}
+		kept = append(kept, j)
+	}
+	st.Joins = kept
+}
