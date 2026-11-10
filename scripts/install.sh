@@ -104,11 +104,14 @@ install_systemd() {
     return 0
   fi
   # A server started by hand (bare `nfrs`) holds the control port; systemd
-  # cannot bind it. Stop the old one first, the state survives in /var/lib/nfr.
-  pidfile=/var/lib/nfr/nfr.pid
-  if [ -f "$pidfile" ]; then
-    echo "stopping the server that was started by hand"
-    "$prefix/nfrs" stop -c /etc/nfr/server.toml || true
+  # cannot bind it. Stop it first — state survives, only the process goes.
+  # `stop` reads data_dir from the config, so this also works when the data
+  # directory was moved; a quiet "nothing running" answer is expected.
+  if out=$("$prefix/nfrs" stop -c /etc/nfr/server.toml 2>&1); then
+    case "$out" in
+      *没有正在运行*) ;;
+      *) echo "$out" ;;
+    esac
   fi
   mkdir -p /etc/nfr
   unit=/etc/systemd/system/nfr-server.service
