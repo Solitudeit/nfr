@@ -95,10 +95,12 @@ func NormalizeJoinCode(code string) string {
 	return b.String()
 }
 
-// JoinCode is one pending invitation.
+// JoinCode is one pending invitation. TunnelID, when set, binds the code to
+// a specific awaiting tunnel redeemed at join time.
 type JoinCode struct {
 	Code      string     `json:"code"`
 	NodeName  string     `json:"node_name"`
+	TunnelID  string     `json:"tunnel_id,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt time.Time  `json:"expires_at"`
 	UsedAt    *time.Time `json:"used_at,omitempty"`
