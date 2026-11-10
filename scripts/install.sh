@@ -11,12 +11,30 @@
 #   NFR_VERSION  pin a release (e.g. v0.9.0), default: latest
 #   NFR_PREFIX   install directory, default: /usr/local/bin
 #   NFR_ONLY     "server" or "client" to install just one of them
+#   NFR_SYSTEMD  set to 1 to also install nfr-server.service and start it
+#                (server only, Linux with systemd, must run as root)
+#
+# Pass --systemd as the first argument to do the same without env vars:
+#   curl -fsSL .../install.sh | sudo sh -s -- --systemd
 set -eu
 
 repo="Solitudeit/nfr"
 prefix="${NFR_PREFIX:-/usr/local/bin}"
 version="${NFR_VERSION:-latest}"
 only="${NFR_ONLY:-}"
+systemd="${NFR_SYSTEMD:-}"
+for arg in "$@"; do
+  case "$arg" in
+    --systemd) systemd=1 ;;
+    --server) only=server ;;
+    --client) only=client ;;
+    -h|--help)
+      sed -n '2,20p' "$0" 2>/dev/null || echo "see comments at the top of install.sh"
+      exit 0
+      ;;
+    *) echo "unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
@@ -76,6 +94,38 @@ case "$only" in
     ;;
 esac
 
+install_systemd() {
+  if [ "$(id -u)" != 0 ]; then
+    echo "NFR_SYSTEMD=1 needs root (try: curl ... | sudo NFR_SYSTEMD=1 sh)" >&2
+    exit 1
+  fi
+  if [ ! -d /run/systemd/system ]; then
+    echo "systemd not detected; binaries are installed, start them yourself" >&2
+    return 0
+  fi
+  mkdir -p /etc/nfr
+  unit=/etc/systemd/system/nfr-server.service
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  fetch "$base/nfr-server.service" "$tmp"
+  mv "$tmp" "$unit"
+  trap - EXIT
+  echo "installed $unit"
+  systemctl daemon-reload
+  systemctl enable --now nfr-server
+  # First start writes the config and prints the panel password to the journal.
+  sleep 2
+  echo
+  systemctl status nfr-server --no-pager --lines=12 || true
+}
+
 # Report what landed. A partial install (NFR_ONLY) skips the other binary.
 if command -v "$prefix/nfrs" >/dev/null 2>&1; then "$prefix/nfrs" version; fi
 if command -v "$prefix/nfrc" >/dev/null 2>&1; then "$prefix/nfrc" version; fi
+
+if [ -n "$systemd" ]; then
+  case "$only" in
+    client) echo "NFR_SYSTEMD ignored with NFR_ONLY=client" >&2 ;;
+    *) install_systemd ;;
+  esac
+fi

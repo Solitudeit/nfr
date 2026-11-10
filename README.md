@@ -75,15 +75,18 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 
 ### 1. 公网服务器
 
-一条命令装好并起起来：
+公网服务器上，一条命令从裸机到能用的面板：
 
 ```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh \
-  && sudo nfrs -c /etc/nfr/server.toml
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+  | sudo sh -s -- --systemd
 ```
 
-第一次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码；启动信息打印完，
-NFR 就转入后台运行，终端直接还给你：
+它装好 `nfrs` / `nfrc`、写入 `/etc/systemd/system/nfr-server.service`、
+`systemctl enable --now`，最后把 `systemctl status` 的一段打给你抄密码。
+不加 `--systemd` 就只装二进制（内网机器用这个）。
+
+第一次启动会自己写 `/etc/nfr/server.toml`、生成自签证书和管理员密码，日志里长这样：
 
 ```
   NFR 控制节点已就绪
@@ -93,22 +96,17 @@ NFR 就转入后台运行，终端直接还给你：
   证书指纹  3f:0e:...
 
   密码只显示这一次，登录后请在「设置」里修改。
-
-  已在后台运行  PID 4231
-  日志          /var/lib/nfr/nfr.log
-  停止          nfrs stop
 ```
 
-要长期跑就交给 systemd（unit 里已放行 80/443 的绑定能力和 `/etc/nfr`、`/var/lib/nfr`
-的写权限，首次启动也能自己写配置）：
+不想用 systemd 就直接前台起一次：
 
 ```bash
-sudo curl -fsSL -o /etc/systemd/system/nfr-server.service \
-  https://github.com/Solitudeit/nfr/releases/latest/download/nfr-server.service
-sudo systemctl daemon-reload && sudo systemctl enable --now nfr-server
+sudo mkdir -p /etc/nfr && sudo nfrs -c /etc/nfr/server.toml   # 打印完自动转后台
+sudo nfrs stop                                                # 改交给 systemd 前先停掉
 ```
 
-要盯着日志跑，加 `--foreground`。
+⚠️ 两种方式不要同时跑——都监听 `control_listen`（默认 8443），后起的会
+`bind: address already in use`。
 
 > 也可以用 Docker 起，同样一条命令：
 >
