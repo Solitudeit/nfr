@@ -685,6 +685,33 @@ func TestTunnelStatusAwaiting(t *testing.T) {
 	}
 }
 
+// Awaiting auto-port picking must respect the tunnel's own network: a UDP
+// tunnel must not be handed a port another UDP tunnel already owns, even
+// when that port is free in TCP space. One-port range where the only port is
+// taken by a UDP tunnel: the picker must skip it (port_range_exhausted), not
+// hand it back for bindPort to reject (port_taken).
+func TestAwaitingUDPAutoPortRespectsUDPSpace(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.PortRange = [2]int{21000, 21000} })
+	err := st.Update(func(state *store.State) error {
+		state.Tunnels = append(state.Tunnels, store.Tunnel{
+			ID: "seed1", Name: "dns", NodeID: "n1", Type: "udp",
+			Local: "127.0.0.1:53", RemotePort: 21000, Enabled: true,
+			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	_, _, err = s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "udp", Local: "127.0.0.1:53"}, 30*time.Minute)
+	if err == nil {
+		t.Fatal("expected an error: the only port in range is taken by another udp tunnel")
+	}
+	if _, code := statusOf(err); code == "port_taken" {
+		t.Fatalf("picker ignored the udp space and handed back the occupied port: %v", err)
+	}
+}
+
 // startTestControl runs the control accept loop on an ephemeral loopback
 // port, exercising the same serveControlConn path as startControl without
 // racing s.ctlLn. It returns the dial address.

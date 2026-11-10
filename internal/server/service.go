@@ -63,7 +63,10 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 		// before buildTunnel validates the name. Without an explicit port one
 		// is picked here and buildTunnel binds exactly that port.
 		if req.RemotePort == 0 {
-			port, err := pickPort(st, "", "tcp")
+			// Pick in the tunnel's own space: a UDP tunnel must not receive a
+			// port another UDP tunnel already owns just because it is free
+			// for TCP.
+			port, err := pickPort(st, "", store.TunnelNetwork(req.Type))
 			if err != nil {
 				return err
 			}
