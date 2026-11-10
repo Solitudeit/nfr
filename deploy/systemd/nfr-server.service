@@ -16,7 +16,10 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/nfr
+# /var/lib/nfr holds state, certificates and the log; /etc/nfr must be
+# writable so a first start can drop server.toml there (ProtectSystem=strict
+# makes the rest of /etc read-only).
+ReadWritePaths=/var/lib/nfr /etc/nfr
 # Uncomment to run as an unprivileged user (chown /var/lib/nfr first):
 # User=nfr
 # Group=nfr

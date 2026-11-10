@@ -11,13 +11,24 @@
 | 443/tcp | 域名模式的 HTTPS 入口（可选） | `https_listen`，可设 `"off"` |
 | 20000-29999/tcp | HTTP 与 TCP 隧道的公网端口 | `port_range`（面板里也能改） |
 
+从一台干净的机器到能用的面板，两条：
+
 ```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo nfrs                                       # 首次运行：生成配置、证书、密码
-sudo cp deploy/systemd/nfr-server.service /etc/systemd/system/
-sudo systemctl enable --now nfr-server
-journalctl -u nfr-server -f
+# 1. 装二进制，首次启动会把配置、证书、密码打印出来，然后转入后台
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh \
+  && sudo nfrs -c /etc/nfr/server.toml
+
+# 2. 换成 systemd 接管：开机自启、崩溃重拉（推荐）
+sudo curl -fsSL -o /etc/systemd/system/nfr-server.service \
+  https://github.com/Solitudeit/nfr/releases/latest/download/nfr-server.service
+sudo systemctl daemon-reload && sudo systemctl enable --now nfr-server
 ```
+
+第一条会自己写 `/etc/nfr/server.toml`、生成自签证书和数据目录，把面板地址、
+一次性密码和证书指纹打印出来，然后转入后台——**记下密码**，登录后再改。
+unit 里已放行 `CAP_NET_BIND_SERVICE` 与 `/etc/nfr`、`/var/lib/nfr` 的写权限，
+所以交给 systemd 后首次启动也能自己写配置。不想用 systemd 就跳过第二条，
+用 `nfrs stop` 停服务。
 
 第一次的密码只会打印一次；忘了就在面板「设置」里改，或者删掉
 `state.json` 里的 `panel_password` 字段再重启（会重新生成）。
@@ -150,6 +161,15 @@ agent 支持同时连多台服务器：多执行几次 `nfrc join`（指向不�
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
 sudo systemctl restart nfr-server      # 内网机器上：sudo systemctl restart nfr-agent
+```
+
+旧的 systemd unit 也要换（`ExecStart` 从 `nfr server` 改成 `nfrs`）。v0.9.1 起
+unit 文件直接作为 release 资产发布，按上面的「四条命令」重下一遍即可：
+
+```bash
+sudo curl -fsSL -o /etc/systemd/system/nfr-server.service \
+  https://github.com/Solitudeit/nfr/releases/latest/download/nfr-server.service
+sudo systemctl daemon-reload && sudo systemctl restart nfr-server
 ```
 
 从 0.8.x 的单二进制 `nfr` 升级上来时，旧命令要换名：
