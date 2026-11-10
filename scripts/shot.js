@@ -26,7 +26,9 @@ const playwright = require(process.env.SHOT_PLAYWRIGHT || "playwright");
     ignoreHTTPSErrors: true,
     locale: "zh-CN",
     timezoneId: "Asia/Taipei",
-    colorScheme: process.env.SHOT_DARK === "1" ? "dark" : "light",
+    // Always start from light: the panel's toggle flips whatever the current
+    // theme resolves to, so a dark prefers-color-scheme would flip it back.
+    colorScheme: "light",
   });
 
   const cookies = JSON.parse(fs.readFileSync(process.env.SHOT_COOKIES, "utf8"));
