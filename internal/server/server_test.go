@@ -1034,3 +1034,36 @@ func TestRegenerateRejectsBoundTunnel(t *testing.T) {
 		t.Error("regenerate on unknown tunnel succeeded, want an error")
 	}
 }
+
+func TestTunnelJoinCodeAccessor(t *testing.T) {
+	s, _ := newTestServer(t, func(cfg *config.Server) {
+		cfg.ControlListen = "127.0.0.1:0"
+	})
+	created, _, err := s.CreateTunnelAwaiting(api.TunnelRequest{
+		Name:   "awaiting",
+		NodeID: "new",
+		Type:   "tcp",
+		Local:  "127.0.0.1:80",
+	}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+
+	jc, ok := s.TunnelJoinCode(created.ID)
+	if !ok {
+		t.Fatal("the freshly created awaiting tunnel has no join code")
+	}
+	if jc.Code == "" {
+		t.Fatal("join code accessor returned an empty code")
+	}
+	if !strings.HasPrefix(jc.Command, "nfrc join ") {
+		t.Fatalf("command = %q, want a full nfrc join command", jc.Command)
+	}
+	if jc.ExpiresAt.IsZero() {
+		t.Fatal("join code accessor returned no expiry")
+	}
+
+	if _, ok := s.TunnelJoinCode("no-such-tunnel"); ok {
+		t.Fatal("unknown tunnel reported a join code")
+	}
+}

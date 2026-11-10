@@ -84,7 +84,7 @@
   {{if .Tunnels}}
   <div class="card-grid">
     {{range .Tunnels}}
-    <article class="card tcard" data-tid="{{.ID}}">
+    <article class="card tcard" data-tid="{{.ID}}" id="t-{{.ID}}">
       <div class="tcard-top">
         <span class="dot {{kind .StatusKind}}" data-live-dot></span>
         <a class="tcard-name" href="/nfr/tunnels/edit?id={{.ID}}&amp;server={{$.Current}}">{{.Name}}</a>
@@ -107,6 +107,25 @@
         </dd></div>
         {{end}}
       </dl>
+      {{if .Awaiting}}{{$jc := index $.Codes .ID}}
+      {{if $jc}}
+      <div class="await-box">
+        <div class="await-hint">在内网机器上运行这条命令，设备接入后隧道自动生效：</div>
+        <div class="copyfield"><code>{{$jc.Command}}</code><button type="button" data-copy="{{$jc.Command}}">复制</button></div>
+        {{if $jc.Warning}}<div class="flash warn" role="alert">{{$jc.Warning}}</div>{{end}}
+        <div class="await-meta">
+          <span class="join-code">{{$jc.Code}}</span>
+          <span class="muted" data-expires="{{$jc.ExpiresAt.Unix}}">剩余 —</span>
+        </div>
+        <form method="post" action="/nfr/tunnels/regen-code">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="server" value="{{$.Current}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="btn ghost sm" type="submit">重新生成命令</button>
+        </form>
+      </div>
+      {{end}}
+      {{end}}
       <div class="tcard-actions">
         <form method="post" action="/nfr/tunnels/toggle">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">

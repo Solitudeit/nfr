@@ -271,3 +271,200 @@ func TestTunnelFormOffersTheConsoleHostWhenEnabled(t *testing.T) {
 		t.Fatal("the console host is offered without the badge that separates it from agents")
 	}
 }
+
+func TestTunnelFormOffersNewDevice(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("form status = %d", rec.Code)
+	}
+	for _, want := range []string{"data-new-device", "＋ 新设备", `<details class="adv"`, "留空自动生成"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("new-device form is missing %q", want)
+		}
+	}
+	if !strings.Contains(body, "hidden") && strings.Contains(body, "grab-btn") && !strings.Contains(body, `grab-btn hidden`) {
+		t.Fatalf("the allocate button should be hidden in the staged form")
+	}
+	for _, gone := range []string{"192.168.1.1", "combo-list"} {
+		if strings.Contains(body, gone) {
+			t.Fatalf("staged form still contains fake-data leftover %q", gone)
+		}
+	}
+}
+
+// newDeviceTunnel posts the new-device form and returns the created awaiting
+// tunnel id and its join code as rendered on the tunnels page.
+func newDeviceTunnel(t *testing.T, p *Panel, cookies []*http.Cookie) (string, string) {
+	t.Helper()
+	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
+	csrf := extractCSRF(t, rec.Body.String())
+
+	rec = do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
+		"csrf":       {csrf},
+		"server":     {"local"},
+		"node_id":    {"new"},
+		"type":       {"tcp"},
+		"local_host": {"127.0.0.1"},
+		"local_port": {"8080"},
+		"enabled":    {"1"},
+	}, cookies)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/nfr/tunnels?server=local#t-") {
+		t.Fatalf("save Location = %q, want the tunnel card anchor", loc)
+	}
+	id := strings.TrimPrefix(loc, "/nfr/tunnels?server=local#t-")
+
+	rec = do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	body := rec.Body.String()
+	if !strings.Contains(body, "等待接入") {
+		t.Fatal("the awaiting tunnel does not show the 等待接入 status")
+	}
+	if !strings.Contains(body, `id="t-`+id+`"`) {
+		t.Fatal("the tunnel card has no anchor id for the redirect")
+	}
+	if !strings.Contains(body, "nfrc join ") {
+		t.Fatal("the awaiting card does not show the copy-pasteable join command")
+	}
+	if !strings.Contains(body, "data-expires") {
+		t.Fatal("the awaiting card does not carry a countdown expiry")
+	}
+	if !strings.Contains(body, "/nfr/tunnels/regen-code") {
+		t.Fatal("the awaiting card has no regenerate button")
+	}
+	start := strings.Index(body, `class="join-code">`)
+	if start < 0 {
+		t.Fatal("no join-code span rendered on the tunnels page")
+	}
+	rest := body[start+len(`class="join-code">`):]
+	code := rest[:strings.Index(rest, "</span>")]
+	return id, code
+}
+
+func TestTunnelSaveNewDeviceCreatesAwaiting(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+	id, code := newDeviceTunnel(t, p, cookies)
+	if id == "" || code == "" {
+		t.Fatal("no awaiting tunnel or code was produced")
+	}
+}
+
+func TestRegenCodeRoute(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+	id, code := newDeviceTunnel(t, p, cookies)
+
+	csrf := extractCSRF(t, func() string {
+		rec := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+		return rec.Body.String()
+	}())
+	rec := do(p, http.MethodPost, "/nfr/tunnels/regen-code", url.Values{
+		"csrf":   {csrf},
+		"server": {"local"},
+		"id":     {id},
+	}, cookies)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("regen-code status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Header().Get("Location"), "err=") {
+		t.Fatalf("regen-code failed: %s", rec.Header().Get("Location"))
+	}
+
+	rec = do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	if strings.Contains(rec.Body.String(), `class="join-code">`+code+`</span>`) {
+		t.Fatal("the tunnels page still shows the old code after regeneration")
+	}
+	// A fresh code must be present in its place.
+	body := rec.Body.String()
+	start := strings.Index(body, `class="join-code">`)
+	if start < 0 {
+		t.Fatal("no join-code rendered after regeneration")
+	}
+	rest := body[start+len(`class="join-code">`):]
+	fresh := rest[:strings.Index(rest, "</span>")]
+	if fresh == code {
+		t.Fatal("regeneration returned the same code")
+	}
+}
+
+func TestRegenCodeAlreadyJoinedConflict(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	if err := p.srv.SetLocalNode(true); err != nil {
+		t.Fatalf("enable local node: %v", err)
+	}
+	// A joined tunnel: node_id=local goes through the ordinary create path.
+	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
+	csrf := extractCSRF(t, rec.Body.String())
+	rec = do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
+		"csrf":       {csrf},
+		"server":     {"local"},
+		"node_id":    {"local"},
+		"name":       {"joined"},
+		"type":       {"tcp"},
+		"local_host": {"127.0.0.1"},
+		"local_port": {"8081"},
+		"enabled":    {"1"},
+	}, cookies)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = do(p, http.MethodPost, "/nfr/tunnels/regen-code", url.Values{
+		"csrf":   {csrf},
+		"server": {"local"},
+		"id":     {"joined"},
+	}, cookies)
+	// "joined" is the tunnel name; the regen route keys on the tunnel id, so
+	// first resolve the real id from the tunnels page.
+	rec = do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	body := rec.Body.String()
+	idx := strings.Index(body, `data-tid="`)
+	if idx < 0 {
+		t.Fatal("joined tunnel not found on the tunnels page")
+	}
+	rest := body[idx+len(`data-tid="`):]
+	id := rest[:strings.Index(rest, `"`)]
+
+	csrf = extractCSRF(t, body)
+	rec = do(p, http.MethodPost, "/nfr/tunnels/regen-code", url.Values{
+		"csrf":   {csrf},
+		"server": {"local"},
+		"id":     {id},
+	}, cookies)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("regen-code status = %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	u, perr := url.Parse(loc)
+	if perr != nil {
+		t.Fatalf("regen-code Location = %q: %v", loc, perr)
+	}
+	if u.Query().Get("err") != "this tunnel already has a node" {
+		t.Fatalf("regen-code Location = %q, want an already_joined error", loc)
+	}
+}
+
+func TestRemoteFormHidesNewDevice(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	// /nfr/tunnels (no server param) with no configured remote redirects to
+	// the local form surface; the form itself defaults to server=local.
+	rec := do(p, http.MethodGet, "/nfr/tunnels", nil, cookies)
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "server=local") {
+		t.Fatalf("no remotes: expect redirect to the local view, got %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	rec = do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
+	if !strings.Contains(rec.Body.String(), "data-new-device") {
+		t.Fatal("local form must offer the new-device card")
+	}
+}

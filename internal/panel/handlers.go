@@ -2,11 +2,13 @@ package panel
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/solitudeit/nfr/internal/api"
 )
@@ -82,6 +84,10 @@ type tunnelsData struct {
 	LocalHost string // Edit.Local split for the two-field form
 	LocalPort string
 	SelNode   *api.Node // node picked outside the form (entry link / edit); nil → form shows the picker
+	// Codes carries the live join command of every awaiting tunnel on the
+	// current server, keyed by tunnel id, so the card can show what a new
+	// device must run without a second request.
+	Codes map[string]api.JoinCodeResponse
 }
 
 // cards renders every instance the console can reach, the local one first.
@@ -194,6 +200,7 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		d.CurName = p.srv.Info().Name
 		d.CurURL = p.srv.Info().PanelURL
 		d.Tunnels = p.srv.Tunnels()
+		d.Codes = p.joinCodes(d.Tunnels)
 		d.Nodes, d.LocalTarget = splitNodes(p.srv.Nodes())
 		d.OnlineNodes = countOnline(d.Nodes)
 		d.LocalNodeOn = d.LocalTarget != nil
@@ -217,6 +224,7 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 			d.RemoteErr = err.Error()
 		} else {
 			d.Tunnels = tunnels
+			d.Codes = p.joinCodes(tunnels)
 			if nodes, err := c.Nodes(ctx); err == nil {
 				d.Nodes, d.LocalTarget = splitNodes(nodes)
 				d.OnlineNodes = countOnline(d.Nodes)
@@ -272,7 +280,11 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 			p.labelNodes(r.Context(), d.Nodes)
 		}
 	}
-	d.Draft = existing == nil && d.OnlineNodes == 0
+	// Draft marks a remote new-form with nothing online: those save switched
+	// off. The local form never drafts — the new-device flow must create an
+	// enabled awaiting tunnel so the join command works the moment a device
+	// redeems it.
+	d.Draft = existing == nil && !d.IsLocal && d.OnlineNodes == 0
 	// The node is picked outside the form: either it is a property of the
 	// tunnel being edited, or it came in on the entry URL (?node=). When it
 	// resolves, the form shows a locked confirmation instead of the picker.
@@ -333,6 +345,22 @@ func (p *Panel) editForm(w http.ResponseWriter, r *http.Request, s *session) {
 	http.NotFound(w, r)
 }
 
+// joinCodes collects the live join code of every awaiting tunnel, keyed by
+// tunnel id. The panel renders each awaiting card's command from it; joined
+// tunnels get no entry and the template falls back to nothing.
+func (p *Panel) joinCodes(tunnels []api.Tunnel) map[string]api.JoinCodeResponse {
+	codes := map[string]api.JoinCodeResponse{}
+	for _, t := range tunnels {
+		if !t.Awaiting {
+			continue
+		}
+		if jc, ok := p.srv.TunnelJoinCode(t.ID); ok {
+			codes[t.ID] = jc
+		}
+	}
+	return codes
+}
+
 func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 	if err := r.ParseForm(); err != nil {
 		p.backErr(w, r, "/nfr/tunnels", err)
@@ -370,7 +398,17 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.FormValue("id")
 	var err error
 	if sel == "local" {
-		if id == "" {
+		if id == "" && req.NodeID == "new" {
+			// New-device flow: the tunnel is created before any node exists
+			// and the panel sends the operator back to its card, which shows
+			// the bound join command.
+			var created api.Tunnel
+			created, _, err = p.srv.CreateTunnelAwaiting(req, 30*time.Minute)
+			if err == nil {
+				http.Redirect(w, r, "/nfr/tunnels?server=local#t-"+created.ID, http.StatusSeeOther)
+				return
+			}
+		} else if id == "" {
 			_, err = p.srv.CreateTunnel(req)
 		} else {
 			_, err = p.srv.UpdateTunnel(id, req)
@@ -416,6 +454,28 @@ func (p *Panel) tunnelDelete(w http.ResponseWriter, r *http.Request, s *session)
 		return
 	}
 	p.ok(w, r, "/nfr/tunnels", "隧道已删除")
+}
+
+// tunnelRegenCode replaces the join code bound to an awaiting tunnel: the old
+// command stops working and the card shows a fresh one.
+func (p *Panel) tunnelRegenCode(w http.ResponseWriter, r *http.Request, s *session) {
+	_ = r.ParseForm()
+	sel := r.FormValue("server")
+	if sel == "" {
+		sel = "local"
+	}
+	id := r.FormValue("id")
+	if sel != "local" {
+		// Regen is a local-server capability for now: the brief binds it to
+		// this instance's awaiting tunnels.
+		p.backErr(w, r, "/nfr/tunnels", errors.New("只有本服务器支持重新生成加入命令"))
+		return
+	}
+	if _, err := p.srv.RegenerateTunnelCode(id); err != nil {
+		p.backErr(w, r, "/nfr/tunnels", err)
+		return
+	}
+	p.ok(w, r, "/nfr/tunnels", "加入命令已重新生成")
 }
 
 func (p *Panel) tunnelToggle(w http.ResponseWriter, r *http.Request, s *session) {
