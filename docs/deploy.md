@@ -165,7 +165,7 @@ sudo systemctl enable --now nfr-agent
 一次都会在服务端新增一个节点），而是用已保存的配置启动：
 
 ```bash
-nfrc -c /etc/nfr/agent.toml          # 前台
+nfrc -c /etc/nfr/agent.toml          # 前台（非 root 用户：~/.config/nfr/agent.toml）
 sudo systemctl restart nfr-agent     # 已装成服务时
 ```
 

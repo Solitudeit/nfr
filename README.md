@@ -146,6 +146,8 @@ Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfrc` 作为服�
 nfrc -c /etc/nfr/agent.toml
 ```
 
+（普通用户不是 root 时配置在 `~/.config/nfr/agent.toml`。）
+
 `join` 结束时的输出、`--no-start` 的提示、以及面板上「等待接入」的卡片都会把这一行
 印出来，不用记。
 
