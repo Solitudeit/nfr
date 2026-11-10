@@ -166,6 +166,7 @@ func (s *Server) handleJoin(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn, f 
 		nodeID string
 		token  string
 		errMsg string
+		bound  string
 	)
 	now := time.Now().UTC()
 	err := s.st.Update(func(st *store.State) error {
@@ -192,6 +193,17 @@ func (s *Server) handleJoin(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn, f 
 		})
 		t := now
 		jc.UsedAt = &t
+		// A code minted by CreateTunnelAwaiting carries the tunnel it belongs
+		// to: redeeming it activates that tunnel right here, in the same
+		// update that creates the node. A deleted tunnel or one that already
+		// has a node is skipped silently — the join itself still succeeds.
+		if jc.TunnelID != "" {
+			if t, ok := st.TunnelByID(jc.TunnelID); ok && t.NodeID == "" {
+				t.NodeID = nodeID
+				t.UpdatedAt = now
+				bound = t.Name
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -201,6 +213,11 @@ func (s *Server) handleJoin(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn, f 
 	}
 	s.lg.Info("node joined", "node", name, "id", nodeID, "remote", ip)
 	s.hub.publish(api.Event{Type: "node-joined", At: now, Message: name})
+	if bound != "" {
+		// The store is no longer locked: the hub does not need it, and the
+		// event wants the tunnel name captured inside the update.
+		s.hub.publish(api.Event{Type: "tunnel-bound", At: now, Message: bound})
+	}
 	_ = proto.WriteFrame(ctrl, &proto.Frame{
 		Type:    proto.TypeWelcome,
 		NodeID:  nodeID,
