@@ -440,6 +440,87 @@ func TestAwaitingCardShowsConfigRestartPath(t *testing.T) {
 	}
 }
 
+// The failure that actually happens in the field: the device joined, the
+// tunnel went live, then the client died. Re-running `nfrc join` is the wrong
+// repair (it registers a second node), so the card of a tunnel whose node is
+// offline must point at the saved config instead.
+func TestOfflineTunnelPointsAtConfigRestart(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultServer()
+	cfg.DataDir = dir
+	cfg.ControlListen = "off"
+	cfg.HTTPListen = "off"
+	cfg.HTTPSListen = "off"
+	cfg.Domain = "example.com"
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	// A node that has joined before but has no live session: the seeded
+	// server never registers an agent, so this node reads as offline.
+	if err := st.Update(func(s *store.State) error {
+		s.Nodes = append(s.Nodes, store.Node{ID: "gone", Name: "edge-1"})
+		s.Tunnels = append(s.Tunnels, store.Tunnel{
+			ID: "offline1", Name: "offline-tunnel", NodeID: "gone",
+			Type: "tcp", Local: "127.0.0.1:8080", RemotePort: 20011, Enabled: true,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	srv, password, err := server.New(server.Options{Config: cfg, Store: st, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatalf("server: %v", err)
+	}
+	p := New(srv, log.New("error", ""))
+	p.geo = stubLocator{}
+	cookies := login(t, p, password)
+
+	rec := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	body := rec.Body.String()
+	if !strings.Contains(body, "节点离线") {
+		t.Fatal("the offline tunnel is not reported as 节点离线")
+	}
+	card := body[strings.Index(body, `id="t-offline1"`):]
+	card = card[:strings.Index(card, "</article>")]
+	if !strings.Contains(card, "nfrc -c") {
+		t.Fatal("the offline card never says how to bring the client back")
+	}
+	if !strings.Contains(card, "不要重新 join") {
+		t.Fatal("the offline card does not warn against re-running join")
+	}
+}
+
+// A healthy tunnel must not carry the offline advice: the hint is a repair for
+// a node that is gone, and showing it everywhere would turn it into noise.
+func TestOfflineHintStaysOnOfflineCards(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+	if err := p.srv.SetLocalNode(true); err != nil {
+		t.Fatalf("enable local node: %v", err)
+	}
+	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
+	csrf := extractCSRF(t, rec.Body.String())
+	rec = do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
+		"csrf":       {csrf},
+		"server":     {"local"},
+		"node_id":    {"local"},
+		"name":       {"healthy"},
+		"type":       {"tcp"},
+		"local_host": {"127.0.0.1"},
+		"local_port": {"8080"},
+		"enabled":    {"1"},
+	}, cookies)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save status = %d", rec.Code)
+	}
+
+	rec = do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	if body := rec.Body.String(); strings.Contains(body, "不要重新 join") {
+		t.Fatal("a healthy tunnel carries the offline restart hint")
+	}
+}
+
 func TestRegenCodeRoute(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
