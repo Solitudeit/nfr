@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import shlex
 import socket
 import ssl
 import subprocess
@@ -121,6 +122,23 @@ def http_get(port, host_header, timeout=5):
     return resp.status, body
 
 
+def tcp_probe(port):
+    """Send one request through a raw TCP tunnel; True when the private
+    service payload comes back."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as s:
+            s.sendall(b"GET / HTTP/1.1\r\nHost: raw\r\nConnection: close\r\n\r\n")
+            data = b""
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        return LocalService.payload in data
+    except OSError:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true")
@@ -197,7 +215,16 @@ def main():
 
         panel = Panel("https://127.0.0.1:%d" % control)
         status, html = panel.login(password)
-        check("panel login", status == 200 and "概览" in html, "status %d" % status)
+        # /nfr/ 303-redirects to the tunnels page (urllib follows it), whose
+        # nav reads 隧道/节点/服务器/设置 and whose local view carries the
+        # stats block merged from the old overview.
+        check(
+            "panel login",
+            status == 200
+            and ">隧道</span>" in html
+            and 'data-stat="nodes-online"' in html,
+            "status %d" % status,
+        )
 
         status, html = panel.request("/nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
         m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
@@ -294,6 +321,101 @@ def main():
                     pass
                 time.sleep(0.2)
         check("tcp tunnel proxies", ok, "port %s" % port)
+
+        # Tunnel-first flow: creating a tunnel for a not-yet-joined device
+        # mints a join command on the awaiting card; redeeming it brings the
+        # device in and activates the tunnel in one step.
+        status, html = panel.request(
+            "/nfr/tunnels/save",
+            {
+                "csrf": panel.csrf, "server": "local", "type": "tcp",
+                "node_id": "new", "local": "127.0.0.1:%d" % local_port,
+                "enabled": "1",
+            },
+        )
+        m = re.search(
+            r'id="t-([0-9a-z]+)".{0,4000}?<code>(nfrc join [^<]+)</code>'
+            r'.{0,400}?class="join-code">([0-9A-Z]+)<',
+            html, re.S,
+        )
+        check("awaiting tunnel created", m is not None, "status %d" % status)
+
+        join_port = None
+        if m:
+            tid, command_text, code2 = m.group(1), m.group(2), m.group(3)
+            check("join command rendered", command_text.startswith("nfrc join "),
+                  command_text[:60])
+            # The card command joins and then keeps the agent connected (it
+            # is meant to be pasted on the device), so the harness redeems
+            # it with --no-start and its own config dir instead. Flags must
+            # precede the positionals: Go's flag package stops parsing at
+            # the first one.
+            join_argv = shlex.split(command_text)
+            agent2_cfg = os.path.join(tmp, "agent2.toml")
+            p = subprocess.run(
+                [nfrc, "join", "--no-start", "-c", agent2_cfg,
+                 "--name", "tunnelnode"] + join_argv[2:],
+                capture_output=True, text=True, timeout=30,
+            )
+            check("tunnel node joined via card command", p.returncode == 0,
+                  (p.stderr or p.stdout).strip()[-300:])
+
+            # Start the second agent so the redeemed tunnel carries traffic,
+            # mirroring the first agent's lifecycle above.
+            agent2 = None
+            if p.returncode == 0:
+                agent2_log = open(os.path.join(tmp, "agent2.log"), "wb")
+                agent2 = subprocess.Popen(
+                    [nfrc, "-c", agent2_cfg], stdout=agent2_log,
+                    stderr=subprocess.STDOUT,
+                )
+                procs.append(agent2)
+
+            end = time.time() + 20
+            tun2 = None
+            while time.time() < end:
+                _, body = panel.request("/nfr/api/state")
+                tun2 = next(
+                    (t for t in json.loads(body)["tunnels"] if t["id"] == tid), None
+                )
+                if tun2 and tun2.get("node_id"):
+                    break
+                time.sleep(0.3)
+            check("tunnel bound to the new node",
+                  tun2 is not None and bool(tun2.get("node_id")))
+
+            status, html2 = panel.request("/nfr/tunnels?server=local")
+            card = re.search(r'id="t-%s".*?(?=<article|</main)' % re.escape(tid), html2, re.S)
+            check("card no longer awaits",
+                  card is not None
+                  and "等待接入" not in card.group(0)
+                  and 'class="join-code"' not in card.group(0))
+
+            join_port = tun2.get("remote_port") if tun2 else None
+            ok = False
+            if join_port:
+                end = time.time() + 10
+                while time.time() < end:
+                    if tcp_probe(join_port):
+                        ok = True
+                        break
+                    time.sleep(0.2)
+            check("tunnel-first tcp traffic flows", ok, "port %s" % join_port)
+
+            try:
+                p = subprocess.run(
+                    [nfrc, "join", "--no-start", "-c", agent2_cfg,
+                     "--name", "dupnode", "127.0.0.1:%d" % control, code2],
+                    capture_output=True, text=True, timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                # A hang is not a rejection: the client is expected to fail
+                # fast once the server reports the code already used.
+                p = None
+            check("spent join code is rejected",
+                  p is not None and p.returncode != 0
+                  and "already used" in (p.stderr + p.stdout).lower(),
+                  (p.stderr or p.stdout).strip()[-120:] if p else "nfrc timed out")
 
         # HTTP can also be reached on a dedicated port, without any domain.
         _, body = panel.request("/nfr/api/allocate", {"tunnel_id": ""}, {"X-CSRF": panel.csrf})
