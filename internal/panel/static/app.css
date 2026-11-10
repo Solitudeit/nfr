@@ -82,6 +82,11 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 
+/* The UA stylesheet hides [hidden] with display:none, but any component rule
+   that sets display (.flash{display:flex}, .btn{display:inline-flex}) wins on
+   specificity. Keep the attribute authoritative so markup can toggle it. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -867,6 +872,9 @@ label.ctl-row { cursor: pointer; }
 .node-pick button.np-card { padding-right: 32px; }
 .node-pick { max-width: none; }
 .np-add { border-style: dashed; color: var(--text-2); }
+/* 这张卡的说明是「为什么选它」，比其它卡的机器规格更长；窄屏允许折行，
+   别让省略号把意思截掉。 */
+.np-add .np-meta { white-space: normal; }
 
 /* 节点页卡片与隧道页服务器卡片 */
 .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }

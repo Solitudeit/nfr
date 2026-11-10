@@ -633,3 +633,16 @@ func TestRemoteFormHidesNewDevice(t *testing.T) {
 		t.Fatal("local form must offer the new-device card")
 	}
 }
+
+func TestHiddenAttributeBeatsComponentDisplay(t *testing.T) {
+	css, err := files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+	// .flash and .btn both set an explicit display, which beats the UA
+	// stylesheet's [hidden] rule. Without a global override the empty
+	// #nodewarn strip and the manual grab button render on the tunnel form.
+	if !regexp.MustCompile(`(?m)^\s*\[hidden\]\s*\{[^}]*display:\s*none\s*!important`).Match(css) {
+		t.Fatal(`app.css must carry a global "[hidden] { display: none !important }" rule`)
+	}
+}
