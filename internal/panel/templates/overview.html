@@ -35,46 +35,19 @@
       <a class="right btn ghost sm" href="/nfr/tunnels">管理</a>
     </div>
     {{if .Tunnels}}
-    <div class="tbl-wrap">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>隧道</th>
-            <th>节点</th>
-            <th>公网入口</th>
-            <th>内网地址</th>
-            <th>状态</th>
-            <th class="num">速率</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Tunnels}}
-          <tr data-tid="{{.ID}}">
-            <td>
-              <span class="dot {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}"></span>
-              <a class="name" href="/nfr/tunnels/edit?id={{.ID}}&amp;server=local">{{.Name}}</a>
-              <div class="sub">
-                <span class="pill {{if eq .Type "http"}}pill-http{{else if eq .Type "udp"}}pill-udp{{else}}pill-tcp{{end}}">{{if eq .Type "http"}}HTTP{{else if eq .Type "udp"}}UDP{{else}}TCP{{end}}</span>
-                {{if .BandwidthKB}}<span class="pill pill-cap">≤{{.BandwidthKB}}KB/s</span>{{end}}
-                入 {{bytes .In}} / 出 {{bytes .Out}}
-              </div>
-              {{if .QuotaMB}}
-              <div class="meter-wrap">
-                <span class="meter {{pctlv .UsedBytes .QuotaMB}}" data-live-meter><i style="width:{{pct .UsedBytes .QuotaMB}}%"></i></span>
-                <span data-live-pct>{{pct .UsedBytes .QuotaMB}}%</span>
-                <span>本月 {{bytes .UsedBytes}} / {{.QuotaMB}}MB</span>
-              </div>
-              {{end}}
-            </td>
-            <td>{{.NodeName}}</td>
-            <td class="addr">{{if eq .Type "http"}}{{if .Hosts}}{{join .Hosts ", "}}{{else}}:{{.RemotePort}}{{end}}{{else}}:{{.RemotePort}}{{end}}</td>
-            <td class="addr">{{.Local}}</td>
-            <td><span class="chip {{if not .Enabled}}off{{else if .Online}}on{{else}}err{{end}}" data-live-chip>{{if not .Enabled}}{{if .QuotaPaused}}配额停用{{else}}已停用{{end}}{{else if .Online}}在线{{else}}节点离线{{end}}</span></td>
-            <td class="num" data-live-rate>{{rate .InRate}} / {{rate .OutRate}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+    <div class="ocard-list">
+      {{range .Tunnels}}
+      <a class="ocard" href="/nfr/tunnels/edit?id={{.ID}}&amp;server=local" data-tid="{{.ID}}">
+        <span class="dot {{kind .StatusKind}}" data-live-dot></span>
+        <span class="ocard-name">{{.Name}}</span>
+        <span class="ocard-meta">
+          <span class="pill {{if eq .Type "http"}}pill-http{{else if eq .Type "udp"}}pill-udp{{else}}pill-tcp{{end}}">{{if eq .Type "http"}}HTTP{{else if eq .Type "udp"}}UDP{{else}}TCP{{end}}</span>
+          <span class="mono">{{endpoint .}}</span>
+          <span class="muted">→ {{.Local}}</span>
+        </span>
+        <span class="chip {{kind .StatusKind}}" data-live-chip>{{.Status}}</span>
+      </a>
+      {{end}}
     </div>
     {{else}}
     <div class="empty">
@@ -104,5 +77,5 @@
 
 <div class="quickstart">
   <span class="qs-k">快速开始</span>
-  <span>内网机执行 <code>nfr join</code> 接入 <span class="qs-arrow">→</span> <a href="/nfr/tunnels">新建隧道</a> 即可发布服务</span>
+  <span>内网机执行 <code>nfrc join</code> 接入 <span class="qs-arrow">→</span> <a href="/nfr/tunnels">新建隧道</a> 即可发布服务</span>
 </div>

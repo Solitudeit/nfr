@@ -13,7 +13,7 @@
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo nfr server                                 # 首次运行：生成配置、证书、密码
+sudo nfrs                                       # 首次运行：生成配置、证书、密码
 sudo cp deploy/systemd/nfr-server.service /etc/systemd/system/
 sudo systemctl enable --now nfr-server
 journalctl -u nfr-server -f
@@ -45,7 +45,7 @@ firewall-cmd --permanent --add-port=8443/tcp --add-port=80/tcp --add-port=443/tc
 
 **A. 自签证书（默认，零配置）**
 面板地址是 `https://IP:8443/nfr/`，浏览器会警告一次。
-`nfr join` 和纳管服务器会自动钉指纹，所以命令行侧不会报错。
+`nfrc join` 和纳管服务器会自动钉指纹，所以命令行侧不会报错。
 
 **B. Let's Encrypt**
 ```toml
@@ -57,7 +57,7 @@ email   = "you@example.com"
 ```
 重启后 NFR 会在需要时自动申请证书，存在 `<data_dir>/acme`。
 这要求 443 能从公网访问（HTTP-01 走 80，TLS-ALPN-01 走 443）。
-拿到公网证书后，`nfr join` 和纳管都会改用系统根证书校验，不再钉指纹。
+拿到公网证书后，`nfrc join` 和纳管都会改用系统根证书校验，不再钉指纹。
 
 **C. 自己的证书**
 ```toml
@@ -97,7 +97,7 @@ https_listen   = "off"
 **2. 生成反代配置**
 
 ```bash
-nfr proxy-config app.example.com        # 换成你的域名
+nfrs proxy-config app.example.com       # 换成你的域名
 ```
 
 把打印出来的 `server { … }` 粘到该站点的配置里，或者写到 `/etc/nginx/conf.d/nfr.conf`。片段里已经带好 `Host`、`X-Forwarded-*` 和 WebSocket 的升级头；
@@ -119,27 +119,50 @@ TLS 由 nginx 的证书终止，NFR 会从 `X-Forwarded-Proto` 知道访客其�
 
 ## 内网机器
 
+隧道由内网那台机器发起（`nfrc` 拨回来），服务器从不代替它拨「内网地址」——
+这是「内网地址永远是客户端视角」这条铁律的落地方式。
+
 ```bash
-nfr join example.com ABC123                  # 加入码在面板「节点」页生成
+nfrc join example.com ABC123                 # 加入码在面板「节点」页生成
 ```
+
+地址只写主机名、不写端口时，端口取面板给出的那个（默认 8443）。
+如果你是从本机直接连、而服务器只监听内网/回环，就把完整地址和端口写全，例如
+`nfrc join 10.0.0.5:8443 ABC123`；`join` 用你输入的主机地址，不用服务器通告的地址。
+
+面板生成的命令取地址的顺序是：设置里的**公网域名** → 设置里的**对外地址** →
+探测到的本机网卡地址。三者都没有（例如云主机在内网网卡后面）时，面板会在命令旁
+给出警告——先去「设置」填对外地址，再把命令粘到别的机器上。
 
 `join` 默认写完配置就一直连着，适合 `tmux`/`screen` 里直接跑；交给 systemd 时：
 
 ```bash
-nfr join --no-start example.com ABC123
+nfrc join --no-start example.com ABC123
 sudo cp deploy/systemd/nfr-agent.service /etc/systemd/system/
 sudo systemctl enable --now nfr-agent
 ```
 
-agent 支持同时连多台服务器：多执行几次 `nfr join`（指向不同服务器）即可，
+agent 支持同时连多台服务器：多执行几次 `nfrc join`（指向不同服务器）即可，
 `agent.toml` 里会有多个 `[[server]]` 段。
 
 ## 升级
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo systemctl restart nfr-server nfr-agent
+sudo systemctl restart nfr-server      # 内网机器上：sudo systemctl restart nfr-agent
 ```
+
+从 0.8.x 的单二进制 `nfr` 升级上来时，旧命令要换名：
+
+| 旧 | 新 |
+| --- | --- |
+| `nfr server --foreground -c …` | `nfrs --foreground -c …` |
+| `nfr agent -c …` | `nfrc -c …` |
+| `nfr join <addr> <code>` | `nfrc join <addr> <code>` |
+| `nfr stop` / `nfr status` | `nfrs stop` / `nfrs status` |
+
+`install.sh` 会同时装 `nfrs` 与 `nfrc`；只要一个时用
+`NFR_ONLY=server`（或 `client`）。旧的 `nfr` 二进制可以删掉。
 
 `state.json` 带 schema 版本，小版本升级直接覆盖二进制即可。
 升级前备份：`cp /var/lib/nfr/state.json /var/lib/nfr/state.json.bak`。

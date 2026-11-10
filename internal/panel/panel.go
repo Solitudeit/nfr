@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/server"
+	"github.com/solitudeit/nfr/internal/store"
 	"github.com/solitudeit/nfr/internal/version"
 )
 
@@ -100,6 +102,48 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 			default:
 				return "lv0"
 			}
+		},
+		// kind maps a tunnel status kind onto the dot and chip classes the
+		// stylesheet already understands.
+		"kind": func(k string) string {
+			switch k {
+			case "on":
+				return "on"
+			case "idle":
+				return "idle"
+			case "warn":
+				return "warn"
+			case "err":
+				return "err"
+			case "off":
+				return "off"
+			default:
+				return "off"
+			}
+		},
+		// endpoint renders the address a visitor types: domain or IP plus the
+		// public port, or the bare host for an http tunnel.
+		"endpoint": func(t api.Tunnel) string {
+			if t.Type == store.TunnelHTTP {
+				if len(t.Hosts) > 0 {
+					return strings.Join(t.Hosts, ", ")
+				}
+				if t.PublicHost != "" {
+					return t.PublicHost + ":" + strconv.Itoa(t.RemotePort)
+				}
+				return ":" + strconv.Itoa(t.RemotePort)
+			}
+			if t.PublicHost != "" {
+				return t.PublicHost + ":" + strconv.Itoa(t.RemotePort)
+			}
+			return ":" + strconv.Itoa(t.RemotePort)
+		},
+		// stale tells the operator which machines are merely offline and which
+		// are gone for good: a week without a heartbeat and nothing running on
+		// it means the card is just clutter.
+		"stale": func(n api.Node) bool {
+			return !n.Online && n.Tunnels == 0 && n.LastSeen != nil &&
+				time.Since(*n.LastSeen) > 7*24*time.Hour
 		},
 		"vshort": func(v string) string {
 			if i := strings.IndexByte(v, ' '); i > 0 {

@@ -65,6 +65,18 @@ type tunnelsData struct {
 	RemoteErr string
 	Tunnels   []api.Tunnel
 	Nodes     []api.Node
+	// OnlineNodes counts agents holding a control connection right now. The
+	// form uses it to say plainly that nothing can carry traffic yet instead of
+	// letting an operator believe a tunnel is live.
+	OnlineNodes int
+	LocalNodeOn bool
+	// LocalTarget is the console host offered as a tunnel target when the
+	// operator turned that on. It is kept out of Nodes on purpose: it is not an
+	// agent and must never look like one.
+	LocalTarget *api.Node
+	// Draft marks a new tunnel that cannot be live yet: no agent is connected,
+	// so the form saves it switched off and says why.
+	Draft     bool
 	PortRange [2]int
 	Edit      *api.Tunnel
 	LocalHost string // Edit.Local split for the two-field form
@@ -164,10 +176,14 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		PortRange: p.srv.Settings().PortRange,
 	}
 	if sel == "" {
-		// Every instance gets a card, even when there is only one: the card
-		// names the country the machine sits in, which is information the
-		// tunnel list below cannot show.
+		// Federated instances are an advanced feature: with none configured the
+		// tunnel page opens straight on this instance's tunnels instead of
+		// asking which server to manage.
 		p.refreshRemotes(r.Context())
+		if len(p.srv.Remotes()) == 0 {
+			http.Redirect(w, r, "/nfr/tunnels?server=local", http.StatusSeeOther)
+			return
+		}
 		d.Cards = p.cards(r.Context())
 		p.render(w, r, "tunnels", d)
 		return
@@ -178,8 +194,13 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		d.CurName = p.srv.Info().Name
 		d.CurURL = p.srv.Info().PanelURL
 		d.Tunnels = p.srv.Tunnels()
-		d.Nodes = p.srv.Nodes()
+		d.Nodes, d.LocalTarget = splitNodes(p.srv.Nodes())
+		d.OnlineNodes = countOnline(d.Nodes)
+		d.LocalNodeOn = d.LocalTarget != nil
 		p.labelNodes(r.Context(), d.Nodes)
+		if d.LocalTarget != nil {
+			p.labelNodes(r.Context(), []api.Node{*d.LocalTarget})
+		}
 		d.CurRegion = p.region(r.Context(), d.CurURL, true)
 	} else {
 		c, rec, err := p.srv.RemoteClient(sel)
@@ -197,7 +218,9 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		} else {
 			d.Tunnels = tunnels
 			if nodes, err := c.Nodes(ctx); err == nil {
-				d.Nodes = nodes
+				d.Nodes, d.LocalTarget = splitNodes(nodes)
+				d.OnlineNodes = countOnline(d.Nodes)
+				d.LocalNodeOn = d.LocalTarget != nil
 				p.labelNodes(r.Context(), d.Nodes)
 			}
 		}
@@ -226,8 +249,13 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 	}
 	if d.IsLocal {
 		d.CurName = p.srv.Info().Name
-		d.Nodes = p.srv.Nodes()
+		d.Nodes, d.LocalTarget = splitNodes(p.srv.Nodes())
+		d.OnlineNodes = countOnline(d.Nodes)
+		d.LocalNodeOn = d.LocalTarget != nil
 		p.labelNodes(r.Context(), d.Nodes)
+		if d.LocalTarget != nil {
+			p.labelNodes(r.Context(), []api.Node{*d.LocalTarget})
+		}
 		d.CurRegion = p.region(r.Context(), p.srv.Info().PanelURL, true)
 	} else {
 		c, rec, err := p.srv.RemoteClient(sel)
@@ -238,27 +266,35 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 		d.CurName = rec.Name
 		d.CurRegion = p.region(r.Context(), rec.URL, false)
 		if nodes, err := c.Nodes(r.Context()); err == nil {
-			d.Nodes = nodes
+			d.Nodes, d.LocalTarget = splitNodes(nodes)
+			d.OnlineNodes = countOnline(d.Nodes)
+			d.LocalNodeOn = d.LocalTarget != nil
 			p.labelNodes(r.Context(), d.Nodes)
 		}
 	}
+	d.Draft = existing == nil && d.OnlineNodes == 0
 	// The node is picked outside the form: either it is a property of the
 	// tunnel being edited, or it came in on the entry URL (?node=). When it
 	// resolves, the form shows a locked confirmation instead of the picker.
+	pick := func(id string) {
+		if id == "" {
+			return
+		}
+		if d.LocalTarget != nil && d.LocalTarget.ID == id {
+			d.SelNode = d.LocalTarget
+			return
+		}
+		for i := range d.Nodes {
+			if d.Nodes[i].ID == id {
+				d.SelNode = &d.Nodes[i]
+				return
+			}
+		}
+	}
 	if existing != nil {
-		for i := range d.Nodes {
-			if d.Nodes[i].ID == existing.NodeID {
-				d.SelNode = &d.Nodes[i]
-				break
-			}
-		}
-	} else if nid := r.URL.Query().Get("node"); nid != "" {
-		for i := range d.Nodes {
-			if d.Nodes[i].ID == nid {
-				d.SelNode = &d.Nodes[i]
-				break
-			}
-		}
+		pick(existing.NodeID)
+	} else {
+		pick(r.URL.Query().Get("node"))
 	}
 	p.render(w, r, "tunnel_form", d)
 }
@@ -307,7 +343,7 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 		sel = "local"
 	}
 	port, _ := strconv.Atoi(r.FormValue("remote_port"))
-	enabled := r.FormValue("enabled") != ""
+	enabled := formSwitch(r.FormValue("enabled"))
 	bw, _ := strconv.Atoi(r.FormValue("bandwidth_kb"))
 	quota, _ := strconv.ParseInt(r.FormValue("quota_mb"), 10, 64)
 	local := strings.TrimSpace(r.FormValue("local"))
@@ -386,7 +422,7 @@ func (p *Panel) tunnelToggle(w http.ResponseWriter, r *http.Request, s *session)
 	_ = r.ParseForm()
 	sel := r.FormValue("server")
 	id := r.FormValue("id")
-	on := r.FormValue("enabled") == "true"
+	on := formSwitch(r.FormValue("enabled"))
 	var err error
 	if sel == "" || sel == "local" {
 		err = p.srv.SetTunnelEnabled(id, on)
@@ -405,16 +441,52 @@ func (p *Panel) tunnelToggle(w http.ResponseWriter, r *http.Request, s *session)
 	p.ok(w, r, "/nfr/tunnels", "隧道已更新")
 }
 
+// splitNodes separates real agents from the console host, which the server
+// only offers as a target when the operator opted in.
+func splitNodes(nodes []api.Node) (agents []api.Node, local *api.Node) {
+	agents = make([]api.Node, 0, len(nodes))
+	for i := range nodes {
+		if nodes[i].Local {
+			v := nodes[i]
+			local = &v
+			continue
+		}
+		agents = append(agents, nodes[i])
+	}
+	return agents, local
+}
+
+// countOnline reports how many agents currently hold a control connection.
+func countOnline(nodes []api.Node) int {
+	n := 0
+	for _, v := range nodes {
+		if v.Online {
+			n++
+		}
+	}
+	return n
+}
+
 type nodesData struct {
 	base
-	Nodes   []api.Node
-	Code    string
-	Command string
+	Nodes       []api.Node
+	LocalTarget *api.Node
+	OnlineNodes int
+	LocalNodeOn bool
+	Code        string
+	Command     string
+	JoinWarning string
 }
 
 func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
-	d := nodesData{base: p.newBase(r, s, "nodes", "节点", "nodes"), Nodes: p.srv.Nodes()}
+	d := nodesData{base: p.newBase(r, s, "nodes", "节点", "nodes")}
+	d.Nodes, d.LocalTarget = splitNodes(p.srv.Nodes())
+	d.OnlineNodes = countOnline(d.Nodes)
+	d.LocalNodeOn = d.LocalTarget != nil
 	p.labelNodes(r.Context(), d.Nodes)
+	if d.LocalTarget != nil {
+		p.labelNodes(r.Context(), []api.Node{*d.LocalTarget})
+	}
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		req := api.JoinCodeRequest{Name: strings.TrimSpace(r.FormValue("name"))}
@@ -424,6 +496,7 @@ func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
 		} else {
 			d.Code = resp.Code
 			d.Command = resp.Command
+			d.JoinWarning = resp.Warning
 		}
 	}
 	p.render(w, r, "nodes", d)
@@ -491,19 +564,22 @@ func (p *Panel) servers(w http.ResponseWriter, r *http.Request, s *session) {
 
 type settingsData struct {
 	base
-	Name       string
-	Domain     string
-	APIEnabled bool
-	PortLow    int
-	PortHigh   int
-	Email      string
-	Pin        string
-	PanelURL   string
-	CertSource string
-	CertMode   string
-	CertExpiry string
-	Keys       []api.APIKey
-	NewKey     string
+	Name        string
+	Domain      string
+	PublicHost  string
+	APIEnabled  bool
+	PortLow     int
+	PortHigh    int
+	Email       string
+	Pin         string
+	PanelURL    string
+	CertSource  string
+	CertMode    string
+	CertExpiry  string
+	Keys        []api.APIKey
+	NewKey      string
+	LocalNode   bool
+	JoinWarning string
 }
 
 func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
@@ -559,11 +635,16 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 			high, _ := strconv.Atoi(r.FormValue("port_high"))
 			err := p.srv.UpdateSettings(
 				r.FormValue("domain"),
-				r.FormValue("api_enabled") != "",
+				r.FormValue("public_host"),
+				formSwitch(r.FormValue("api_enabled")),
 				[2]int{low, high},
 				r.FormValue("email"),
 			)
 			if err != nil {
+				d.Error = err.Error()
+				break
+			}
+			if err := p.srv.SetLocalNode(formSwitch(r.FormValue("local_node"))); err != nil {
 				d.Error = err.Error()
 				break
 			}
@@ -580,9 +661,11 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 	info := p.srv.Info()
 	d.Name = info.Name
 	d.Domain = set.Domain
+	d.PublicHost = set.PublicHost
 	d.APIEnabled = set.APIEnabled
 	d.PortLow, d.PortHigh = set.PortRange[0], set.PortRange[1]
 	d.Email = set.HTTPSEmail
+	d.LocalNode = set.LocalNode
 	d.Pin = info.Pinned
 	d.PanelURL = info.PanelURL
 	cert := p.srv.CertSummary()
@@ -659,6 +742,18 @@ func (p *Panel) backErr(w http.ResponseWriter, r *http.Request, path string, err
 	}
 	q := "?server=" + sel + "&err=" + url.QueryEscape(err.Error())
 	http.Redirect(w, r, path+q, http.StatusSeeOther)
+}
+
+// formSwitch reads a checkbox-like value. A browser sends "1" (or "on") when
+// ticked and nothing when not, but scripts post "true"/"false" just as often;
+// treating "false" as truthy because it is a non-empty string would silently
+// enable a tunnel nobody asked to enable.
+func formSwitch(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "0", "false", "off", "no":
+		return false
+	}
+	return true
 }
 
 func splitHosts(raw string) []string {

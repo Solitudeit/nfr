@@ -29,6 +29,10 @@ const (
 	TypePing      = "ping"
 	TypePong      = "pong"
 	TypeError     = "error"
+	// TypeDialFailed is sent by an agent when it could not reach the inner
+	// address of a tunnel. Without it the server only sees a closed stream and
+	// cannot tell a dead local service from a quiet connection.
+	TypeDialFailed = "dial_failed"
 )
 
 // MaxFrameSize bounds a single control frame.

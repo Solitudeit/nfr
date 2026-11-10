@@ -1,12 +1,39 @@
 <div class="page-head">
   <div>
     <h1>节点</h1>
-    <p class="lead">面板所在的机器自带一个节点，可以直接为它建隧道；接进来的每台机器只保持一条主动外连，不需要公网 IP，也不需要开端口。</p>
+    <p class="lead">接进来的每台机器只保持一条主动外连，不需要公网 IP，也不需要开端口。设备在线后，为它建的隧道会自动生效。</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="/nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
   </div>
 </div>
+
+{{if .LocalTarget}}
+<section class="panel" style="margin-bottom:18px">
+  <div class="panel-head">
+    <h2>服务端本机</h2>
+    <span class="card-sub">设置里显式开启 · 不走 agent，和下面的内网设备不是一类目标</span>
+  </div>
+  <div class="node-grid">
+    <section class="card node-card" data-nid="{{.LocalTarget.ID}}">
+      <div class="nc-top">
+        <span class="dot on"></span>
+        <span class="nc-name">{{.LocalTarget.Name}}</span>
+        {{if .LocalTarget.Region}}<span class="chip loc" title="按公网 IP 归属地">{{.LocalTarget.Region}}</span>{{end}}
+        <span class="chip warn">服务端本机</span>
+      </div>
+      <div class="nc-meta">
+        <span>{{if .LocalTarget.OS}}{{.LocalTarget.OS}} / {{.LocalTarget.Arch}}{{if .LocalTarget.Version}} · {{vshort .LocalTarget.Version}}{{end}}{{else}}系统未知{{end}}</span>
+        <span>{{.LocalTarget.Tunnels}} 条隧道</span>
+        <span>面板所在的这台机器</span>
+      </div>
+      <div class="nc-actions">
+        <a class="btn sm" href="/nfr/tunnels/new?server=local&amp;node={{.LocalTarget.ID}}">新建隧道</a>
+      </div>
+    </section>
+  </div>
+</section>
+{{end}}
 
 {{if .Nodes}}
 <div class="node-grid">
@@ -21,18 +48,19 @@
     <div class="nc-meta">
       <span>{{if .OS}}{{.OS}} / {{.Arch}}{{if .Version}} · {{vshort .Version}}{{end}}{{else}}系统未知{{end}}</span>
       <span>{{.Tunnels}} 条隧道</span>
-      <span>{{if .Local}}面板所在机器 · 始终在线{{else}}最后在线 <span data-live-seen>{{if .Online}}刚刚{{else}}{{ago .LastSeen}}{{end}}</span>{{end}}</span>
+      <span>最后在线 <span data-live-seen>{{if .Online}}刚刚{{else}}{{ago .LastSeen}}{{end}}</span></span>
     </div>
+    {{if stale .}}
+    <div class="nc-stale">这台机器一周没上线，也没有隧道挂在它上面。不再需要的话可以移除。</div>
+    {{end}}
     <div class="nc-actions">
       <a class="btn sm" href="/nfr/tunnels/new?server=local&amp;node={{.ID}}">新建隧道</a>
       <button type="button" class="btn ghost sm" data-rename="{{.ID}}" data-name="{{.Name}}">改名</button>
-      {{if not .Local}}
       <form method="post" action="/nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         <input type="hidden" name="id" value="{{.ID}}">
         <button class="btn danger sm" type="submit">移除</button>
       </form>
-      {{end}}
     </div>
     <form class="nc-rename" id="rename-{{.ID}}" hidden method="post" action="/nfr/nodes/rename">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -44,6 +72,12 @@
   </section>
   {{end}}
 </div>
+{{else}}
+<section class="card empty">
+  <div class="empty-icon">{{template "i-empty"}}</div>
+  <b>还没有内网设备接入</b>
+  <p class="muted">在右边生成一个加入码，到那台机器上运行 <code>nfrc join</code>；它上线后这里会出现卡片。</p>
+</section>
 {{end}}
 
 <div class="grid2" style="margin-top:14px">
@@ -56,6 +90,7 @@
         <code>{{.Command}}</code>
         <button type="button" class="btn sm" data-copy="{{.Command}}">复制</button>
       </div>
+      {{if .JoinWarning}}<div class="flash warn" style="margin-top:12px"><span>{{.JoinWarning}}</span></div>{{end}}
       <p class="hint" style="margin-top:12px">在内网机器上执行上面这条命令。加入码只用来换一次长期令牌，令牌只保存在那台机器上；泄露后删掉节点即可失效。</p>
     </section>
     {{end}}
@@ -64,7 +99,7 @@
       <div class="card-head"><h2>它是怎么工作的</h2></div>
       <ol class="steps">
         <li><b>生成加入码</b><span>一次性、5 分钟内有效，泄露了也不怕。</span></li>
-        <li><b>在内网机器上运行</b><span>一条 <code>nfr join</code> 命令，主动外连，不需要公网 IP。</span></li>
+        <li><b>在内网机器上运行</b><span>一条 <code>nfrc join</code> 命令，主动外连，不需要公网 IP。</span></li>
         <li><b>回来建隧道</b><span>把内网端口或域名映射到公网，随时改、随时生效。</span></li>
       </ol>
     </section>

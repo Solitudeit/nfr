@@ -19,6 +19,7 @@ jobs:
       - run: go build ./...
       - name: End-to-end
         run: |
-          go build -o bin/nfr ./cmd/nfr
+          go build -o bin/nfrs ./cmd/nfrs
+          go build -o bin/nfrc ./cmd/nfrc
           python3 scripts/e2e.py
           python3 scripts/e2e_federation.py

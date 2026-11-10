@@ -34,6 +34,11 @@
         <span class="hint">用于生成隧道的默认域名（<code>名称.example.com</code>）。没有域名可以留空。</span>
       </div>
       <div class="field">
+        <label for="public_host">对外地址</label>
+        <input id="public_host" name="public_host" value="{{.PublicHost}}" placeholder="203.0.113.7">
+        <span class="hint">访客连接隧道时用的地址。没有域名、又不在本机访问时填这里（公网 IP 或解析到本机的名字）。留空则自动探测。</span>
+      </div>
+      <div class="field">
         <label>端口范围</label>
         <div class="field-row">
           <input name="port_low" type="number" value="{{.PortLow}}" aria-label="起始端口">
@@ -53,9 +58,43 @@
 </section>
 
 <section class="set-grp">
+  <h3 class="set-title">高级</h3>
+  <form class="card" method="post" action="/nfr/settings">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="domain" value="{{.Domain}}">
+    <input type="hidden" name="public_host" value="{{.PublicHost}}">
+    <input type="hidden" name="port_low" value="{{.PortLow}}">
+    <input type="hidden" name="port_high" value="{{.PortHigh}}">
+    <input type="hidden" name="email" value="{{.Email}}">
+    <input type="hidden" name="name" value="{{.Name}}">
+    <div class="ctl-rows">
+      <label class="ctl-row">
+        <span class="lbl">允许穿透服务端本机
+          <span class="row-sub">打开后，面板所在的这台机器也能作为隧道出口（直接连本机地址，不经过 agent）。内网设备应该用 nfrc join 接入，而不是走这里。</span>
+        </span>
+        <span class="ctl-col">
+          <label class="switch">
+            <input type="checkbox" name="local_node" value="1" {{if .LocalNode}}checked{{end}}>
+            <span class="track" aria-hidden="true"></span>
+          </label>
+        </span>
+      </label>
+    </div>
+    <div class="actions set-foot"><button class="btn sm" type="submit">应用</button></div>
+  </form>
+</section>
+
+<section class="set-grp">
   <h3 class="set-title">REST API</h3>
   <form class="card" method="post" action="/nfr/settings" id="api">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="domain" value="{{.Domain}}">
+    <input type="hidden" name="public_host" value="{{.PublicHost}}">
+    <input type="hidden" name="port_low" value="{{.PortLow}}">
+    <input type="hidden" name="port_high" value="{{.PortHigh}}">
+    <input type="hidden" name="email" value="{{.Email}}">
+    <input type="hidden" name="name" value="{{.Name}}">
+    <input type="hidden" name="local_node" value="{{if .LocalNode}}1{{end}}">
     <div class="ctl-rows">
       <label class="ctl-row">
         <span class="lbl">开放 REST API

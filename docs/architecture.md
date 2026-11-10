@@ -2,20 +2,24 @@
 
 ## 进程与角色
 
-一个二进制，两种角色：
+两个二进制，一个在内网、一个在公网，共用 `internal/` 里的同一套逻辑：
 
-| 角色 | 启动 | 职责 |
-|---|---|---|
-| server | `nfr server` | 公网入口（80/443 + 端口池）、控制通道、面板、REST API、`state.json` |
-| agent | `nfr agent` | 主动外连控制通道、按服务端下发的隧道列表拨内网服务 |
+| 程序 | 部署位置 | 启动 | 职责 |
+|---|---|---|---|
+| `nfrs` | 公网服务器 | `nfrs` | 公网入口（80/443 + 端口池）、控制通道、面板、REST API、`state.json` |
+| `nfrc` | 内网机器 | `nfrc` | 主动外连控制通道、按服务端下发的隧道列表拨内网服务 |
 
-`nfr join` 是一次性客户端：拿到加入码 → 换长期令牌 → 写 `agent.toml`，
-本身不常驻。
+`nfrc join <server> <code>` 是一次性动作：拿到加入码 → 换长期令牌 → 写 `agent.toml`。
+不加 `--no-start` 时它接着就把连接挂上，等于 `nfrs` 侧再也不需要碰第二条命令。
+
+命令行的分发逻辑集中在 `internal/cli`：`cmd/nfrs` 与 `cmd/nfrc` 只负责设置
+`cli.Program` 并交给 `cli.RunServer` / `cli.RunClient`，所以两边的帮助、版本、
+配置路径和错误文案不会各写一套。
 
 ## 连接建立
 
 ```
-agent ──TCP──▶ server:8443
+nfrc ──TCP──▶ nfrs:8443
    TLS 1.3 握手（ALPN nfr/1）
    yamux 会话
    ├─ stream 0：控制流
@@ -24,10 +28,11 @@ agent ──TCP──▶ server:8443
    │    auth    {mac = HMAC-SHA256(sha256(token), nonce)}
    │    welcome {node_id, revision}
    │    config  {tunnels…}        ← 之后每次变更都会重发
+   │    dial_failed {tunnel, msg} ← 拨不通内网地址时上报，面板据此显示「目标不可达」
    │    ping/pong 每 25s，90s 无帧判定掉线
    └─ stream N：一个公网连接一条流
         2 字节长度 + JSON {tunnel, remote}
-        agent 拨 local → 双向 copy → 半关闭
+        nfrc 拨 local → 双向 copy → 半关闭
 ```
 
 令牌本身从不上网：server 存 `sha256(token)`，agent 用它算 HMAC 证明持有令牌。
@@ -47,6 +52,21 @@ agent ──TCP──▶ server:8443
 
 每个连接都会计入 metrics（字节、连接数、错误数），只存内存：
 5 分钟秒级点 + 24 小时分钟级点。
+
+## 隧道状态怎么来的
+
+服务端不猜。一个状态由四份事实合成：
+
+- `enabled` / `quota_paused`：来自 `state.json`，操作员或配额自动关的。
+- 节点在不在：控制通道有没有活跃的 yamux 会话（`s.agents`），不看 `last_seen`。
+- `node_missing`：隧道指向的 node_id 已经不在节点表里（换了机器、删了节点）。
+- `target_down`：agent 上一条 `dial_failed` 帧，拨号成功一次或隧道被改动就清掉。
+
+合起来只输出一个词（就绪 / 活跃 / 已停用 / 配额停用 / 节点离线 / 需重新选择节点 /
+目标不可达），渲染和 4 秒轮询用的是同一个字段，所以页面不会自相矛盾。
+
+内置的「服务端本机」默认不是隧道目标：内网地址属于加入的机器，悄悄在服务器上
+拨它会让一条隧道看起来能用却打到别处。需要时可以设置里显式打开。
 
 ## 状态
 
@@ -72,7 +92,9 @@ agent ──TCP──▶ server:8443
 ## 包结构
 
 ```
-cmd/nfr              子命令入口
+cmd/nfrs             公网服务器的入口（裸命令 = 后台启动）
+cmd/nfrc             内网机器的入口（裸命令 = 按 agent.toml 连接）
+internal/cli         两个二进制共用的命令行：参数、横幅、后台化、join
 internal/config      引导配置（TOML）
 internal/store       state.json + 查询
 internal/auth        join code、token、HMAC、API key

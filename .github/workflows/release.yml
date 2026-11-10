@@ -30,7 +30,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/nfr-*
+            dist/nfrs-*
+            dist/nfrc-*
             dist/SHA256SUMS
             scripts/install.sh
           generate_release_notes: true

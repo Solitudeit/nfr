@@ -3,7 +3,8 @@
 
 Starts a temporary server, joins an agent, creates one HTTP and one TCP
 tunnel and drives traffic through both. Only the Python standard library is
-used, so it runs on any machine that has python3 and a built ./nfr binary.
+used, so it runs on any machine that has python3 and the built nfrs / nfrc
+binaries.
 
     python3 scripts/e2e.py                 # builds its own temp dir
     python3 scripts/e2e.py --keep          # keep the temp dir for debugging
@@ -29,7 +30,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = os.environ.get("NFR_BIN", os.path.join(ROOT, "bin", "nfr"))
+NFRS_BIN = os.environ.get("NFRS_BIN", os.path.join(ROOT, "bin", "nfrs"))
+NFRC_BIN = os.environ.get("NFRC_BIN", os.path.join(ROOT, "bin", "nfrc"))
 
 failures = []
 
@@ -122,12 +124,16 @@ def http_get(port, host_header, timeout=5):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true")
-    ap.add_argument("--bin", default=BIN)
+    ap.add_argument("--nfrs", default=NFRS_BIN, help="the control node binary")
+    ap.add_argument("--nfrc", default=NFRC_BIN, help="the client binary")
     args = ap.parse_args()
 
-    binary = os.path.abspath(args.bin)
-    if not os.path.exists(binary):
-        print("missing binary: " + binary + " (run: go build -o bin/nfr ./cmd/nfr)")
+    nfrs = os.path.abspath(args.nfrs)
+    nfrc = os.path.abspath(args.nfrc)
+    missing = [p for p in (nfrs, nfrc) if not os.path.exists(p)]
+    if missing:
+        print("missing binary: " + ", ".join(missing) +
+              " (run: make build, or: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)")
         return 2
 
     tmp = tempfile.mkdtemp(prefix="nfr-e2e-")
@@ -175,7 +181,7 @@ def main():
 
         server_log = open(os.path.join(tmp, "server.log"), "wb")
         server = subprocess.Popen(
-            [binary, "server", "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
+            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
         )
         procs.append(server)
         if not wait_port(control):
@@ -202,7 +208,7 @@ def main():
 
         agent_cfg = os.path.join(tmp, "agent.toml")
         p = subprocess.run(
-            [binary, "join", "--no-start", "-c", agent_cfg, "--name", "testnode", "127.0.0.1:%d" % control, code],
+            [nfrc, "join", "--no-start", "-c", agent_cfg, "--name", "testnode", "127.0.0.1:%d" % control, code],
             capture_output=True,
             text=True,
         )
@@ -210,7 +216,7 @@ def main():
 
         agent_log = open(os.path.join(tmp, "agent.log"), "wb")
         agent = subprocess.Popen(
-            [binary, "agent", "-c", agent_cfg], stdout=agent_log, stderr=subprocess.STDOUT
+            [nfrc, "-c", agent_cfg], stdout=agent_log, stderr=subprocess.STDOUT
         )
         procs.append(agent)
 
@@ -444,7 +450,7 @@ def main():
         server_log.close()
         server_log = open(os.path.join(tmp, "server.log"), "ab")
         server = subprocess.Popen(
-            [binary, "server", "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
+            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
         )
         procs[0] = server
         check("server restarted", wait_port(control))

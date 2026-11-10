@@ -43,7 +43,7 @@
             {{range .Nodes}}
             <button type="button" class="np-card{{if not .Online}} np-off{{end}}"
                     role="radio" aria-checked="false"
-                    data-id="{{.ID}}">
+                    data-id="{{.ID}}" data-online="{{if .Online}}1{{else}}0{{end}}">
               <span class="np-top">
                 <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
                 <span class="np-name">{{.Name}}</span>
@@ -54,9 +54,17 @@
             {{end}}
             <input type="hidden" name="node_id" id="node_id" value="">
           </div>
+          <div class="flash warn" id="nodewarn" role="alert" hidden></div>
           <span class="tf-hint">点选一台内网机器作为出口；离线节点也能选，机器上线后隧道自动生效。也可以到 <a href="/nfr/nodes">节点</a> 页从某台机器直接新建。</span>
           {{else}}
-          <div class="flash warn" role="alert">还没有接入节点。先到 <a href="/nfr/nodes">节点</a> 页生成加入码，在内网机器上运行 <code>nfr join</code>。</div>
+          <div class="flash warn" role="alert">内网设备当前离线。先在内网机器运行 <code>nfrc join</code>，设备上线后隧道自动生效——现在保存会存为停用状态。</div>
+          {{end}}
+          {{if .LocalTarget}}
+          <div class="np-local" role="note">
+            <span class="chip warn">服务端本机</span>
+            <span class="np-local-txt">面板所在的这台机器也能作为出口（设置里已开启），它不走 agent，和上面的内网设备不是一类目标。</span>
+            <button type="button" class="btn sm{{if and .SelNode (eq .SelNode.ID .LocalTarget.ID)}} primary{{end}}" data-local-node="{{.LocalTarget.ID}}">{{if and .SelNode (eq .SelNode.ID .LocalTarget.ID)}}已选定{{else}}选它{{end}}</button>
+          </div>
           {{end}}
         </div>
       </div>
@@ -136,15 +144,18 @@
     </div>
   </section>
 
+  {{if .Draft}}
+  <div class="flash warn" role="alert" style="margin-top:16px">没有在线的内网设备，这条隧道会先存为停用状态；设备上线后回到列表点「启用」即可。</div>
+  {{end}}
   <section class="card hstack" style="margin-top:16px">
     <label class="switch">
-      <input type="checkbox" id="enabled" name="enabled" value="1" {{if .Edit}}{{if .Edit.Enabled}}checked{{end}}{{else}}checked{{end}}>
+      <input type="checkbox" id="enabled" name="enabled" value="1" {{if .Edit}}{{if .Edit.Enabled}}checked{{end}}{{else if .Draft}}{{else}}checked{{end}}{{if .Draft}} disabled{{end}}>
       <span class="track" aria-hidden="true"></span>
       <span class="txt">启用这条隧道</span>
     </label>
     <span class="right"></span>
     <a class="btn ghost" href="/nfr/tunnels?server={{.Current}}">取消</a>
-    <button type="submit" class="btn primary"{{if eq (len .Nodes) 0}} disabled{{end}}>{{if .Edit}}保存修改{{else}}创建隧道{{end}}</button>
+    <button type="submit" class="btn primary"{{if and (eq (len .Nodes) 0) (not .LocalTarget)}} disabled{{end}}>{{if .Edit}}保存修改{{else if .Draft}}存为停用草稿{{else}}创建隧道{{end}}</button>
   </section>
 </form>
 
@@ -176,6 +187,8 @@
   if (pick && nodeInput) {
     var cards = Array.prototype.slice.call(pick.querySelectorAll('.np-card'));
 
+    var nodeWarn = document.getElementById('nodewarn');
+
     function selectNode(card) {
       cards.forEach(function (c) {
         var on = c === card;
@@ -183,6 +196,17 @@
         c.setAttribute('aria-checked', on ? 'true' : 'false');
       });
       nodeInput.value = card ? card.dataset.id : '';
+      // Picking a machine that is not connected is allowed on purpose — the
+      // tunnel goes live when it comes back — but the operator deserves to
+      // know why nothing flows the moment they save.
+      if (nodeWarn) {
+        var offline = card && card.dataset.online === '0';
+        nodeWarn.hidden = !offline;
+        if (offline) {
+          nodeWarn.textContent = '「' + card.querySelector('.np-name').textContent +
+            '」当前离线，隧道会在它上线后生效。';
+        }
+      }
     }
 
     cards.forEach(function (c) {
@@ -278,6 +302,24 @@
       port.value = v;
     });
   });
+
+  // ---- 服务端本机选项（与 agent 节点隔离） ------------------------------
+  var localBtn = document.querySelector('[data-local-node]');
+  if (localBtn) {
+    localBtn.addEventListener('click', function () {
+      var field = document.getElementById('node_id');
+      if (!field) {
+        field = document.createElement('input');
+        field.type = 'hidden';
+        field.name = 'node_id';
+        field.id = 'node_id';
+        form.appendChild(field);
+      }
+      field.value = localBtn.dataset.localNode;
+      localBtn.classList.add('primary');
+      localBtn.textContent = '已选定';
+    });
+  }
 
   // ---- 提交前把 地址:端口 合成 local ------------------------------------
   form.addEventListener('submit', function () {

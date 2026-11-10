@@ -220,7 +220,7 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		return nil
 	})
 	if !found {
-		_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "unknown node, run nfr join again"})
+		_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "unknown node, run nfrc join again"})
 		sess.Close()
 		return
 	}
@@ -316,8 +316,54 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		case proto.TypePing:
 			_ = a.sendFrame(&proto.Frame{Type: proto.TypePong, TS: time.Now().Unix()})
 		case proto.TypePong:
+		case proto.TypeDialFailed:
+			// The agent is connected but its inner address refused. Record it
+			// so the tunnel reports 目标不可达 rather than 就绪.
+			s.markTargetDown(node.ID, f.Code, f.Message, f.TS)
 		}
 	}
+}
+
+// markTargetDown remembers that an agent could not reach a tunnel's inner
+// address. The flag clears as soon as a connection succeeds or the tunnel is
+// reconfigured, so a fixed local service recovers on its own.
+func (s *Server) markTargetDown(nodeID, tunnelID, message string, ts int64) {
+	if tunnelID == "" {
+		return
+	}
+	at := time.Now()
+	if ts > 0 {
+		at = time.Unix(ts, 0)
+	}
+	s.mu.Lock()
+	if s.targetDown == nil {
+		s.targetDown = make(map[string]targetFailure)
+	}
+	s.targetDown[tunnelID] = targetFailure{node: nodeID, message: message, at: at}
+	s.mu.Unlock()
+	s.lg.Warn("agent cannot reach local service", "node", nodeID, "tunnel", tunnelID, "detail", message)
+	if s.hub != nil {
+		s.hub.publish(api.Event{Type: "tunnel-target-down", At: at, Message: message})
+	}
+}
+
+// clearTargetDown forgets a failure once traffic gets through again.
+func (s *Server) clearTargetDown(tunnelIDs ...string) {
+	if len(tunnelIDs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	for _, id := range tunnelIDs {
+		delete(s.targetDown, id)
+	}
+	s.mu.Unlock()
+}
+
+// targetFailure is one agent's report that a tunnel endpoint refused.
+type targetFailure struct {
+	node    string
+	message string
+	at      time.Time
 }
 
 func remoteIP(addr net.Addr) string {

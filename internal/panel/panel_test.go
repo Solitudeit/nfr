@@ -152,25 +152,72 @@ func TestCreateJoinCode(t *testing.T) {
 	}
 }
 
-func TestTunnelsAlwaysShowsServerCards(t *testing.T) {
+func TestSettingsExposeThePublicAddress(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
 
-	// A single instance still gets a card: the card is where the country and
-	// the tunnel counts live, so skipping it hid both.
+	page := do(p, http.MethodGet, "/nfr/settings", nil, cookies)
+	if page.Code != http.StatusOK {
+		t.Fatalf("settings page = %d", page.Code)
+	}
+	body := page.Body.String()
+	if !strings.Contains(body, `name="public_host"`) {
+		t.Fatal("settings page must offer a public address field")
+	}
+
+	// Saving it round-trips, and the other groups' hidden fields must not
+	// wipe it out when they post.
+	token := extractCSRF(t, body)
+	form := url.Values{
+		"csrf": {token}, "name": {"NFR"}, "domain": {""},
+		"public_host": {"203.0.113.7"}, "port_low": {"20000"}, "port_high": {"29999"},
+		"email": {""}, "api_enabled": {"1"},
+	}
+	if rec := do(p, http.MethodPost, "/nfr/settings", form, cookies); rec.Code != http.StatusOK && rec.Code != http.StatusSeeOther {
+		t.Fatalf("save settings = %d", rec.Code)
+	}
+	after := do(p, http.MethodGet, "/nfr/settings", nil, cookies).Body.String()
+	if !strings.Contains(after, `value="203.0.113.7"`) {
+		t.Error("public address did not persist")
+	}
+	if st := p.srv.Settings(); st.LocalNode {
+		t.Error("local_node should stay off unless explicitly ticked")
+	}
+}
+
+func TestFormSwitchReadsCheckboxesAndBooleans(t *testing.T) {
+	// Browsers post "1" when ticked and nothing when not; scripts post
+	// "true"/"false". Only the empty-ish values may mean off, otherwise a
+	// caller asking for "false" would silently turn a tunnel on.
+	for _, on := range []string{"1", "on", "true", "TRUE", "yes"} {
+		if !formSwitch(on) {
+			t.Errorf("formSwitch(%q) = false, want true", on)
+		}
+	}
+	for _, off := range []string{"", "0", "false", "off", "no", "  "} {
+		if formSwitch(off) {
+			t.Errorf("formSwitch(%q) = true, want false", off)
+		}
+	}
+}
+
+func TestSingleInstanceSkipsTheServerPicker(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	// Federated instances are an advanced feature. With none configured the
+	// tunnel page belongs to this instance, so asking which server to manage
+	// makes no sense.
 	rec := do(p, http.MethodGet, "/nfr/tunnels", nil, cookies)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("tunnels = %d %s", rec.Code, rec.Header().Get("Location"))
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("tunnels = %d, want a redirect to this instance", rec.Code)
 	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `href="/nfr/tunnels?server=local"`) {
-		t.Fatal("tunnels does not link the local instance card")
+	if got := rec.Header().Get("Location"); got != "/nfr/tunnels?server=local" {
+		t.Fatalf("Location = %q", got)
 	}
-	if !strings.Contains(body, "香港") {
-		t.Fatal("server card does not carry the region label")
-	}
-	if strings.Contains(body, ">本机<") {
-		t.Fatal("the console should name the country, not call the instance local")
+	body := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies).Body.String()
+	if strings.Contains(body, "选择一台服务器") {
+		t.Fatal("the tunnel list still offers server selection")
 	}
 }
 
@@ -189,34 +236,38 @@ func extractCSRF(t *testing.T, body string) string {
 	return rest[:j]
 }
 
-func TestNodesShowCountryNotThisHost(t *testing.T) {
+func TestNodesHideTheConsoleHostByDefault(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
 
-	// The built-in node is a node like any other on screen: it has to be
-	// selectable and labelled by its country, never by the words "this host".
+	// An inner address belongs to the machine that joined. Until the operator
+	// opts in, the console host must not be offered as a tunnel target, and it
+	// must never be labelled in a way that suggests it is a normal agent.
 	for _, path := range []string{"/nfr/nodes", "/nfr/tunnels?server=local", "/nfr/tunnels/new?server=local"} {
 		rec := do(p, http.MethodGet, path, nil, cookies)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s = %d", path, rec.Code)
 		}
 		body := rec.Body.String()
-		if !strings.Contains(body, "香港") {
-			t.Fatalf("%s carries no country label for the built-in node", path)
-		}
-		if strings.Contains(body, "本机") {
-			t.Fatalf("%s still calls the instance local", path)
+		if strings.Contains(body, `data-id="local"`) || strings.Contains(body, `data-nid="local"`) {
+			t.Fatalf("%s offers the console host as a target", path)
 		}
 	}
 }
 
-func TestTunnelFormOffersTheBuiltInNode(t *testing.T) {
+func TestTunnelFormOffersTheConsoleHostWhenEnabled(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
 
+	if err := p.srv.SetLocalNode(true); err != nil {
+		t.Fatalf("enable local node: %v", err)
+	}
 	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
 	body := rec.Body.String()
-	if !strings.Contains(body, `data-id="local"`) {
-		t.Fatal("the built-in node is missing from the node picker")
+	if !strings.Contains(body, `data-local-node="local"`) {
+		t.Fatal("the console host is missing from the form once it is enabled")
+	}
+	if !strings.Contains(body, "服务端本机") {
+		t.Fatal("the console host is offered without the badge that separates it from agents")
 	}
 }

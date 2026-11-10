@@ -60,6 +60,15 @@ type Settings struct {
 	PortRange  [2]int `json:"port_range"`
 	APIEnabled bool   `json:"api_enabled"`
 	HTTPSEmail string `json:"https_email"`
+	// PublicHost is the address visitors dial to reach published tunnels, e.g.
+	// "nfr.example.com" or "203.0.113.7". Domain still wins for HTTP tunnels;
+	// this covers the case where the operator has no domain but does know the
+	// public address of a NAT'd host.
+	PublicHost string `json:"public_host,omitempty"`
+	// LocalNode exposes the console host itself as a tunnel target. It is off
+	// by default: an inner address belongs to the machine that joined, not to
+	// the server, so silently dialling it here would break that promise.
+	LocalNode bool `json:"local_node,omitempty"`
 }
 
 // Tunnel is one published service.

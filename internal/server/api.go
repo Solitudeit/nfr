@@ -455,16 +455,20 @@ func (s *Server) apiDeleteKey(w http.ResponseWriter, r *http.Request) {
 
 type settingsView struct {
 	Domain     string `json:"domain"`
+	PublicHost string `json:"public_host,omitempty"`
 	APIEnabled bool   `json:"api_enabled"`
 	PortRange  [2]int `json:"port_range"`
 	HTTPSEmail string `json:"https_email"`
+	LocalNode  bool   `json:"local_node,omitempty"`
 }
 
 func (s *Server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 	st := s.st.Snapshot()
 	writeJSON(w, http.StatusOK, settingsView{
-		Domain: st.Settings.Domain, APIEnabled: st.Settings.APIEnabled,
-		PortRange: st.Settings.PortRange, HTTPSEmail: st.Settings.HTTPSEmail,
+		Domain: st.Settings.Domain, PublicHost: st.Settings.PublicHost,
+		APIEnabled: st.Settings.APIEnabled,
+		PortRange:  st.Settings.PortRange, HTTPSEmail: st.Settings.HTTPSEmail,
+		LocalNode: st.Settings.LocalNode,
 	})
 }
 
@@ -473,7 +477,11 @@ func (s *Server) apiPatchSettings(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if err := s.UpdateSettings(req.Domain, req.APIEnabled, req.PortRange, req.HTTPSEmail); err != nil {
+	if err := s.UpdateSettings(req.Domain, req.PublicHost, req.APIEnabled, req.PortRange, req.HTTPSEmail); err != nil {
+		writeErr2(w, err)
+		return
+	}
+	if err := s.SetLocalNode(req.LocalNode); err != nil {
 		writeErr2(w, err)
 		return
 	}

@@ -58,8 +58,9 @@ type Server struct {
 	udpSess      map[string]*udpSession
 	attempts     map[string]*attempt
 	lastUsed     map[string]time.Time
-	limits       map[string]*tunnelLimit // per tunnel bandwidth shaping
-	flushed      map[string]int64        // quota accounting: metrics total already folded into the store
+	limits       map[string]*tunnelLimit  // per tunnel bandwidth shaping
+	flushed      map[string]int64         // quota accounting: metrics total already folded into the store
+	targetDown   map[string]targetFailure // tunnel id -> last "cannot reach the inner address" report
 
 	httpSrv  *http.Server
 	httpsSrv *http.Server
@@ -295,7 +296,7 @@ func (s *Server) serveConsoleConn(c net.Conn) {
 // ingressHint explains how to coexist with a web server that already owns the
 // port, which is the usual situation on nginx / Caddy boxes.
 func ingressHint(addr string) string {
-	return fmt.Sprintf("if %s is already used by nginx or Caddy, keep it running: set http_listen = \"127.0.0.1:8080\" and https_listen = \"off\" in server.toml, then run `nfr proxy-config <domain>` and paste the snippet into that site's reverse-proxy config", addr)
+	return fmt.Sprintf("if %s is already used by nginx or Caddy, keep it running: set http_listen = \"127.0.0.1:8080\" and https_listen = \"off\" in server.toml, then run `nfrs proxy-config <domain>` and paste the snippet into that site's reverse-proxy config", addr)
 }
 
 func (s *Server) startHTTP() error {
@@ -389,13 +390,18 @@ func (s *Server) serveWellKnown(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// advertisedControl is the control address a joining machine should dial. A
+// wildcard bind (:8443) is not dialable, so the domain — or this machine's
+// first public address — stands in; without that, discovery hands out an
+// address nobody can reach.
 func (s *Server) advertisedControl() string {
 	host, port, err := net.SplitHostPort(s.cfg.ControlListen)
 	if err != nil {
 		return s.cfg.ControlListen
 	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		return ":" + port
+	host = transport.BestHost(s.cfg.Domain, host)
+	if port == "443" {
+		return host
 	}
 	return net.JoinHostPort(host, port)
 }
@@ -427,7 +433,18 @@ func (s *Server) Info() api.Info {
 }
 
 func (s *Server) panelURL() string {
-	return PanelBaseURL(s.cfg)
+	// The console address is for the operator's browser, so it prefers the
+	// same address they configured for visitors; interface probing is only a
+	// fallback for a fresh install with nothing set yet.
+	host := s.publicHost()
+	_, port, err := net.SplitHostPort(s.cfg.ControlListen)
+	if err != nil {
+		port = "8443"
+	}
+	if host == "" {
+		host = firstSiteHost()
+	}
+	return "https://" + net.JoinHostPort(host, port) + "/nfr/"
 }
 
 // PanelBaseURL builds the console address for a configuration: the configured
@@ -518,23 +535,45 @@ func (s *Server) Tunnels() []api.Tunnel {
 		online[id] = true
 	}
 	s.mu.Unlock()
+	s.mu.Lock()
+	failures := make(map[string]targetFailure, len(s.targetDown))
+	for id, f := range s.targetDown {
+		failures[id] = f
+	}
+	s.mu.Unlock()
+	// Visitors dial the configured domain, else the operator's public
+	// address, else this host's first interface address. A bare ":20001" in
+	// the console tells nobody where to connect.
+	publicHost := s.publicHost()
+	if publicHost == "" {
+		publicHost = firstSiteHost()
+	}
 	out := make([]api.Tunnel, 0, len(st.Tunnels))
 	for _, t := range st.Tunnels {
 		nodeName := ""
 		nodeOnline := online[t.NodeID]
+		nodeMissing := false
 		if t.NodeID == localNodeID {
-			nodeName = st.Name
-			if nodeName == "" {
-				nodeName = "NFR"
+			// The console host is only a target when the operator opted in;
+			// otherwise the tunnel has lost its node and says so.
+			if st.Settings.LocalNode {
+				nodeName = st.Name
+				if nodeName == "" {
+					nodeName = "NFR"
+				}
+				nodeOnline = true
+			} else {
+				nodeMissing = true
 			}
-			nodeOnline = true
 		} else if n, ok := st.NodeByID(t.NodeID); ok {
 			nodeName = n.Name
+		} else {
+			nodeMissing = true
 		}
 		v := api.Tunnel{
 			ID: t.ID, Name: t.Name, NodeID: t.NodeID, NodeName: nodeName,
 			Type: t.Type, Local: t.Local, RemotePort: t.RemotePort, Hosts: t.Hosts,
-			Enabled: t.Enabled, Online: nodeOnline,
+			Enabled: t.Enabled, Online: nodeOnline, NodeMissing: nodeMissing, PublicHost: publicHost,
 			BandwidthKB: t.BandwidthKB, QuotaMB: t.QuotaMB, UsedBytes: t.UsedBytes, QuotaPaused: t.QuotaPaused,
 			CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		}
@@ -542,9 +581,35 @@ func (s *Server) Tunnels() []api.Tunnel {
 			v.In, v.Out, v.Conns, v.Active, v.Errs = m.In, m.Out, m.Conns, m.Active, m.Errs
 			v.InRate, v.OutRate = m.InRate, m.OutRate
 		}
+		if _, ok := failures[t.ID]; ok {
+			v.TargetDown = true
+		}
+		v.Status, v.StatusKind = tunnelStatus(v)
 		out = append(out, v)
 	}
 	return out
+}
+
+// tunnelStatus is the single place that decides what one tunnel is doing.
+// The wording avoids 在线: a tunnel is never "online", a node is connected and
+// traffic is either flowing, ready to flow, or blocked by a named cause.
+func tunnelStatus(t api.Tunnel) (label, kind string) {
+	switch {
+	case !t.Enabled && t.QuotaPaused:
+		return "配额停用", "off"
+	case !t.Enabled:
+		return "已停用", "off"
+	case t.NodeMissing:
+		return "需重新选择节点", "warn"
+	case !t.Online:
+		return "节点离线", "err"
+	case t.TargetDown:
+		return "目标不可达", "err"
+	case t.Active > 0:
+		return "活跃", "on"
+	default:
+		return "就绪", "idle"
+	}
 }
 
 // Tunnel returns one tunnel view.
@@ -584,8 +649,11 @@ func (s *Server) Nodes() []api.Node {
 		out = append(out, v)
 	}
 	// The built-in node goes last so callers that pick the first online node
-	// (scripts and integrations) keep choosing a real agent.
-	out = append(out, s.localNode(st))
+	// (scripts and integrations) keep choosing a real agent. It is hidden
+	// unless the operator opted in to tunnelling the console host itself.
+	if st.Settings.LocalNode {
+		out = append(out, s.localNode(st))
+	}
 	return out
 }
 
