@@ -51,6 +51,26 @@
 {{if .RemoteErr}}
 <div class="flash err" role="alert">无法连接这台服务器：{{.RemoteErr}}</div>
 {{else}}
+{{if .IsLocal}}
+<div class="stats">
+  <div class="stat">
+    <span class="stat-v" data-stat="nodes-online">{{.OnlineNodes}} / {{len .Nodes}}</span>
+    <span class="stat-k">在线节点</span>
+  </div>
+  <div class="stat">
+    <span class="stat-v" data-stat="tunnels-enabled">{{.StatsEnabled}} / {{len .Tunnels}}</span>
+    <span class="stat-k">启用隧道</span>
+  </div>
+  <div class="stat">
+    <span class="stat-v" data-stat="total-in">{{bytes .StatsIn}}</span>
+    <span class="stat-k">入站流量</span>
+  </div>
+  <div class="stat">
+    <span class="stat-v" data-stat="total-out">{{bytes .StatsOut}}</span>
+    <span class="stat-k">出站流量</span>
+  </div>
+</div>
+{{end}}
 {{if .Nodes}}
 <section class="panel">
   <div class="panel-head">
