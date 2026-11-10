@@ -1,6 +1,6 @@
 # NFR
 
-**自托管的内网穿透 / 反向隧道工具。一个二进制，自带面板。**
+**自托管的内网穿透 / 反向隧道工具。两个二进制，自带面板。**
 
 NFR 是一款自托管的内网穿透 / 反向隧道工具：把内网的服务暴露到公网服务器上，
 不需要在客户端写配置文件、不需要手动开端口、不需要再装一个第三方面板。
@@ -8,7 +8,7 @@ NFR 是一款自托管的内网穿透 / 反向隧道工具：把内网的服务�
 - 公网机：`nfrs` —— 跑控制通道、面板和 REST API，HTTP 可以用独立端口直连
 - 内网机：`nfrc join <server> <code>` —— 一条 6 位加入码完成接入，之后自动重连
 - 管理：浏览器打开面板，所有隧道、节点、端口、证书都在里面创建
-- 多机：A 机器的面板可以直接纳管 B、C 服务器，在一处管理全部隧道
+- 多机（可选）：A 机器的面板可以纳管 B、C 服务器，在一处管理全部隧道；不用就不出现
 
 ```
                  公网                       内网
@@ -58,13 +58,15 @@ NFR 是一款自托管的内网穿透 / 反向隧道工具：把内网的服务�
 
 ## 快速开始
 
-三条命令，不用先写配置文件。
+不用先写配置文件。
 
 ### 1. 公网服务器
 
+一条命令装好并起起来：
+
 ```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo nfrs
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh \
+  && sudo nfrs -c /etc/nfr/server.toml
 ```
 
 第一次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码；启动信息打印完，
@@ -84,7 +86,16 @@ NFR 就转入后台运行，终端直接还给你：
   停止          nfrs stop
 ```
 
-要盯着日志前台跑（systemd / 调试），加 `--foreground`。
+要长期跑就交给 systemd（unit 里已放行 80/443 的绑定能力和 `/etc/nfr`、`/var/lib/nfr`
+的写权限，首次启动也能自己写配置）：
+
+```bash
+sudo curl -fsSL -o /etc/systemd/system/nfr-server.service \
+  https://github.com/Solitudeit/nfr/releases/latest/download/nfr-server.service
+sudo systemctl daemon-reload && sudo systemctl enable --now nfr-server
+```
+
+要盯着日志跑，加 `--foreground`。
 
 > 也可以用 Docker 起，同样一条命令：
 >
@@ -118,7 +129,7 @@ Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfrc` 作为服�
 
 ### 3. 建隧道
 
-面板「隧道」→ 选服务器 →「新建隧道」：
+面板「隧道」→「新建隧道」：
 
 - **HTTP**：填内网地址，点「获取端口」拿一个公网端口（如 `20612`），访客直接访问
   `http://你的服务器IP:20612`；想按域名分流再填域名，走 80/443，不占额外端口
