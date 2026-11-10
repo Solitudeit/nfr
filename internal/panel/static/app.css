@@ -684,50 +684,6 @@ label.ctl-row { cursor: pointer; }
 .steps li > b { grid-column: 2; font-size: 13px; font-weight: 600; }
 .steps li > span { grid-column: 2; font-size: 12px; color: var(--text-3); }
 
-/* ── quickstart：一行，不抢戏 ──────────────────────────────────────── */
-
-.quickstart {
-  margin-top: 20px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12.5px;
-  color: var(--text-2);
-}
-.quickstart .qs-k { font-size: 11.5px; color: var(--text-3); }
-.quickstart code { color: var(--text); }
-.quickstart .qs-arrow { color: var(--text-3); }
-
-/* ── chart ─────────────────────────────────────────────────────────── */
-
-.chart { height: 200px; position: relative; padding: 0; }
-.chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
-.chart .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 5; }
-.chart .axis { stroke: var(--line-strong); stroke-width: 1; opacity: .6; }
-.chart .area-in { fill: url(#nfr-fill); }
-.chart .line-in { fill: none; stroke: var(--brand); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
-.chart .line-out { fill: none; stroke: var(--series-2); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 5 4; opacity: .9; }
-.chart .dot-in { fill: var(--brand); }
-.chart .halo-in { fill: var(--brand); opacity: .14; }
-.chart .chart-label { fill: var(--text-3); font-size: 9px; font-family: var(--mono); }
-.chart-empty { height: 100%; display: grid; place-items: center; color: var(--text-3); font-size: 12.5px; }
-
-.legend {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
-  color: var(--text-2);
-}
-.legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { width: 12px; height: 2px; border-radius: 1px; background: var(--brand); display: inline-block; }
-.legend .out i { background: var(--series-2); }
-
 /* ── login ─────────────────────────────────────────────────────────── */
 
 .login {
@@ -830,11 +786,9 @@ label.ctl-row { cursor: pointer; }
 @media (max-width: 560px) {
   .card-grid { grid-template-columns: 1fr; }
   .tcard-rows dt { flex-basis: 56px; }
-  .ocard-meta .muted { display: none; }
 
   .content { padding: 14px 14px 96px; }
   .card { padding: 16px; }
-  .legend { padding: 10px 12px; }
   h1 { font-size: 18px; }
   .stat { padding: 10px 14px 9px; }
   .stat-v { font-size: 18px; }
@@ -1013,53 +967,6 @@ a.srv-card:active { transform: scale(.994); }
   gap: 8px;
   margin-top: auto;
   padding-top: 4px;
-}
-
-/* 概览页的隧道行：比列表页更紧凑，一屏能看到更多 */
-.ocard-list {
-  display: flex;
-  flex-direction: column;
-  padding: 6px 8px 10px;
-}
-
-.ocard {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 8px;
-  border-radius: var(--r-sm);
-  text-decoration: none;
-  color: inherit;
-  min-width: 0;
-}
-
-.ocard + .ocard { box-shadow: inset 0 1px 0 var(--line); }
-
-.ocard:hover { background: var(--surface-2); }
-
-.ocard-name {
-  flex: 0 1 auto;
-  font-weight: 600;
-  font-size: 13.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ocard-meta {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.ocard-meta .mono {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 接入节点：外部已选定时的只读确认 */

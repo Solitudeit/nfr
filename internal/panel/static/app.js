@@ -89,11 +89,6 @@
   });
 
   // ── live state ─────────────────────────────────────────────────────
-  var chart = document.querySelector("[data-chart]");
-  var MAX = 48;
-  var target = { in: [], out: [] };
-  var shown = { in: [], out: [] };
-  var anim = null;
 
   function fmtBytes(n) {
     n = Number(n) || 0;
@@ -164,12 +159,6 @@
       }
       setText(row.querySelector("[data-live-seen]"), n.online ? "刚刚" : rel(n.last_seen));
     });
-
-    if (chart) {
-      var tinRate = tunnels.reduce(function (a, t) { return a + (t.in_rate || 0); }, 0);
-      var toutRate = tunnels.reduce(function (a, t) { return a + (t.out_rate || 0); }, 0);
-      pushSample(tinRate, toutRate);
-    }
   }
 
   function rel(ts) {
@@ -180,135 +169,6 @@
     if (d < 86400) return Math.round(d / 3600) + " 小时前";
     return Math.round(d / 86400) + " 天前";
   }
-
-  function pushSample(tin, tout) {
-    target.in.push(tin); target.out.push(tout);
-    // Start the new point from the current on-screen value so the curve never jumps.
-    shown.in.push(shown.in.length ? shown.in[shown.in.length - 1] : tin);
-    shown.out.push(shown.out.length ? shown.out[shown.out.length - 1] : tout);
-    while (target.in.length > MAX) {
-      target.in.shift(); target.out.shift();
-      shown.in.shift(); shown.out.shift();
-    }
-    if (reduce()) {
-      shown.in = target.in.slice();
-      shown.out = target.out.slice();
-      drawChart();
-      return;
-    }
-    animateChart();
-  }
-
-  function animateChart() {
-    if (anim) cancelAnimationFrame(anim);
-    var fromIn = shown.in.slice(), fromOut = shown.out.slice();
-    var toIn = target.in.slice(), toOut = target.out.slice();
-    var t0 = performance.now(), dur = 260;
-    function frame(now) {
-      var k = Math.min(1, (now - t0) / dur);
-      var e = 1 - Math.pow(1 - k, 3);
-      for (var i = 0; i < toIn.length; i++) {
-        shown.in[i] = fromIn[i] + (toIn[i] - fromIn[i]) * e;
-        shown.out[i] = fromOut[i] + (toOut[i] - fromOut[i]) * e;
-      }
-      drawChart();
-      if (k < 1) anim = requestAnimationFrame(frame); else anim = null;
-    }
-    anim = requestAnimationFrame(frame);
-  }
-
-  var NS = "http://www.w3.org/2000/svg";
-  function el(name, attrs) {
-    var e = document.createElementNS(NS, name);
-    for (var k in attrs) e.setAttribute(k, attrs[k]);
-    return e;
-  }
-
-  function drawChart() {
-    // ViewBox matches the container's pixel box 1:1, so labels never stretch
-    // even though preserveAspectRatio is "none".
-    var w = Math.max(chart.clientWidth || 320, 200);
-    var h = Math.max(chart.clientHeight || 200, 120);
-    var padT = 16, padB = 26, padL = 46, padR = 14;
-    var plotW = w - padL - padR;
-    var plotH = h - padT - padB;
-    var all = shown.in.concat(shown.out);
-    var max = Math.max.apply(null, all.length ? all : [0]);
-    if (!max || max <= 0) {
-      if (!chart.querySelector(".chart-empty")) {
-        chart.innerHTML = '<div class="chart-empty">正在采样…</div>';
-      }
-      return;
-    }
-    var n = Math.max(shown.in.length, 2);
-    function X(i) { return padL + (i / (n - 1)) * plotW; }
-    function Y(v) { return padT + plotH - (v / max) * plotH; }
-    function path(arr, close) {
-      var d = "";
-      for (var i = 0; i < arr.length; i++) {
-        d += (i === 0 ? "M" : "L") + X(i).toFixed(2) + " " + Y(arr[i]).toFixed(2);
-      }
-      if (close) {
-        d += " L" + (padL + plotW).toFixed(2) + " " + (padT + plotH).toFixed(2);
-        d += " L" + padL + " " + (padT + plotH).toFixed(2) + " Z";
-      }
-      return d;
-    }
-    var svg = el("svg", { viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none", "aria-hidden": "true" });
-    var defs = el("defs", {});
-    var grad = el("linearGradient", { id: "nfr-fill", x1: 0, y1: 0, x2: 0, y2: 1 });
-    grad.appendChild(el("stop", { offset: "0%", "stop-color": "var(--brand)", "stop-opacity": "0.24" }));
-    grad.appendChild(el("stop", { offset: "100%", "stop-color": "var(--brand)", "stop-opacity": "0" }));
-    defs.appendChild(grad);
-    svg.appendChild(defs);
-
-    // horizontal grid + y axis labels
-    [0, 0.5, 1].forEach(function (f) {
-      var y = padT + plotH - f * plotH;
-      svg.appendChild(el("line", { class: "grid", x1: padL, y1: y.toFixed(1), x2: padL + plotW, y2: y.toFixed(1) }));
-      var label = el("text", { class: "chart-label", x: padL - 9, y: (y + 3).toFixed(1), "text-anchor": "end" });
-      label.textContent = f === 0 ? "0" : fmtBytes(max * f);
-      svg.appendChild(label);
-    });
-    svg.appendChild(el("line", { class: "axis", x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH }));
-
-    // x axis labels
-    ["-3 分钟", "-2 分钟", "-1 分钟", "现在"].forEach(function (txt, i, arr) {
-      var x = padL + (i / (arr.length - 1)) * plotW;
-      var label = el("text", {
-        class: "chart-label", x: x.toFixed(1), y: h - 8,
-        "text-anchor": i === 0 ? "start" : (i === arr.length - 1 ? "end" : "middle")
-      });
-      label.textContent = txt;
-      svg.appendChild(label);
-    });
-
-    if (shown.in.length > 1) {
-      svg.appendChild(el("path", { class: "area-in", d: path(shown.in, true) }));
-      if (shown.out.some(function (v) { return v > 0; })) {
-        svg.appendChild(el("path", { class: "line-out", d: path(shown.out, false), "vector-effect": "non-scaling-stroke" }));
-      }
-      svg.appendChild(el("path", { class: "line-in", d: path(shown.in, false), "vector-effect": "non-scaling-stroke" }));
-      var lx = X(shown.in.length - 1), ly = Y(shown.in[shown.in.length - 1]);
-      svg.appendChild(el("circle", { class: "halo-in", cx: lx.toFixed(2), cy: ly.toFixed(2), r: 7 }));
-      svg.appendChild(el("circle", { class: "dot-in", cx: lx.toFixed(2), cy: ly.toFixed(2), r: 3 }));
-    } else {
-      var lastY = Y(shown.in[0] || 0);
-      svg.appendChild(el("circle", { class: "dot-in", cx: padL + plotW, cy: lastY.toFixed(1), r: 2.5 }));
-    }
-    chart.innerHTML = "";
-    chart.appendChild(svg);
-    setText(document.querySelector("[data-peak]"), "最近几分钟 · 峰值 " + fmtRate(max));
-  }
-
-  // Keep the 1:1 viewBox in sync when the panel width changes.
-  var resizeTimer = null;
-  window.addEventListener("resize", function () {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () {
-      if (chart && chart.querySelector("svg")) drawChart();
-    }, 120);
-  });
 
   var live = document.querySelector("[data-live]");
   if (live) {
