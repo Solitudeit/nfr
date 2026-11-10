@@ -161,6 +161,18 @@ sudo cp deploy/systemd/nfr-agent.service /etc/systemd/system/
 sudo systemctl enable --now nfr-agent
 ```
 
+加入码只用来换一次令牌，换完就作废。**之后重启客户端不要再 `join`**（每 `join`
+一次都会在服务端新增一个节点），而是用已保存的配置启动：
+
+```bash
+nfrc -c /etc/nfr/agent.toml          # 前台
+sudo systemctl restart nfr-agent     # 已装成服务时
+```
+
+这条命令在 `join` 的输出、`--no-start` 的提示和面板「等待接入」卡片上都会给出。
+`nfr-agent.service` 的 `ExecStart` 就是它（附带 `-c /etc/nfr/agent.toml`），
+所以装成服务之后重启机器会自动恢复。
+
 agent 支持同时连多台服务器：多执行几次 `nfrc join`（指向不同服务器）即可，
 `agent.toml` 里会有多个 `[[server]]` 段。
 

@@ -422,6 +422,24 @@ func TestTunnelSaveNewDeviceCreatesAwaiting(t *testing.T) {
 	}
 }
 
+// The waiting card has to tell the operator how to bring the client back
+// after a reboot: the join code is spent once redeemed, so the restart path
+// is the saved agent.toml, not the join command.
+func TestAwaitingCardShowsConfigRestartPath(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+	newDeviceTunnel(t, p, cookies)
+
+	rec := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	body := rec.Body.String()
+	if !strings.Contains(body, "nfrc -c") {
+		t.Fatal("the awaiting card never mentions starting the client from its saved config")
+	}
+	if !strings.Contains(body, "agent.toml") {
+		t.Fatal("the awaiting card does not name the config file the client restarts from")
+	}
+}
+
 func TestRegenCodeRoute(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)

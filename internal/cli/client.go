@@ -180,26 +180,41 @@ func cmdJoin(args []string) {
 		fatal("save config: %v", err)
 	}
 
-	fmt.Printf(`
-  Connected "%s" as node %s
-  ─────────────────────────────
-  Server   %s
-  Config   %s
-  Cert     %s
-`, *name, welcome.NodeID, control, *cfgPath, certLabel(caMode, observedPin))
+	printJoinSummary(*name, welcome.NodeID, control, *cfgPath, certLabel(caMode, observedPin))
 
 	if *noStart {
-		fmt.Printf(`
-  Start the client when you are ready:
-
-    %s -c %s
-`, Program, *cfgPath)
+		printJoinSummaryNoStart(*cfgPath)
 		return
 	}
 
 	lg := log.New(cfg.LogLevel, cfg.LogFile)
 	fmt.Print("\n  Keeping it connected; press Ctrl-C to stop.\n\n")
 	runAgents(cfg, lg)
+}
+
+// printJoinSummary reports what join just saved. The restart command is part
+// of the message because it is the handle the operator needs later: the join
+// code is spent once redeemed, so a reboot goes through this config file.
+func printJoinSummary(nodeName, nodeID, server, cfgPath, cert string) {
+	fmt.Printf(`
+  Connected "%s" as node %s
+  ─────────────────────────────
+  Server   %s
+  Config   %s
+  Cert     %s
+  Restart  %s -c %s
+`, nodeName, nodeID, server, cfgPath, cert, Program, cfgPath)
+}
+
+// printJoinSummaryNoStart is the --no-start tail: it repeats the restart
+// command because that is also the systemd ExecStart and the post-reboot one.
+func printJoinSummaryNoStart(cfgPath string) {
+	fmt.Printf(`
+  Configuration saved and nothing started yet. Bring the client up from it
+  whenever you like — after a reboot, a dropped link or a manual Ctrl-C:
+
+    %s -c %s
+`, Program, cfgPath)
 }
 
 // runAgents keeps one connection per configured server until the process is
