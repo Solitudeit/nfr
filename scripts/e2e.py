@@ -358,6 +358,13 @@ def main():
               "awaiting=%s captured t-%s" % ([t["id"] for t in awaiting], tid))
         check("join command rendered", command_text.startswith("nfrc join "),
               command_text[:60])
+        # The join code is one-shot, so the card must also hand over the path
+        # that brings the client back later: start from the saved config.
+        card = html[html.index('id="t-%s"' % tid):]
+        card = card[:card.index("</article>")]
+        check("awaiting card shows config restart",
+              "nfrc -c" in card and "agent.toml" in card,
+              "no config-start hint on the awaiting card")
         # The card command joins and then keeps the agent connected (it is
         # meant to be pasted on the device), so the harness redeems it with
         # --no-start and its own config dir instead. Flags must precede the

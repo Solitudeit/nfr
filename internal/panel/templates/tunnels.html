@@ -137,6 +137,8 @@
           <span class="join-code">{{$jc.Code}}</span>
           <span class="muted" data-expires="{{$jc.ExpiresAt.Unix}}">剩余 —</span>
         </div>
+        <div class="await-hint">设备重启或客户端中断后，用同一条已保存的配置重新拉起（加入码已用过，不必再要）：</div>
+        <div class="copyfield"><code>nfrc -c /etc/nfr/agent.toml</code><button type="button" data-copy="nfrc -c /etc/nfr/agent.toml">复制</button></div>
         <form method="post" action="/nfr/tunnels/regen-code">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <input type="hidden" name="server" value="{{$.Current}}">
