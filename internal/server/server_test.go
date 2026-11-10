@@ -818,8 +818,20 @@ func TestJoinRedeemsDeletedTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create awaiting tunnel: %v", err)
 	}
-	if err := s.DeleteTunnel(tun.ID); err != nil {
-		t.Fatalf("delete tunnel: %v", err)
+	// Revocation deletes a deleted tunnel's bound codes, so this test reaches
+	// the defensive path in handleJoin — a code whose tunnel vanished without
+	// going through DeleteTunnel — by removing the tunnel from the store
+	// directly.
+	if err := st.Update(func(s *store.State) error {
+		for i := range s.Tunnels {
+			if s.Tunnels[i].ID == tun.ID {
+				s.Tunnels = append(s.Tunnels[:i], s.Tunnels[i+1:]...)
+				break
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("remove tunnel from store: %v", err)
 	}
 
 	addr := startTestControl(t, s)
@@ -880,4 +892,145 @@ func TestJoinDoesNotRebind(t *testing.T) {
 		t.Errorf("tunnel node id = %q, want unchanged %q", got.NodeID, "n1")
 	}
 
+}
+
+// findBoundCode returns the live join code bound to the tunnel, if any.
+func findBoundCode(t *testing.T, st *store.Store, tunnelID string) (auth.JoinCode, bool) {
+	t.Helper()
+	var found auth.JoinCode
+	var ok bool
+	if err := st.View(func(s *store.State) error {
+		if jc, foundHere := store.FindJoinCodeByTunnel(s, tunnelID); foundHere {
+			found, ok = *jc, true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	return found, ok
+}
+
+func TestDeleteTunnelRevokesCode(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.ControlListen = "127.0.0.1:0" })
+	tun, jc, err := s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "tcp", Local: "127.0.0.1:80"}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+	// The bound code must be visible before the delete, so a passing test
+	// can only come from the revocation, not from a code that never existed.
+	if _, ok := findBoundCode(t, st, tun.ID); !ok {
+		t.Fatal("bound code not found before delete")
+	}
+	if err := s.DeleteTunnel(tun.ID); err != nil {
+		t.Fatalf("delete tunnel: %v", err)
+	}
+
+	addr := startTestControl(t, s)
+
+	// Revocation: deleting the awaiting tunnel kills its bound code, so the
+	// old command can never activate anything again.
+	if f, err := joinViaControl(t, s, addr, jc.Code, "late-box"); err != nil {
+		t.Fatalf("join with revoked code: %v", err)
+	} else if f.Type != proto.TypeError {
+		t.Fatalf("join with revoked code: frame %q, want an error reply", f.Type)
+	}
+	if _, ok := findBoundCode(t, st, tun.ID); ok {
+		t.Error("bound code still findable after tunnel deleted")
+	}
+}
+
+func TestRegenerateReplacesBoundCode(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.ControlListen = "127.0.0.1:0" })
+	tun, old, err := s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "tcp", Local: "127.0.0.1:80"}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+	fresh, err := s.RegenerateTunnelCode(tun.ID)
+	if err != nil {
+		t.Fatalf("regenerate: %v", err)
+	}
+	if fresh.Code == old.Code || len(fresh.Code) != 6 {
+		t.Fatalf("fresh code %q must be new and six characters", fresh.Code)
+	}
+	if !strings.HasPrefix(fresh.Command, "nfrc join ") || !strings.Contains(fresh.Command, fresh.Code) {
+		t.Errorf("command %q is not copy-pasteable", fresh.Command)
+	}
+	if want := 30 * time.Minute; time.Until(fresh.ExpiresAt) > want || time.Until(fresh.ExpiresAt) <= 0 {
+		t.Errorf("expires in %v, want within %v", time.Until(fresh.ExpiresAt), want)
+	}
+	// At most one live bound code per tunnel: the old one must be gone.
+	if _, ok := findBoundCode(t, st, tun.ID); !ok {
+		t.Fatal("fresh bound code not found after regenerate")
+	}
+	if found, ok := findBoundCode(t, st, tun.ID); ok && found.Code != fresh.Code {
+		t.Errorf("live bound code = %q, want the fresh %q", found.Code, fresh.Code)
+	}
+
+	addr := startTestControl(t, s)
+
+	// The old code is revoked: its join fails...
+	if f, err := joinViaControl(t, s, addr, old.Code, "stale-box"); err != nil {
+		t.Fatalf("join with old code: %v", err)
+	} else if f.Type != proto.TypeError {
+		t.Fatalf("join with old code: frame %q, want an error reply", f.Type)
+	}
+	// ...and the fresh one joins and binds the tunnel.
+	f, err := joinViaControl(t, s, addr, fresh.Code, "fresh-box")
+	if err != nil {
+		t.Fatalf("join with fresh code: %v", err)
+	}
+	if f.Type != proto.TypeWelcome || f.Token == "" {
+		t.Fatalf("reply %q (msg %q), want welcome with a token", f.Type, f.Message)
+	}
+	node, ok := findNodeByName(t, st, "fresh-box")
+	if !ok {
+		t.Fatal("fresh code did not create a node")
+	}
+	got := mustTunnel(t, s, tun.ID)
+	if got.NodeID != node.ID {
+		t.Errorf("tunnel node id = %q, want %q from the fresh code", got.NodeID, node.ID)
+	}
+}
+
+func TestRegenerateRejectsBoundTunnel(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.ControlListen = "127.0.0.1:0" })
+	tun, old, err := s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "tcp", Local: "127.0.0.1:80"}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+	addr := startTestControl(t, s)
+	if _, err := joinViaControl(t, s, addr, old.Code, "owner-box"); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	node, ok := findNodeByName(t, st, "owner-box")
+	if !ok {
+		t.Fatal("node was not created")
+	}
+	if _, err := s.RegenerateTunnelCode(tun.ID); err == nil {
+		t.Fatal("regenerate on a bound tunnel succeeded, want an error")
+	}
+	// A rejected regenerate must not touch the tunnel or mint a new code:
+	// the only bound code is still the redeemed one, never re-minted.
+	got := mustTunnel(t, s, tun.ID)
+	if got.NodeID != node.ID {
+		t.Errorf("tunnel node id = %q, want unchanged %q", got.NodeID, node.ID)
+	}
+	var boundCodes int
+	if err := st.View(func(s *store.State) error {
+		for _, j := range s.Joins {
+			if j.TunnelID == tun.ID {
+				boundCodes++
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	if boundCodes != 1 {
+		t.Errorf("bound codes = %d, want 1 (the redeemed one, never re-minted)", boundCodes)
+	}
+	// An unknown tunnel is an error, never a panic or a minted code.
+	if _, err := s.RegenerateTunnelCode("no-such-tunnel"); err == nil {
+		t.Error("regenerate on unknown tunnel succeeded, want an error")
+	}
 }
