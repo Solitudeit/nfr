@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -10,11 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/yamux"
 	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/auth"
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/log"
 	"github.com/solitudeit/nfr/internal/proto"
 	"github.com/solitudeit/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/transport"
 )
 
 func newTestServer(t *testing.T, mut func(*config.Server)) (*Server, *store.Store) {
@@ -678,4 +683,201 @@ func TestTunnelStatusAwaiting(t *testing.T) {
 	if got, _ := tunnelStatus(api.Tunnel{Enabled: false, Awaiting: true, QuotaPaused: true}); got != "配额停用" {
 		t.Errorf("quota-paused awaiting tunnel status = %q, want 配额停用", got)
 	}
+}
+
+// startTestControl runs the control accept loop on an ephemeral loopback
+// port, exercising the same serveControlConn path as startControl without
+// racing s.ctlLn. It returns the dial address.
+func startTestControl(t *testing.T, s *Server) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen control: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	done := make(chan struct{})
+	go func() {
+		close(done)
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go s.serveControlConn(c)
+		}
+	}()
+	<-done
+	return ln.Addr().String()
+}
+
+// joinViaControl connects a fake agent through the real control path —
+// TLS with the tunnel ALPN, a yamux session, a join frame — and returns the
+// server's reply. It mirrors what internal/cli does on a real device, so the
+// redemption path is exercised end to end, not just the store mutation.
+func joinViaControl(t *testing.T, s *Server, addr, code, name string) (*proto.Frame, error) {
+	t.Helper()
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	raw, err := dialer.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial control: %v", err)
+	}
+	tc := tls.Client(raw, transport.ClientConfig("localhost", s.Pin()))
+	hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := tc.HandshakeContext(hctx); err != nil {
+		raw.Close()
+		return nil, err
+	}
+	sess, err := yamux.Client(tc, yamuxConfig())
+	if err != nil {
+		tc.Close()
+		return nil, err
+	}
+	defer sess.Close()
+	stream, err := sess.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := proto.WriteFrame(stream, &proto.Frame{
+		Type: proto.TypeJoin, Code: code, Node: name,
+		OS: "linux", Arch: "amd64", Version: "test",
+	}); err != nil {
+		return nil, err
+	}
+	f, err := proto.ReadFrame(stream)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// findNodeByName returns the node with the given name, if it joined.
+func findNodeByName(t *testing.T, st *store.Store, name string) (store.Node, bool) {
+	t.Helper()
+	var found store.Node
+	var ok bool
+	if err := st.View(func(s *store.State) error {
+		for _, n := range s.Nodes {
+			if n.Name == name {
+				found, ok = n, true
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	return found, ok
+}
+
+func TestJoinBindsAwaitingTunnel(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.ControlListen = "127.0.0.1:0" })
+	tun, jc, err := s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "tcp", Local: "127.0.0.1:80"}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+
+	// The control listener address is assigned after startControl, so the
+	// server must already be running before the fake agent dials it.
+	addr := startTestControl(t, s)
+
+	f, err := joinViaControl(t, s, addr, jc.Code, "edge-box")
+	if err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	if f.Type != proto.TypeWelcome || f.Token == "" {
+		t.Fatalf("reply %q (msg %q), want welcome with a token", f.Type, f.Message)
+	}
+
+	node, ok := findNodeByName(t, st, "edge-box")
+	if !ok {
+		t.Fatal("joined node was not created")
+	}
+	if node.ID != f.NodeID {
+		t.Errorf("welcome node id %q, want the stored node %q", f.NodeID, node.ID)
+	}
+	// The whole point: redemption binds the awaiting tunnel to the new node
+	// inside the same update, so it stops waiting immediately.
+	got := mustTunnel(t, s, tun.ID)
+	if got.NodeID != node.ID {
+		t.Errorf("tunnel node id = %q, want %q", got.NodeID, node.ID)
+	}
+	if got.Awaiting {
+		t.Error("tunnel still awaiting after its code was redeemed")
+	}
+	if got.Status == "等待接入" {
+		t.Errorf("status = %q, the bound tunnel must not wait anymore", got.Status)
+	}
+
+}
+
+func TestJoinRedeemsDeletedTunnel(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.ControlListen = "127.0.0.1:0" })
+	tun, jc, err := s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "tcp", Local: "127.0.0.1:80"}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+	if err := s.DeleteTunnel(tun.ID); err != nil {
+		t.Fatalf("delete tunnel: %v", err)
+	}
+
+	addr := startTestControl(t, s)
+
+	// The tunnel is gone, but the code itself is still valid: the join must
+	// succeed and create the node, never panic on the missing tunnel.
+	f, err := joinViaControl(t, s, addr, jc.Code, "late-box")
+	if err != nil {
+		t.Fatalf("join after tunnel deleted: %v", err)
+	}
+	if f.Type != proto.TypeWelcome || f.Token == "" {
+		t.Fatalf("reply %q (msg %q), want welcome with a token", f.Type, f.Message)
+	}
+	if _, ok := findNodeByName(t, st, "late-box"); !ok {
+		t.Fatal("node was not created after redeeming a deleted tunnel's code")
+	}
+
+}
+
+func TestJoinDoesNotRebind(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.ControlListen = "127.0.0.1:0" })
+	// A tunnel already owned by n1, plus a code that still claims this tunnel.
+	// The code avoids I/L/O: NormalizeJoinCode maps those to 1/1/0, so a code
+	// with them would not round-trip through the lookup.
+	addNode(t, st, "n1")
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "owned", NodeID: "n1", Type: "tcp", Local: "127.0.0.1:80"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := st.Update(func(s *store.State) error {
+		s.PruneJoins(now)
+		s.Joins = append(s.Joins, auth.JoinCode{
+			Code: "REBND7", NodeName: "sneaky", TunnelID: tun.ID,
+			CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("mint rebind code: %v", err)
+	}
+
+	addr := startTestControl(t, s)
+
+	f, err := joinViaControl(t, s, addr, "REBND7", "sneaky")
+	if err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	if f.Type != proto.TypeWelcome || f.Token == "" {
+		t.Fatalf("reply %q (msg %q), want welcome with a token", f.Type, f.Message)
+	}
+	// Joining succeeds, the node exists, but an already-bound tunnel is never
+	// touched — no rebinding, even for a freshly minted node.
+	if _, ok := findNodeByName(t, st, "sneaky"); !ok {
+		t.Fatal("node was not created")
+	}
+	got := mustTunnel(t, s, tun.ID)
+	if got.NodeID != "n1" {
+		t.Errorf("tunnel node id = %q, want unchanged %q", got.NodeID, "n1")
+	}
+
 }
