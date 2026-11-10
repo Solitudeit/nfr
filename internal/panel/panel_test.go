@@ -93,19 +93,29 @@ func TestRequiresLogin(t *testing.T) {
 	}
 }
 
-func TestLoginAndOverview(t *testing.T) {
+func TestLoginLandsOnTunnels(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
 
+	// The overview page is gone: the console root and /nfr/overview both send
+	// the operator to this instance's tunnels.
 	rec := do(p, http.MethodGet, "/nfr/", nil, cookies)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/nfr/tunnels?server=local" {
+		t.Fatalf("root = %d %s, want 303 to the local tunnels", rec.Code, rec.Header().Get("Location"))
+	}
+	if rec = do(p, http.MethodGet, "/nfr/overview", nil, cookies); rec.Code != http.StatusSeeOther {
+		t.Fatalf("overview = %d, want 303", rec.Code)
+	}
+
+	rec = do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("overview = %d", rec.Code)
+		t.Fatalf("tunnels = %d", rec.Code)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "example.com") {
-		t.Fatalf("overview does not show the instance: %s", body[:200])
+		t.Fatalf("tunnels does not show the instance: %s", body[:200])
 	}
-	// The session is required on every page, not just the overview.
+	// The session is required on every page, not just the tunnels.
 	if rec := do(p, http.MethodGet, "/nfr/tunnels", nil, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("tunnels without a session = %d", rec.Code)
 	}
@@ -219,6 +229,27 @@ func TestSingleInstanceSkipsTheServerPicker(t *testing.T) {
 	body := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies).Body.String()
 	if strings.Contains(body, "选择一台服务器") {
 		t.Fatal("the tunnel list still offers server selection")
+	}
+}
+
+func TestTunnelsCarriesStatsAndFourNavItems(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	// The tunnels page absorbed the overview's stats block, and the nav
+	// dropped the overview entry.
+	rec := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tunnels = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`data-stat="nodes-online"`, `data-stat="tunnels-enabled"`, `data-stat="total-in"`, `data-stat="total-out"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("tunnels page is missing the stat %s", want)
+		}
+	}
+	if strings.Contains(body, "概览") {
+		t.Fatal("the nav still offers the overview page")
 	}
 }
 

@@ -64,14 +64,12 @@
 </html>{{end}}
 
 {{define "nav"}}
-<a href="/nfr/overview" class="{{if eq .Nav "overview"}}active{{end}}">{{template "i-grid"}}<span>概览</span></a>
 <a href="/nfr/tunnels" class="{{if eq .Nav "tunnels"}}active{{end}}">{{template "i-tunnels"}}<span>隧道</span></a>
 <a href="/nfr/nodes" class="{{if eq .Nav "nodes"}}active{{end}}">{{template "i-nodes"}}<span>节点</span></a>
 <a href="/nfr/servers" class="{{if eq .Nav "servers"}}active{{end}}">{{template "i-servers"}}<span>服务器</span></a>
 <a href="/nfr/settings" class="{{if eq .Nav "settings"}}active{{end}}">{{template "i-settings"}}<span>设置</span></a>
 {{end}}
 
-{{define "i-grid"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>{{end}}
 {{define "i-tunnels"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5h11"/><path d="m11.5 4.5 3 3-3 3"/><path d="M20.5 16.5h-11"/><path d="m12.5 13.5-3 3 3 3"/></svg>{{end}}
 {{define "i-nodes"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>{{end}}
 {{define "i-servers"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.5L12 12 3.5 7.5 12 3Z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5"/><path d="m3.5 17 8.5 4.5 8.5-4.5"/></svg>{{end}}

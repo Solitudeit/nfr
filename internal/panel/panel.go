@@ -214,7 +214,9 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.Path == "/nfr/" || r.URL.Path == "/nfr/overview":
-		p.overview(w, r, sess)
+		// The overview page merged into the tunnels page: both entry points
+		// land on this instance's tunnels, which carry the stats block now.
+		http.Redirect(w, r, "/nfr/tunnels?server=local", http.StatusSeeOther)
 	case r.URL.Path == "/nfr/tunnels":
 		p.tunnels(w, r, sess)
 	case r.URL.Path == "/nfr/tunnels/new":

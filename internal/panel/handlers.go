@@ -27,35 +27,6 @@ type serverCard struct {
 	RegionCode string // ISO 3166-1 alpha-2, for the flag
 }
 
-type overviewData struct {
-	base
-	Tunnels []api.Tunnel
-	Nodes   []api.Node
-	Online  int
-	Enabled int
-	In      int64
-	Out     int64
-}
-
-func (p *Panel) overview(w http.ResponseWriter, r *http.Request, s *session) {
-	tunnels := p.srv.Tunnels()
-	nodes := p.srv.Nodes()
-	d := overviewData{base: p.newBase(r, s, "overview", "概览", "overview"), Tunnels: tunnels, Nodes: nodes}
-	for _, n := range nodes {
-		if n.Online {
-			d.Online++
-		}
-	}
-	for _, t := range tunnels {
-		if t.Enabled {
-			d.Enabled++
-		}
-		d.In += t.In
-		d.Out += t.Out
-	}
-	p.render(w, r, "overview", d)
-}
-
 type tunnelsData struct {
 	base
 	Cards     []serverCard
@@ -88,6 +59,11 @@ type tunnelsData struct {
 	// current server, keyed by tunnel id, so the card can show what a new
 	// device must run without a second request.
 	Codes map[string]api.JoinCodeResponse
+	// Stats block fields for the local view: online nodes come from
+	// OnlineNodes; the rest restate what the overview page used to render.
+	StatsEnabled int
+	StatsIn      int64
+	StatsOut     int64
 }
 
 // cards renders every instance the console can reach, the local one first.
@@ -204,6 +180,17 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		d.Nodes, d.LocalTarget = splitNodes(p.srv.Nodes())
 		d.OnlineNodes = countOnline(d.Nodes)
 		d.LocalNodeOn = d.LocalTarget != nil
+		// The stats block keeps the four headline numbers the overview page
+		// used to show. Totals sum the tunnels loaded above: the server
+		// exposes no traffic aggregate, and the page repaints the block live
+		// from /nfr/api/state anyway.
+		for _, t := range d.Tunnels {
+			if t.Enabled {
+				d.StatsEnabled++
+			}
+			d.StatsIn += t.In
+			d.StatsOut += t.Out
+		}
 		p.labelNodes(r.Context(), d.Nodes)
 		if d.LocalTarget != nil {
 			p.labelNodes(r.Context(), []api.Node{*d.LocalTarget})
