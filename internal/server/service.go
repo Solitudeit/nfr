@@ -180,6 +180,9 @@ func (s *Server) DeleteTunnel(id string) error {
 					}
 				}
 				st.Leases = leases
+				// Revocation: a deleted awaiting tunnel's command must never
+				// work again, so its bound codes die with it.
+				store.DeleteJoinsByTunnel(st, id)
 				return nil
 			}
 		}
@@ -193,6 +196,48 @@ func (s *Server) DeleteTunnel(id string) error {
 	s.reconcile()
 	s.notify("tunnel deleted: " + name)
 	return nil
+}
+
+// RegenerateTunnelCode replaces the join code bound to an awaiting tunnel:
+// the old code is revoked and a fresh one minted in the same update, so at
+// most one live bound code exists per tunnel. TTL is fixed at 30 minutes.
+func (s *Server) RegenerateTunnelCode(id string) (api.JoinCodeResponse, error) {
+	var code string
+	var expiresAt time.Time
+	err := s.st.Update(func(st *store.State) error {
+		t, ok := st.TunnelByID(id)
+		if !ok {
+			return errNotFound("tunnel not found")
+		}
+		if t.NodeID != "" {
+			return errConflict("already_joined", "this tunnel already has a node")
+		}
+		// One live bound code per tunnel: drop the old before minting.
+		store.DeleteJoinsByTunnel(st, id)
+		now := time.Now().UTC()
+		st.PruneJoins(now)
+		code = auth.NewJoinCode()
+		expiresAt = now.Add(30 * time.Minute)
+		st.Joins = append(st.Joins, auth.JoinCode{
+			Code:      code,
+			NodeName:  t.Name,
+			TunnelID:  t.ID,
+			CreatedAt: now,
+			ExpiresAt: expiresAt,
+		})
+		return nil
+	})
+	if err != nil {
+		return api.JoinCodeResponse{}, err
+	}
+	// joinHost reads the store, so it must run after Update released its lock.
+	host, warning := s.joinHost()
+	return api.JoinCodeResponse{
+		Code:      code,
+		ExpiresAt: expiresAt,
+		Command:   fmt.Sprintf("nfrc join %s %s", host, code),
+		Warning:   warning,
+	}, nil
 }
 
 // SetTunnelEnabled flips the enabled switch.
