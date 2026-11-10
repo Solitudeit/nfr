@@ -553,6 +553,7 @@ func (s *Server) Tunnels() []api.Tunnel {
 		nodeName := ""
 		nodeOnline := online[t.NodeID]
 		nodeMissing := false
+		awaiting := t.NodeID == ""
 		if t.NodeID == localNodeID {
 			// The console host is only a target when the operator opted in;
 			// otherwise the tunnel has lost its node and says so.
@@ -573,7 +574,7 @@ func (s *Server) Tunnels() []api.Tunnel {
 		v := api.Tunnel{
 			ID: t.ID, Name: t.Name, NodeID: t.NodeID, NodeName: nodeName,
 			Type: t.Type, Local: t.Local, RemotePort: t.RemotePort, Hosts: t.Hosts,
-			Enabled: t.Enabled, Online: nodeOnline, NodeMissing: nodeMissing, PublicHost: publicHost,
+			Enabled: t.Enabled, Awaiting: awaiting, Online: nodeOnline, NodeMissing: nodeMissing, PublicHost: publicHost,
 			BandwidthKB: t.BandwidthKB, QuotaMB: t.QuotaMB, UsedBytes: t.UsedBytes, QuotaPaused: t.QuotaPaused,
 			CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		}
@@ -592,13 +593,16 @@ func (s *Server) Tunnels() []api.Tunnel {
 
 // tunnelStatus is the single place that decides what one tunnel is doing.
 // The wording avoids 在线: a tunnel is never "online", a node is connected and
-// traffic is either flowing, ready to flow, or blocked by a named cause.
+// traffic is either flowing, ready to flow, or blocked by a named cause. A
+// waiting tunnel has no node yet and says so ahead of the node checks.
 func tunnelStatus(t api.Tunnel) (label, kind string) {
 	switch {
 	case !t.Enabled && t.QuotaPaused:
 		return "配额停用", "off"
 	case !t.Enabled:
 		return "已停用", "off"
+	case t.Awaiting:
+		return "等待接入", "warn"
 	case t.NodeMissing:
 		return "需重新选择节点", "warn"
 	case !t.Online:
