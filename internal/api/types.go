@@ -41,6 +41,9 @@ type Tunnel struct {
 	// NodeMissing marks a tunnel whose node no longer exists, which is what a
 	// tunnel pointed at the console host looks like when that target is off.
 	NodeMissing bool `json:"node_missing,omitempty"`
+	// Awaiting marks a tunnel that was created before its node exists and
+	// waits for a device to redeem the join code minted at creation.
+	Awaiting bool `json:"awaiting,omitempty"`
 	// TargetDown reports that the agent is connected but could not reach the
 	// inner address.
 	TargetDown bool `json:"target_down,omitempty"`
@@ -48,9 +51,9 @@ type Tunnel struct {
 	// domain, else this machine's public address. A bare port like ":20001"
 	// tells an operator nothing they can paste into a browser.
 	PublicHost string `json:"public_host,omitempty"`
-	// Status is the one word a person reads: 已停用 / 配额停用 / 节点离线 /
-	// 需重新选择节点 / 就绪 / 活跃 / 目标不可达. StatusKind maps it to a dot and
-	// a chip class so the console and its poller never disagree.
+	// Status is the one word a person reads: 已停用 / 配额停用 / 等待接入 /
+	// 节点离线 / 需重新选择节点 / 就绪 / 活跃 / 目标不可达. StatusKind maps it
+	// to a dot and a chip class so the console and its poller never disagree.
 	Status     string    `json:"status"`
 	StatusKind string    `json:"status_kind"`
 	In         int64     `json:"in"`

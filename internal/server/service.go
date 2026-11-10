@@ -18,7 +18,7 @@ import (
 func (s *Server) CreateTunnel(req api.TunnelRequest) (api.Tunnel, error) {
 	var created store.Tunnel
 	err := s.st.Update(func(st *store.State) error {
-		t, err := buildTunnel(st, req, nil, s.cfg.Domain)
+		t, err := buildTunnel(st, req, nil, s.cfg.Domain, false)
 		if err != nil {
 			return err
 		}
@@ -40,6 +40,93 @@ func (s *Server) CreateTunnel(req api.TunnelRequest) (api.Tunnel, error) {
 	return api.Tunnel{}, nil
 }
 
+// CreateTunnelAwaiting creates a tunnel that has no node yet and mints a join
+// code bound to it, all inside one store update. The device that redeems the
+// code becomes the tunnel's node. NodeID "new" selects this flow; the name is
+// left empty, one is generated from the assigned port.
+func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) (api.Tunnel, api.JoinCodeResponse, error) {
+	if strings.TrimSpace(req.NodeID) != "new" {
+		return api.Tunnel{}, api.JoinCodeResponse{}, errBad("node_id", "awaiting tunnels are created with node_id \"new\"")
+	}
+	if ttl <= 0 {
+		ttl = 30 * time.Minute
+	}
+	if ttl > time.Hour {
+		ttl = time.Hour
+	}
+
+	var created store.Tunnel
+	var code string
+	var expiresAt time.Time
+	err := s.st.Update(func(st *store.State) error {
+		// The auto name is derived from the remote port, so a port must exist
+		// before buildTunnel validates the name. Without an explicit port one
+		// is picked here and buildTunnel binds exactly that port.
+		if req.RemotePort == 0 {
+			port, err := pickPort(st, "", "tcp")
+			if err != nil {
+				return err
+			}
+			req.RemotePort = port
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			name := fmt.Sprintf("tunnel-%d", req.RemotePort)
+			for _, o := range st.Tunnels {
+				if strings.EqualFold(o.Name, name) {
+					name = fmt.Sprintf("tunnel-%d-%s", req.RemotePort, store.NewID()[:4])
+					break
+				}
+			}
+			req.Name = name
+		}
+		// The tunnel has no node yet: clear the marker and let buildTunnel
+		// skip the node check. The ordinary API passes false and can never
+		// quietly create a nodeless tunnel.
+		req.NodeID = ""
+		t, err := buildTunnel(st, req, nil, s.cfg.Domain, true)
+		if err != nil {
+			return err
+		}
+		t.ID = store.NewID()
+		t.CreatedAt = time.Now().UTC()
+		t.UpdatedAt = t.CreatedAt
+		st.Tunnels = append(st.Tunnels, *t)
+		created = *t
+
+		// Mint the bound code in the same update: a tunnel without its code
+		// would wait forever.
+		now := time.Now().UTC()
+		code = auth.NewJoinCode()
+		expiresAt = now.Add(ttl)
+		st.PruneJoins(now)
+		st.Joins = append(st.Joins, auth.JoinCode{
+			Code:      code,
+			NodeName:  t.Name,
+			TunnelID:  t.ID,
+			CreatedAt: now,
+			ExpiresAt: expiresAt,
+		})
+		return nil
+	})
+	if err != nil {
+		return api.Tunnel{}, api.JoinCodeResponse{}, err
+	}
+	// joinHost reads the store, so it must run after Update released its lock.
+	host, warning := s.joinHost()
+	resp := api.JoinCodeResponse{
+		Code:      code,
+		ExpiresAt: expiresAt,
+		Command:   fmt.Sprintf("nfrc join %s %s", host, code),
+		Warning:   warning,
+	}
+	s.reconcile()
+	s.notify("awaiting tunnel created: " + created.Name)
+	if v, ok := s.Tunnel(created.ID); ok {
+		return v, resp, nil
+	}
+	return api.Tunnel{}, resp, nil
+}
+
 // UpdateTunnel replaces the editable fields of a tunnel.
 func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, error) {
 	var node string
@@ -48,7 +135,7 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 		if !ok {
 			return errNotFound("tunnel not found")
 		}
-		next, err := buildTunnel(st, req, cur, s.cfg.Domain)
+		next, err := buildTunnel(st, req, cur, s.cfg.Domain, false)
 		if err != nil {
 			return err
 		}
@@ -133,7 +220,7 @@ func (s *Server) SetTunnelEnabled(id string, on bool) error {
 
 // buildTunnel normalises and validates a tunnel description. It mutates the
 // lease list only when a valid lease is supplied.
-func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel, domain string) (*store.Tunnel, error) {
+func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel, domain string, allowAwaiting bool) (*store.Tunnel, error) {
 	t := &store.Tunnel{Enabled: true}
 	name := strings.TrimSpace(req.Name)
 	nodeID := strings.TrimSpace(req.NodeID)
@@ -203,7 +290,12 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 			return nil, errBad("name", "tunnel name may only contain letters, digits, dot, dash and underscore")
 		}
 	}
-	if nodeID == localNodeID {
+	if allowAwaiting && nodeID == "" {
+		// The awaiting flow: the tunnel is created before any node exists and
+		// waits for a device to redeem the join code minted alongside it. The
+		// ordinary API never gets here (allowAwaiting stays false), so a
+		// normal create cannot quietly produce a nodeless tunnel.
+	} else if nodeID == localNodeID {
 		if !st.Settings.LocalNode {
 			return nil, errBad("node_id", "the console host is not available as a tunnel target")
 		}

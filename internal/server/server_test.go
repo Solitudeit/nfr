@@ -589,3 +589,93 @@ func mustTunnel(t *testing.T, s *Server, id string) api.Tunnel {
 	}
 	return v
 }
+
+func TestCreateTunnelAwaiting(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+	// The brief pins ttl 30 minutes for the awaiting flow.
+	tun, jc, err := s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "tcp", Local: "127.0.0.1:80"}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+	if tun.NodeID != "" {
+		t.Errorf("node id = %q, want empty", tun.NodeID)
+	}
+	if !tun.Awaiting {
+		t.Error("awaiting flag not set")
+	}
+	if tun.Status != "等待接入" {
+		t.Errorf("status = %q, want 等待接入", tun.Status)
+	}
+	if len(tun.Name) == 0 || tun.Name == "new" {
+		t.Errorf("auto name not generated: %q", tun.Name)
+	}
+	if want := fmt.Sprintf("tunnel-%d", tun.RemotePort); tun.Name != want {
+		t.Errorf("auto name = %q, want %q", tun.Name, want)
+	}
+	if len(jc.Code) != 6 {
+		t.Errorf("join code = %q, want six characters", jc.Code)
+	}
+	if !strings.HasPrefix(jc.Command, "nfrc join ") {
+		t.Errorf("command = %q, want the nfrc join prefix", jc.Command)
+	}
+	// The minted code must be bound to this tunnel, and the tunnel must
+	// render as awaiting through the list path too.
+	got := mustTunnel(t, s, tun.ID)
+	if !got.Awaiting || got.Status != "等待接入" {
+		t.Errorf("rendered tunnel: awaiting=%v status=%q", got.Awaiting, got.Status)
+	}
+}
+
+func TestAwaitingPortReachable(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+	// A dedicated HTTP port so the 502 semantics are observable without any
+	// node: reconcile must listen before a device ever joins.
+	tun, _, err := s.CreateTunnelAwaiting(api.TunnelRequest{NodeID: "new", Type: "http", Local: "127.0.0.1:80", RemotePort: 25470}, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("create awaiting tunnel: %v", err)
+	}
+	if tun.RemotePort != 25470 {
+		t.Fatalf("remote port = %d, want 25470", tun.RemotePort)
+	}
+	// reconcile() opens the public listener asynchronously enough that a short
+	// retry loop is the simplest reliable way to wait for it.
+	var conn net.Conn
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		c, err := net.DialTimeout("tcp", "127.0.0.1:25470", 300*time.Millisecond)
+		if err == nil {
+			conn = c
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("public port never opened: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.Get("http://127.0.0.1:25470/")
+	if err != nil {
+		t.Fatalf("request awaiting port: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 while awaiting", resp.StatusCode)
+	}
+}
+
+func TestTunnelStatusAwaiting(t *testing.T) {
+	// An awaiting tunnel must not fall into the nodeMissing wording even
+	// though it has no node yet.
+	got, kind := tunnelStatus(api.Tunnel{Enabled: true, Awaiting: true, NodeMissing: true})
+	if got != "等待接入" || kind != "warn" {
+		t.Fatalf("got (%q,%q), want (等待接入,warn)", got, kind)
+	}
+	// Disabled stays first: a deactivated tunnel never shows 等待接入.
+	if got, _ := tunnelStatus(api.Tunnel{Enabled: false, Awaiting: true}); got != "已停用" {
+		t.Errorf("disabled awaiting tunnel status = %q, want 已停用", got)
+	}
+	if got, _ := tunnelStatus(api.Tunnel{Enabled: false, Awaiting: true, QuotaPaused: true}); got != "配额停用" {
+		t.Errorf("quota-paused awaiting tunnel status = %q, want 配额停用", got)
+	}
+}
