@@ -27,7 +27,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = os.environ.get("NFR_BIN", os.path.join(ROOT, "bin", "nfr"))
+NFRS_BIN = os.environ.get("NFRS_BIN", os.path.join(ROOT, "bin", "nfrs"))
+NFRC_BIN = os.environ.get("NFRC_BIN", os.path.join(ROOT, "bin", "nfrc"))
 PAYLOAD = b"hello from the second node\n"
 
 failures = []
@@ -113,7 +114,7 @@ def http_get(port, host_header, timeout=5):
     return resp.status, body
 
 
-def start_server(binary, tmp, name):
+def start_server(nfrs, tmp, name):
     control = free_port()
     ingress = free_port()
     base = os.path.join(tmp, name)
@@ -129,7 +130,7 @@ def start_server(binary, tmp, name):
             'log_level = "debug"\n' % (control, ingress, os.path.join(base, "data"))
         )
     log = open(os.path.join(base, "server.log"), "wb")
-    proc = subprocess.Popen([binary, "server", "--foreground", "-c", cfg], stdout=log, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen([nfrs, "--foreground", "-c", cfg], stdout=log, stderr=subprocess.STDOUT)
     if not wait_port(control):
         raise RuntimeError("server " + name + " never listened on " + str(control))
     text = open(os.path.join(base, "server.log"), errors="replace").read()
@@ -140,9 +141,12 @@ def start_server(binary, tmp, name):
 
 
 def main():
-    binary = os.path.abspath(BIN)
-    if not os.path.exists(binary):
-        print("missing binary: " + binary + " (run: go build -o bin/nfr ./cmd/nfr)")
+    nfrs = os.path.abspath(NFRS_BIN)
+    nfrc = os.path.abspath(NFRC_BIN)
+    missing = [p for p in (nfrs, nfrc) if not os.path.exists(p)]
+    if missing:
+        print("missing binary: " + ", ".join(missing) +
+              " (run: make build, or: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)")
         return 2
 
     tmp = tempfile.mkdtemp(prefix="nfr-fed-")
@@ -165,9 +169,9 @@ def main():
             print("logs kept in " + tmp)
 
     try:
-        a_proc, a_ctl, a_ing, a_pw = start_server(binary, tmp, "a")
+        a_proc, a_ctl, a_ing, a_pw = start_server(nfrs, tmp, "a")
         procs.append(a_proc)
-        b_proc, b_ctl, b_ing, b_pw = start_server(binary, tmp, "b")
+        b_proc, b_ctl, b_ing, b_pw = start_server(nfrs, tmp, "b")
         procs.append(b_proc)
 
         A = Panel(a_ctl)
@@ -219,13 +223,13 @@ def main():
 
         agent_cfg = os.path.join(tmp, "b-agent.toml")
         p = subprocess.run(
-            [binary, "join", "--no-start", "-c", agent_cfg, "--name", "node-b-agent",
+            [nfrc, "join", "--no-start", "-c", agent_cfg, "--name", "node-b-agent",
              "127.0.0.1:%d" % b_ctl, code],
             capture_output=True, text=True,
         )
         check("B agent joined", p.returncode == 0, (p.stderr or p.stdout).strip()[-200:])
         agent_log = open(os.path.join(tmp, "b-agent.log"), "wb")
-        agent = subprocess.Popen([binary, "agent", "-c", agent_cfg], stdout=agent_log, stderr=subprocess.STDOUT)
+        agent = subprocess.Popen([nfrc, "-c", agent_cfg], stdout=agent_log, stderr=subprocess.STDOUT)
         procs.append(agent)
 
         b_node = None

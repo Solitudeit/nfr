@@ -205,6 +205,9 @@ func (s *Server) handleTCP(c net.Conn, port int) {
 		c.Close()
 		return
 	}
+	// A stream only exists once the agent accepted it, so any earlier
+	// "cannot reach the inner address" report is stale.
+	s.clearTargetDown(t.ID)
 	proxyCount(c, stream, ctr)
 }
 

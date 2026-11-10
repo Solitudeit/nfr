@@ -1,12 +1,12 @@
 [Unit]
-Description=NFR agent (reverse tunnel client)
+Description=NFR client (nfrc, reverse tunnel client)
 Documentation=https://github.com/Solitudeit/nfr
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/nfr agent -c /etc/nfr/agent.toml
+ExecStart=/usr/local/bin/nfrc -c /etc/nfr/agent.toml
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

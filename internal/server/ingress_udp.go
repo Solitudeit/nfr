@@ -96,6 +96,9 @@ func (s *Server) udpDeliver(conn *net.UDPConn, src *net.UDPAddr, t store.Tunnel,
 	ctr.Conns.Add(1)
 	ctr.Active.Add(1)
 	stream, err := s.openStream(t.NodeID, &proto.StreamHeader{Tunnel: t.ID, Remote: src.String()})
+	if err == nil {
+		s.clearTargetDown(t.ID)
+	}
 	if err != nil {
 		ctr.Active.Add(-1)
 		ctr.Errs.Add(1)

@@ -13,6 +13,7 @@ import (
 	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/log"
+	"github.com/solitudeit/nfr/internal/proto"
 	"github.com/solitudeit/nfr/internal/store"
 )
 
@@ -232,7 +233,7 @@ func TestJoinCode(t *testing.T) {
 	if len(resp.Code) != 6 || strings.ToUpper(resp.Code) != resp.Code {
 		t.Fatalf("unexpected code %q", resp.Code)
 	}
-	if !strings.Contains(resp.Command, "nfr join") || !strings.Contains(resp.Command, resp.Code) {
+	if !strings.Contains(resp.Command, "nfrc join") || !strings.Contains(resp.Command, resp.Code) {
 		t.Fatalf("command %q is not copy-pasteable", resp.Command)
 	}
 	if time.Until(resp.ExpiresAt) > 2*time.Minute {
@@ -242,14 +243,14 @@ func TestJoinCode(t *testing.T) {
 
 func TestUpdateSettingsRange(t *testing.T) {
 	s, _ := newTestServer(t, nil)
-	if err := s.UpdateSettings("example.com", true, [2]int{40000, 40100}, "a@b.c"); err != nil {
+	if err := s.UpdateSettings("example.com", "", true, [2]int{40000, 40100}, "a@b.c"); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	got := s.Settings()
 	if got.Domain != "example.com" || !got.APIEnabled || got.PortRange != [2]int{40000, 40100} {
 		t.Fatalf("settings not applied: %+v", got)
 	}
-	if err := s.UpdateSettings("", false, [2]int{40000, 40000}, ""); err == nil {
+	if err := s.UpdateSettings("", "", false, [2]int{40000, 40000}, ""); err == nil {
 		t.Fatal("a one-port range was accepted")
 	}
 }
@@ -353,42 +354,67 @@ func TestSetNodeName(t *testing.T) {
 	}
 }
 
-func TestLocalNodeIsAlwaysAvailable(t *testing.T) {
+func TestConsoleHostIsNotATargetByDefault(t *testing.T) {
 	s, _ := newTestServer(t, nil)
 
-	nodes := s.Nodes()
-	if len(nodes) != 1 || nodes[0].ID != localNodeID || !nodes[0].Online || !nodes[0].Local {
-		t.Fatalf("built-in node missing from Nodes(): %+v", nodes)
+	if nodes := s.Nodes(); len(nodes) != 0 {
+		t.Fatalf("console host leaks into the node list: %+v", nodes)
 	}
-
-	// A tunnel can be created for the built-in node without joining anything.
-	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "self", NodeID: localNodeID, Type: "tcp", Local: "127.0.0.1:9"})
-	if err != nil {
-		t.Fatalf("create tunnel on the built-in node: %v", err)
+	// An inner address belongs to the machine that joined. Until the operator
+	// opts in, asking for the console host must fail loudly rather than quietly
+	// dial a local address on the server.
+	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "self", NodeID: localNodeID, Type: "tcp", Local: "127.0.0.1:9"}); err == nil {
+		t.Fatal("console host accepted as a tunnel target while disabled")
 	}
-	if tun.NodeName == "" {
-		t.Fatal("tunnel has no node name for the built-in node")
-	}
-
-	// An empty node_id means "this host", which is what the panel sends when
-	// nothing has joined yet.
-	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "self2", Type: "tcp", Local: "127.0.0.1:9"}); err != nil {
-		t.Fatalf("create tunnel without a node id: %v", err)
-	}
-
-	if err := s.RemoveNode(localNodeID); err == nil {
-		t.Fatal("built-in node was removable")
-	}
-	if err := s.SetNodeName(localNodeID, "home"); err != nil {
-		t.Fatalf("rename the built-in node: %v", err)
-	}
-	if got := s.Nodes()[0].Name; got != "home" {
-		t.Fatalf("built-in node name = %q, want home", got)
+	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "self2", Type: "tcp", Local: "127.0.0.1:9"}); err == nil {
+		t.Fatal("a tunnel without a node was accepted")
 	}
 }
 
-func TestLocalNodeForwardsTraffic(t *testing.T) {
+func TestConsoleHostCanBeEnabledExplicitly(t *testing.T) {
 	s, _ := newTestServer(t, nil)
+
+	if err := s.SetLocalNode(true); err != nil {
+		t.Fatalf("enable the console host: %v", err)
+	}
+	nodes := s.Nodes()
+	if len(nodes) != 1 || nodes[0].ID != localNodeID || !nodes[0].Online || !nodes[0].Local {
+		t.Fatalf("console host missing after opting in: %+v", nodes)
+	}
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "self", NodeID: localNodeID, Type: "tcp", Local: "127.0.0.1:9"})
+	if err != nil {
+		t.Fatalf("create tunnel on the console host: %v", err)
+	}
+	if tun.NodeName == "" {
+		t.Fatal("tunnel has no node name for the console host")
+	}
+
+	if err := s.RemoveNode(localNodeID); err == nil {
+		t.Fatal("console host was removable")
+	}
+	if err := s.SetNodeName(localNodeID, "home"); err != nil {
+		t.Fatalf("rename the console host: %v", err)
+	}
+	if got := s.Nodes()[0].Name; got != "home" {
+		t.Fatalf("console host name = %q, want home", got)
+	}
+
+	// Switching it back off must not silently keep the old tunnels alive: they
+	// now point at a node that is gone, and say so.
+	if err := s.SetLocalNode(false); err != nil {
+		t.Fatalf("disable the console host: %v", err)
+	}
+	got := s.Tunnels()
+	if len(got) != 1 || !got[0].NodeMissing {
+		t.Fatalf("tunnel did not report its lost node: %+v", got)
+	}
+}
+
+func TestConsoleHostForwardsTraffic(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+	if err := s.SetLocalNode(true); err != nil {
+		t.Fatalf("enable the console host: %v", err)
+	}
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Backend", "local")
@@ -452,7 +478,7 @@ func TestJoinCommandIsDialable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("join code: %v", err)
 	}
-	if want := "nfr join nfr.example.com:8443 " + resp.Code; resp.Command != want {
+	if want := "nfrc join nfr.example.com:8443 " + resp.Code; resp.Command != want {
 		t.Errorf("command=%q want %q", resp.Command, want)
 	}
 
@@ -469,4 +495,97 @@ func TestJoinCommandIsDialable(t *testing.T) {
 	if !strings.HasSuffix(resp2.Command, ":8443 "+resp2.Code) {
 		t.Errorf("command=%q should keep the control port and code", resp2.Command)
 	}
+
+	// An explicit public address beats interface probing: it is the one thing
+	// the operator knows that this process cannot discover.
+	s3, _ := newTestServer(t, func(c *config.Server) { c.ControlListen = ":8443" })
+	if err := s3.UpdateSettings("", "203.0.113.7", false, [2]int{20000, 29999}, ""); err != nil {
+		t.Fatalf("settings: %v", err)
+	}
+	resp3, err := s3.CreateJoinCode(api.JoinCodeRequest{Name: "edge"})
+	if err != nil {
+		t.Fatalf("join code: %v", err)
+	}
+	if want := "nfrc join 203.0.113.7:8443 " + resp3.Code; resp3.Command != want {
+		t.Errorf("command=%q want %q", resp3.Command, want)
+	}
+
+	// Bound to loopback with nothing configured: the address only works here,
+	// so the response must say so instead of pretending it is dialable.
+	s4, _ := newTestServer(t, func(c *config.Server) { c.ControlListen = "127.0.0.1:8443" })
+	resp4, err := s4.CreateJoinCode(api.JoinCodeRequest{Name: "edge"})
+	if err != nil {
+		t.Fatalf("join code: %v", err)
+	}
+	if !strings.Contains(resp4.Command, "127.0.0.1:8443") {
+		t.Errorf("command=%q should keep the loopback bind", resp4.Command)
+	}
+	if resp4.Warning == "" {
+		t.Error("a loopback-only join command must carry a warning")
+	}
+}
+
+func TestTunnelStatusWording(t *testing.T) {
+	base := api.Tunnel{Enabled: true, Online: true}
+	cases := []struct {
+		name string
+		in   api.Tunnel
+		want string
+		kind string
+	}{
+		{"disabled", api.Tunnel{Enabled: false}, "已停用", "off"},
+		{"quota", api.Tunnel{Enabled: false, QuotaPaused: true}, "配额停用", "off"},
+		{"missing node", api.Tunnel{Enabled: true, NodeMissing: true}, "需重新选择节点", "warn"},
+		{"node offline", api.Tunnel{Enabled: true, Online: false}, "节点离线", "err"},
+		{"target down", api.Tunnel{Enabled: true, Online: true, TargetDown: true}, "目标不可达", "err"},
+		{"ready", base, "就绪", "idle"},
+		{"busy", api.Tunnel{Enabled: true, Online: true, Active: 3}, "活跃", "on"},
+	}
+	for _, c := range cases {
+		got, kind := tunnelStatus(c.in)
+		if got != c.want || kind != c.kind {
+			t.Errorf("%s: got (%q,%q) want (%q,%q)", c.name, got, kind, c.want, c.kind)
+		}
+	}
+	// 在线 must never come back: a tunnel is not a host.
+	for _, c := range cases {
+		if strings.Contains(c.want, "在线") {
+			t.Errorf("%s still says 在线", c.name)
+		}
+	}
+}
+
+func TestDialFailureMarksTunnelTargetDown(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.ControlListen = "off" })
+	addNode(t, st, "n1")
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "edge", NodeID: "n1", Type: "tcp", Local: "127.0.0.1:9"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Pretend the agent is connected: without a session the tunnel would
+	// truthfully report 节点离线 and never reach the target check.
+	s.setSession("n1", &agentSession{nodeID: "n1", send: make(chan *proto.Frame, 4), done: make(chan struct{})})
+	t.Cleanup(func() { s.dropSession("n1", s.sessionFor("n1")) })
+	if got := mustTunnel(t, s, tun.ID); got.Status != "就绪" {
+		t.Fatalf("before report status=%q", got.Status)
+	}
+	s.markTargetDown("n1", tun.ID, "connection refused", time.Now().Unix())
+	got := mustTunnel(t, s, tun.ID)
+	if !got.TargetDown || got.Status != "目标不可达" {
+		t.Fatalf("after report status=%q target_down=%v", got.Status, got.TargetDown)
+	}
+	// A successful stream clears the flag, so a fixed service recovers.
+	s.clearTargetDown(tun.ID)
+	if got := mustTunnel(t, s, tun.ID); got.TargetDown {
+		t.Fatalf("target_down should clear")
+	}
+}
+
+func mustTunnel(t *testing.T, s *Server, id string) api.Tunnel {
+	t.Helper()
+	v, ok := s.Tunnel(id)
+	if !ok {
+		t.Fatalf("tunnel %s not found", id)
+	}
+	return v
 }

@@ -5,17 +5,17 @@
 NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到公网服务器上，
 不需要在客户端写配置文件、不需要手动开端口、不需要再装一个第三方面板。
 
-- 公网机：`nfr server` —— 跑控制通道、面板和 REST API，HTTP 可以用独立端口直连
-- 内网机：`nfr join <server> <code>` —— 一条 6 位加入码完成接入，之后自动重连
+- 公网机：`nfrs` —— 跑控制通道、面板和 REST API，HTTP 可以用独立端口直连
+- 内网机：`nfrc join <server> <code>` —— 一条 6 位加入码完成接入，之后自动重连
 - 管理：浏览器打开面板，所有隧道、节点、端口、证书都在里面创建
 - 多机：A 机器的面板可以直接纳管 B、C 服务器，在一处管理全部隧道
 
 ```
                  公网                       内网
-  访客 ──▶ :20612 ────┐              ┌── nfr agent ── localhost:8080
+  访客 ──▶ :20612 ────┐              ┌── nfrc ── localhost:8080
   访客 ──▶ :20613 ────┤              │
-  浏览器 ─▶ :8443 ──▶ nfr server ────┤
-  面板   ◀─ /nfr/    │   TLS+yamux  └── nfr agent ── localhost:22
+  浏览器 ─▶ :8443 ──▶  nfrs    ──────┤
+  面板   ◀─ /nfr/    │   TLS+yamux  └── nfrc ── localhost:22
                       └─ 端口池 20000-29999 ──▶ 访客直连
   域名访问（可选）：:80/:443 按 Host / SNI 分流
 ```
@@ -24,7 +24,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 
 | | frp | NFR |
 |---|---|---|
-| 客户端配置 | 手写 `frpc.toml`，每台机器拷一份 | 一条 `nfr join` 命令，配置由服务端下发 |
+| 客户端配置 | 手写 `frpc.toml`，每台机器拷一份 | 一条 `nfrc join` 命令，配置由服务端下发 |
 | 加入方式 | 永久 token 明文写在文件里 | 6 位一次性加入码，5 分钟有效，可吊销 |
 | 管理入口 | 无面板，改 TOML 重启 | 内置面板，改完立即生效，不用重启 |
 | 多机管理 | 一台一台改配置文件 | 面板纳管多台服务器，卡片式切换 |
@@ -36,8 +36,9 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 ## 界面
 
 面板是服务端渲染的，没有 npm、没有前端构建、没有 CDN。界面走"工具优先"路线：
-浅色侧栏 + 1px 分隔线、内联统计条（不摆卡片）、紧凑表格为主角、8px 圆角、无阴影渐变，
-层级靠字重和灰度表达；主色 `#0969da`，语义绿/红/橙只出现在状态上。所有颜色走 CSS
+浅色侧栏 + 1px 分隔线、内联统计条、隧道与节点用卡片排列（桌面两列，手机上单列，
+不出现横向滚动）、连续曲率圆角、无阴影渐变，层级靠字重和灰度表达；
+主色 `#0969da`，语义绿/红/橙只出现在状态上。所有颜色走 CSS
 变量，深浅主题只换 token、不改组件结构；文字对比度按 WCAG 2.1 AA 校准。
 右上角可切深色并记住选择，手机上是底部标签栏，数据每 4 秒自己刷新。
 
@@ -54,7 +55,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 
 > 以下截图为功能示意，配色以概览页为准。
 
-| 选择服务器 | 纳管另一台 |
+| 隧道页 | 纳管另一台 |
 |---|---|
 | ![隧道](docs/screenshots/tunnels.png) | ![服务器](docs/screenshots/servers.png) |
 
@@ -62,7 +63,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 |---|---|
 | ![设置](docs/screenshots/settings.png) | ![手机](docs/screenshots/overview-phone.png) |
 
-| 隧道列表 | 登录 |
+| 手机上单列 | 登录 |
 |---|---|
 | ![隧道列表](docs/screenshots/tunnel-list.png) | ![登录](docs/screenshots/login.png) |
 
@@ -76,7 +77,7 @@ NFR (Not FRP) 是 frp、ngrok 的开源替代品：把内网的服务暴露到�
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo nfr server
+sudo nfrs
 ```
 
 第一次启动会自动生成 `/etc/nfr/server.toml`、自签证书和管理员密码；启动信息打印完，
@@ -93,7 +94,7 @@ NFR 就转入后台运行，终端直接还给你：
 
   已在后台运行  PID 4231
   日志          /var/lib/nfr/nfr.log
-  停止          nfr stop
+  停止          nfrs stop
 ```
 
 要盯着日志前台跑（systemd / 调试），加 `--foreground`。
@@ -110,21 +111,22 @@ NFR 就转入后台运行，终端直接还给你：
 > 细节见 [docs/deploy.md](docs/deploy.md)。
 >
 > 80/443 已经被 nginx / Caddy 占着？把 `http_listen` 改到 `127.0.0.1:8080`、
-> `https_listen = "off"`，再跑 `nfr proxy-config app.example.com` 生成反代片段贴进站点配置，
+> `https_listen = "off"`，再跑 `nfrs proxy-config app.example.com` 生成反代片段贴进站点配置，
 > 详见 [和已有的 nginx / Caddy 共存](docs/deploy.md#和已有的-nginx--caddy-共存)。
 
-### 2. 内网机器（可选）
+### 2. 内网机器
 
-服务器自己就是一个节点：不接任何 agent 也能在「隧道」页直接给它建隧道，
-本地地址填 `127.0.0.1` 即可。要映射局域网里的别的机器，再接 agent：
-在面板「节点」页点「生成加入码」，把打印出来的那条命令粘到内网机器：
+隧道由内网那台机器发起，服务器不代替它拨「内网地址」——所以在内网机器上接 agent：
+面板「节点」页点「生成加入码」，把打印出来的那条命令粘到内网机器：
 
 ```bash
-nfr join example.com ABC123
+nfrc join example.com ABC123
 ```
 
 它记下证书指纹、换取长期令牌、写入 `/etc/nfr/agent.toml`，然后**直接保持连接**。
-Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfr agent` 作为服务。
+如果打印出来的命令里是本机地址，面板会同时提示——先去「设置」填「对外地址」
+（公网 IP 或解析到这台机器的名字），再加入别的机器。
+Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfrc` 作为服务。
 断线会自己重连（1s 起，指数退避到 30s），服务器重启后隧道照样恢复。
 
 ### 3. 建隧道
@@ -161,9 +163,9 @@ https_listen   = "off"
 data_dir       = "/tmp/nfr-demo"
 TOML
 
-go run ./cmd/nfr server -c /tmp/nfr-demo.toml &     # 记下打印出来的密码
+go run ./cmd/nfrs -c /tmp/nfr-demo.toml &           # 记下打印出来的密码
 # 打开 https://127.0.0.1:18443/nfr/ ，节点页生成加入码 ABC123，然后：
-go run ./cmd/nfr join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123 &
+go run ./cmd/nfrc join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123 &
 
 python3 -m http.server 8080 &                       # 一个假的内网服务
 # 面板里建 HTTP 隧道：内网地址 8080，公网端口填 20612（或点「获取端口」），然后：
@@ -174,13 +176,28 @@ curl http://127.0.0.1:20612/
 
 同一个进程，`/nfr/`：
 
-- **概览**：在线节点、启用隧道、进出流量、实时速率曲线
-- **隧道**：第一屏是服务器卡片（每台一张，标明所在国家），点进去再新建 / 编辑 /
-  启停 / 删除，改完立即推送
-- **节点**：卡片列出每台机器，每张标明所在国家；面板所在的机器自带一张（恒在线、可改名、不可移除），接入的 agent 另有卡片；可生成加入码、看在线状态和最后心跳
-- **服务器**：纳管其它 NFR 实例（填地址 + API 密钥即可）
-- **设置**：实例名、域名、端口范围、证书来源与到期、面板密码，以及 API 密钥
+- **概览**：接入设备数、启用隧道数、进出流量、实时速率曲线
+- **隧道**：卡片列出每条隧道——名称、类型、接入节点、公网入口（域名或 IP + 端口）、
+  内网地址、流量与状态；桌面两列，手机上单列，不出现横向滚动
+- **节点**：卡片列出每台接入的设备，标明所在国家、系统、隧道数与最后心跳；
+  可生成加入码、改名、移除（隧道跟着节点走，节点离线时隧道保留但不可用）
+- **服务器**：纳管其它 NFR 实例（填地址 + API 密钥即可；不配就默认隐藏）
+- **设置**：实例名、域名、对外地址、端口范围、证书来源与到期、面板密码，以及 API 密钥
   （给自动化用的 read / write / admin 密钥，明文只显示一次）
+
+### 隧道状态
+
+一条隧道只有一种状态，且不含「在线」这种把隧道当成主机的说法：
+
+| 状态 | 含义 |
+| --- | --- |
+| 就绪 | 节点连着，公网端口在听，随时可以转发 |
+| 活跃 | 此刻有连接在转发 |
+| 已停用 | 被手动关掉，公网端口不监听 |
+| 配额停用 | 本月流量到达上限后自动关掉 |
+| 节点离线 | 接入的机器断线，隧道保留配置但转发不了 |
+| 需重新选择节点 | 隧道指向的节点已不存在，编辑它重新选一台 |
+| 目标不可达 | 节点连着，但它拨不通内网地址（服务没起或端口写错） |
 
 ## 多服务器纳管
 
@@ -221,7 +238,7 @@ email   = "you@example.com"
 # ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
 ```
 
-客户端 `/etc/nfr/agent.toml`（`nfr join` 自动写入，一般不用手改）：
+客户端 `/etc/nfr/agent.toml`（`nfrc join` 自动写入，一般不用手改）：
 
 ```toml
 log_level = "info"
@@ -289,7 +306,7 @@ python3 scripts/e2e_federation.py # 双实例纳管端到端
 ## 状态与版本
 
 - 状态：`<data_dir>/state.json`（0600，原子写入），统计只在内存里
-- 版本：`nfr version`，构建时 `-ldflags "-X .../version.Version=v0.1.0"`
+- 版本：`nfrs version` / `nfrc version`，构建时 `-ldflags "-X .../version.Version=v0.1.0"`
 - 兼容性：`state.json` 带 schema 版本，升级不会丢数据
 
 ## 路线图

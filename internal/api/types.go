@@ -24,29 +24,44 @@ type Info struct {
 
 // Tunnel is the console's view of a published service.
 type Tunnel struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	NodeID      string    `json:"node_id"`
-	NodeName    string    `json:"node_name,omitempty"`
-	Type        string    `json:"type"`
-	Local       string    `json:"local"`
-	RemotePort  int       `json:"remote_port"`
-	Hosts       []string  `json:"hosts,omitempty"`
-	Enabled     bool      `json:"enabled"`
-	BandwidthKB int       `json:"bandwidth_kb,omitempty"`
-	QuotaMB     int64     `json:"quota_mb,omitempty"`
-	UsedBytes   int64     `json:"used_bytes,omitempty"`
-	QuotaPaused bool      `json:"quota_paused,omitempty"`
-	Online      bool      `json:"online"`
-	In          int64     `json:"in"`
-	Out         int64     `json:"out"`
-	Conns       int64     `json:"conns"`
-	Active      int64     `json:"active"`
-	Errs        int64     `json:"errs"`
-	InRate      float64   `json:"in_rate"`
-	OutRate     float64   `json:"out_rate"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	NodeID      string   `json:"node_id"`
+	NodeName    string   `json:"node_name,omitempty"`
+	Type        string   `json:"type"`
+	Local       string   `json:"local"`
+	RemotePort  int      `json:"remote_port"`
+	Hosts       []string `json:"hosts,omitempty"`
+	Enabled     bool     `json:"enabled"`
+	BandwidthKB int      `json:"bandwidth_kb,omitempty"`
+	QuotaMB     int64    `json:"quota_mb,omitempty"`
+	UsedBytes   int64    `json:"used_bytes,omitempty"`
+	QuotaPaused bool     `json:"quota_paused,omitempty"`
+	Online      bool     `json:"online"`
+	// NodeMissing marks a tunnel whose node no longer exists, which is what a
+	// tunnel pointed at the console host looks like when that target is off.
+	NodeMissing bool `json:"node_missing,omitempty"`
+	// TargetDown reports that the agent is connected but could not reach the
+	// inner address.
+	TargetDown bool `json:"target_down,omitempty"`
+	// PublicHost is the address visitors dial for this tunnel: the configured
+	// domain, else this machine's public address. A bare port like ":20001"
+	// tells an operator nothing they can paste into a browser.
+	PublicHost string `json:"public_host,omitempty"`
+	// Status is the one word a person reads: 已停用 / 配额停用 / 节点离线 /
+	// 需重新选择节点 / 就绪 / 活跃 / 目标不可达. StatusKind maps it to a dot and
+	// a chip class so the console and its poller never disagree.
+	Status     string    `json:"status"`
+	StatusKind string    `json:"status_kind"`
+	In         int64     `json:"in"`
+	Out        int64     `json:"out"`
+	Conns      int64     `json:"conns"`
+	Active     int64     `json:"active"`
+	Errs       int64     `json:"errs"`
+	InRate     float64   `json:"in_rate"`
+	OutRate    float64   `json:"out_rate"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // Node is an edge agent as seen by the console.
@@ -109,6 +124,9 @@ type JoinCodeResponse struct {
 	Code      string    `json:"code"`
 	ExpiresAt time.Time `json:"expires_at"`
 	Command   string    `json:"command"`
+	// Warning explains why the command above may not work from another
+	// machine, e.g. the server only knows a loopback address.
+	Warning string `json:"warning,omitempty"`
 }
 
 // RemoteRequest registers another instance.

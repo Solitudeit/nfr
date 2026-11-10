@@ -389,6 +389,22 @@ code { background: var(--surface-3); border-radius: var(--r-xs); padding: 1px 5p
 .chip.on { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
 .chip.off { color: var(--text-3); background: var(--surface-3); border-color: transparent; }
 .chip.err { color: var(--err); background: var(--err-bg); border-color: transparent; }
+.dot.idle {
+  background: var(--line-strong);
+}
+
+.chip.idle {
+  color: var(--text-2);
+  background: var(--surface-3);
+  border-color: transparent;
+}
+
+.chip.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: transparent;
+}
+
 .chip.key { color: var(--brand); background: var(--brand-soft); border-color: transparent; font-family: var(--mono); }
 .chip.loc { color: var(--text-2); background: var(--surface-3); border-color: transparent; margin-left: auto; }
 
@@ -806,6 +822,10 @@ label.ctl-row { cursor: pointer; }
 }
 
 @media (max-width: 560px) {
+  .card-grid { grid-template-columns: 1fr; }
+  .tcard-rows dt { flex-basis: 56px; }
+  .ocard-meta .muted { display: none; }
+
   .content { padding: 14px 14px 96px; }
   .card { padding: 16px; }
   .legend { padding: 10px 12px; }
@@ -904,9 +924,137 @@ a.srv-card:active { transform: scale(.994); }
 }
 .nc-meta .mono { font-family: var(--mono); font-size: 11.5px; }
 .nc-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nc-stale { font-size: 12px; color: var(--text-3); padding: 6px 8px; border-radius: var(--r-xs); background: var(--surface-3); corner-shape: squircle; }
 .nc-rename { display: flex; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
 .nc-rename[hidden] { display: none; }
 .nc-rename input { flex: 1; min-width: 0; }
+
+/* 服务端本机：与 agent 节点刻意分开的一块，避免被当成普通内网设备 */
+.np-local {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px dashed var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.np-local-txt { font-size: 12.5px; color: var(--text-3); flex: 1 1 220px; min-width: 0; }
+
+/* 隧道卡片：一行一条，桌面两列；表格式七列在手机上必然横滚 */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.tcard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tcard-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tcard-name {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tcard-name:hover { color: var(--brand); }
+
+.tcard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.tcard-rows > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.tcard-rows dt {
+  flex: 0 0 62px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.tcard-rows dd {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.tcard-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+/* 概览页的隧道行：比列表页更紧凑，一屏能看到更多 */
+.ocard-list {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px 10px;
+}
+
+.ocard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-radius: var(--r-sm);
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+
+.ocard + .ocard { box-shadow: inset 0 1px 0 var(--line); }
+
+.ocard:hover { background: var(--surface-2); }
+
+.ocard-name {
+  flex: 0 1 auto;
+  font-weight: 600;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ocard-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ocard-meta .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 接入节点：外部已选定时的只读确认 */
 .np-locked {

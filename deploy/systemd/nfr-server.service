@@ -1,12 +1,12 @@
 [Unit]
-Description=NFR control node (reverse tunnel server)
+Description=NFR control node (nfrs, reverse tunnel server)
 Documentation=https://github.com/Solitudeit/nfr
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/nfr server --foreground -c /etc/nfr/server.toml
+ExecStart=/usr/local/bin/nfrs --foreground -c /etc/nfr/server.toml
 Restart=always
 RestartSec=5
 # Ports 80/443 need either root or this capability.

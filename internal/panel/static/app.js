@@ -125,16 +125,15 @@
       if (row) {
         var dot = row.querySelector(".dot");
         if (dot) {
-          dot.classList.toggle("on", !!(t.enabled && t.online));
-          dot.classList.toggle("err", !!(t.enabled && !t.online));
-          dot.classList.toggle("off", !t.enabled);
+          // The server decides the state; the page only paints it, so a
+          // poller tick can never disagree with the rendered list.
+          dot.className = "dot " + (t.status_kind || "off");
         }
         setText(row.querySelector("[data-live-rate]"), fmtRate(t.in_rate || 0) + " / " + fmtRate(t.out_rate || 0));
         var chip = row.querySelector("[data-live-chip]");
-        if (chip) {
-          if (!t.enabled) { chip.textContent = t.quota_paused ? "配额停用" : "已停用"; chip.className = "chip off"; }
-          else if (t.online) { chip.textContent = "在线"; chip.className = "chip on"; }
-          else { chip.textContent = "节点离线"; chip.className = "chip err"; }
+        if (chip && t.status) {
+          chip.textContent = t.status;
+          chip.className = "chip " + (t.status_kind || "off");
         }
         var meter = row.querySelector("[data-live-meter]");
         if (meter && t.quota_mb > 0) {

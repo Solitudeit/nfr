@@ -26,7 +26,7 @@ import (
 // Options describes one server this agent connects to.
 type Options struct {
 	Addr   string // host:port of the control listener
-	Token  string // node token minted by nfr join
+	Token  string // node token minted by nfrc join
 	NodeID string
 	Pin    string
 	// CA verifies the server with the system trust store instead of pinning
@@ -49,6 +49,11 @@ type Agent struct {
 	mu     sync.Mutex
 	routes map[string]tunnelRoute // tunnel id -> local destination
 	sess   *yamux.Session
+
+	// ctrl is the control stream of the current session, guarded by wmu
+	// because streams report dial failures from their own goroutines.
+	ctrl net.Conn
+	wmu  sync.Mutex
 }
 
 // New builds an agent.
@@ -103,7 +108,7 @@ func (a *Agent) Run(ctx context.Context) {
 
 func (a *Agent) session(ctx context.Context) error {
 	if a.opt.Token == "" || a.opt.NodeID == "" {
-		return errors.New("this machine has no node token yet, run: nfr join <server> <code>")
+		return errors.New("this machine has no node token yet, run: nfrc join <server> <code>")
 	}
 	host, _, err := net.SplitHostPort(a.opt.Addr)
 	if err != nil {
@@ -197,10 +202,12 @@ func (a *Agent) session(ctx context.Context) error {
 
 	a.mu.Lock()
 	a.sess = sess
+	a.ctrl = ctrl
 	a.mu.Unlock()
 	defer func() {
 		a.mu.Lock()
 		a.sess = nil
+		a.ctrl = nil
 		a.routes = map[string]tunnelRoute{}
 		a.mu.Unlock()
 	}()
@@ -225,6 +232,33 @@ func (a *Agent) session(ctx context.Context) error {
 			return fmt.Errorf("server error: %s", f.Message)
 		}
 	}
+}
+
+// sendFrame writes one control frame, serialising writers: the session loop
+// answers pings while streams may report a dead local service at any moment.
+func (a *Agent) sendFrame(f *proto.Frame) error {
+	a.mu.Lock()
+	ctrl := a.ctrl
+	a.mu.Unlock()
+	if ctrl == nil {
+		return errors.New("not connected")
+	}
+	a.wmu.Lock()
+	defer a.wmu.Unlock()
+	return proto.WriteFrame(ctrl, f)
+}
+
+// reportDialFailed tells the server that this tunnel's inner address refused
+// the connection, so the console can say 目标不可达 instead of guessing.
+func (a *Agent) reportDialFailed(tunnelID, local string, cause error) {
+	msg := local
+	if cause != nil {
+		msg = local + ": " + cause.Error()
+	}
+	_ = a.sendFrame(&proto.Frame{
+		Type: proto.TypeDialFailed, NodeID: a.opt.NodeID,
+		Code: tunnelID, Message: msg, TS: time.Now().Unix(),
+	})
 }
 
 func (a *Agent) applyConfig(f *proto.Frame) {
@@ -283,6 +317,7 @@ func (a *Agent) handleStream(ctx context.Context, st net.Conn) {
 	hc, err := dialer.DialContext(ctx, "tcp", route.local)
 	if err != nil {
 		a.lg.Warn("cannot reach local service", "tunnel", h.Tunnel, "local", route.local, "err", err)
+		a.reportDialFailed(h.Tunnel, route.local, err)
 		return
 	}
 	defer hc.Close()

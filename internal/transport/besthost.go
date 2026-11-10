@@ -7,12 +7,16 @@ import "net"
 // then a global unicast address from the local interfaces, then the first
 // private LAN address, then loopback. Agents usually reach the server over
 // the public internet, so public-looking addresses win over LAN ones.
+//
+// An explicit bind address wins even when it is loopback: a server listening
+// on 127.0.0.1 is reachable from 127.0.0.1 only, so printing a LAN address
+// would hand out something that refuses the connection.
 func BestHost(domain, listenHost string) string {
 	if domain != "" {
 		return domain
 	}
 	switch listenHost {
-	case "", "0.0.0.0", "::", "[::]", "localhost", "127.0.0.1":
+	case "", "0.0.0.0", "::", "[::]":
 	default:
 		return listenHost // explicit bind address wins
 	}

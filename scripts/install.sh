@@ -3,14 +3,20 @@
 #
 #   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sh
 #
+# Two binaries are installed:
+#   nfrs  the control node, for the public server
+#   nfrc  the client, for the machines inside your network
+#
 # Environment:
-#   NFR_VERSION  pin a release (e.g. v0.1.0), default: latest
+#   NFR_VERSION  pin a release (e.g. v0.9.0), default: latest
 #   NFR_PREFIX   install directory, default: /usr/local/bin
+#   NFR_ONLY     "server" or "client" to install just one of them
 set -eu
 
 repo="Solitudeit/nfr"
 prefix="${NFR_PREFIX:-/usr/local/bin}"
 version="${NFR_VERSION:-latest}"
+only="${NFR_ONLY:-}"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
@@ -32,11 +38,6 @@ if [ "$version" = latest ]; then
 else
   base="https://github.com/$repo/releases/download/$version"
 fi
-url="$base/nfr-$os-$arch"
-if [ "$os" = windows ]; then url="$url.exe"; fi
-
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -51,11 +52,30 @@ fetch() {
   fi
 }
 
-echo "downloading $url"
-fetch "$url" "$tmp"
-chmod +x "$tmp"
-mkdir -p "$prefix"
-mv "$tmp" "$prefix/nfr"
-trap - EXIT
-echo "installed $prefix/nfr"
-"$prefix/nfr" version
+install_one() {
+  name="$1"
+  url="$base/$name-$os-$arch"
+  if [ "$os" = windows ]; then url="$url.exe"; fi
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  echo "downloading $url"
+  fetch "$url" "$tmp"
+  chmod +x "$tmp"
+  mkdir -p "$prefix"
+  mv "$tmp" "$prefix/$name"
+  trap - EXIT
+  echo "installed $prefix/$name"
+}
+
+case "$only" in
+  server) install_one nfrs ;;
+  client) install_one nfrc ;;
+  *)
+    install_one nfrs
+    install_one nfrc
+    ;;
+esac
+
+# Report what landed. A partial install (NFR_ONLY) skips the other binary.
+if command -v "$prefix/nfrs" >/dev/null 2>&1; then "$prefix/nfrs" version; fi
+if command -v "$prefix/nfrc" >/dev/null 2>&1; then "$prefix/nfrc" version; fi

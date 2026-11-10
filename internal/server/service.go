@@ -79,6 +79,7 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 
 // DeleteTunnel removes a tunnel and closes its public port.
 func (s *Server) DeleteTunnel(id string) error {
+	s.clearTargetDown(id)
 	var name string
 	err := s.st.Update(func(st *store.State) error {
 		for i := range st.Tunnels {
@@ -109,6 +110,7 @@ func (s *Server) DeleteTunnel(id string) error {
 
 // SetTunnelEnabled flips the enabled switch.
 func (s *Server) SetTunnelEnabled(id string, on bool) error {
+	s.clearTargetDown(id)
 	var node string
 	err := s.st.Update(func(st *store.State) error {
 		t, ok := st.TunnelByID(id)
@@ -201,13 +203,12 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 			return nil, errBad("name", "tunnel name may only contain letters, digits, dot, dash and underscore")
 		}
 	}
-	if nodeID == "" {
-		nodeID = localNodeID
-	}
-	if nodeID != localNodeID {
-		if _, ok := st.NodeByID(nodeID); !ok {
-			return nil, errBad("node_id", "choose a node that has joined")
+	if nodeID == localNodeID {
+		if !st.Settings.LocalNode {
+			return nil, errBad("node_id", "the console host is not available as a tunnel target")
 		}
+	} else if _, ok := st.NodeByID(nodeID); !ok {
+		return nil, errBad("node_id", "choose a node that has joined")
 	}
 	if typ == "" {
 		typ = store.TunnelTCP
@@ -382,27 +383,45 @@ func (s *Server) CreateJoinCode(req api.JoinCodeRequest) (api.JoinCodeResponse, 
 	if err != nil {
 		return api.JoinCodeResponse{}, err
 	}
+	host, warning := s.joinHost()
 	return api.JoinCodeResponse{
 		Code:      code,
 		ExpiresAt: now.Add(time.Duration(ttl) * time.Second),
-		Command:   fmt.Sprintf("nfr join %s %s", s.joinHost(), code),
+		Command:   fmt.Sprintf("nfrc join %s %s", host, code),
+		Warning:   warning,
 	}, nil
 }
 
-// joinHost renders the address an operator should type on the agent machine.
-func (s *Server) joinHost() string {
+// joinHost renders the address an operator should type on the agent machine,
+// plus a warning when nothing better than a local address exists. Silently
+// printing "localhost" is how machines end up with a command that cannot work.
+func (s *Server) joinHost() (addr, warning string) {
 	host, port, err := net.SplitHostPort(s.cfg.ControlListen)
 	if err != nil {
 		host, port = "", "8443"
 	}
 	// The default control_listen is a wildcard bind, which says nothing about
-	// which address a machine on the internet should dial; BestHost falls back
-	// to this host's interface addresses so the printed command works as is.
-	host = transport.BestHost(s.cfg.Domain, host)
+	// which address a machine on the internet should dial. Domain wins, then
+	// the operator's public address, then this host's interface addresses.
+	host = transport.BestHost(s.publicHost(), host)
 	if port == "443" {
-		return host
+		addr = host
+	} else {
+		addr = net.JoinHostPort(host, port)
 	}
-	return net.JoinHostPort(host, port)
+	if isLocalOnlyHost(host) {
+		warning = "当前地址仅本机可用，请先在设置里填「对外地址」或「公网域名」，再加入别的机器。"
+	}
+	return addr, warning
+}
+
+// isLocalOnlyHost reports whether host can only be reached from this machine.
+func isLocalOnlyHost(host string) bool {
+	if host == "" || host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
 // AddRemote registers another instance for management.
@@ -547,19 +566,58 @@ func (s *Server) DeleteAPIKey(id string) error {
 }
 
 // UpdateSettings changes instance wide behaviour.
-func (s *Server) UpdateSettings(domain string, apiEnabled bool, portRange [2]int, email string) error {
+func (s *Server) UpdateSettings(domain string, publicHost string, apiEnabled bool, portRange [2]int, email string) error {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	domain = strings.TrimPrefix(domain, "http://")
 	domain = strings.TrimPrefix(domain, "https://")
 	domain = strings.TrimSuffix(domain, "/")
+	publicHost = normaliseHost(publicHost)
 	if portRange[0] <= 0 || portRange[1] <= portRange[0] || portRange[1] > 65535 {
 		return errBad("port_range", "port range must be a valid ascending pair")
 	}
 	err := s.st.Update(func(st *store.State) error {
 		st.Settings.Domain = domain
+		st.Settings.PublicHost = publicHost
 		st.Settings.APIEnabled = apiEnabled
 		st.Settings.PortRange = portRange
 		st.Settings.HTTPSEmail = email
+		return nil
+	})
+	if err == nil {
+		s.notify("settings updated")
+	}
+	return err
+}
+
+// normaliseHost cleans an operator-entered public address: strips a scheme and
+// any trailing slash or path, so "https://nfr.example.com/" becomes
+// "nfr.example.com". A port is kept if present.
+func normaliseHost(raw string) string {
+	h := strings.TrimSpace(raw)
+	h = strings.TrimPrefix(h, "http://")
+	h = strings.TrimPrefix(h, "https://")
+	if i := strings.IndexAny(h, "/?#"); i >= 0 {
+		h = h[:i]
+	}
+	return strings.ToLower(strings.TrimSuffix(h, "."))
+}
+
+// publicHost is the address visitors should dial: the configured domain wins,
+// then the operator's "public address" setting, then nothing (callers fall back
+// to probing this host's interfaces).
+func (s *Server) publicHost() string {
+	st := s.st.Snapshot()
+	if st.Settings.Domain != "" {
+		return st.Settings.Domain
+	}
+	return st.Settings.PublicHost
+}
+
+// SetLocalNode turns the console host into a tunnel target. Off by default:
+// an inner address always belongs to the machine that joined.
+func (s *Server) SetLocalNode(on bool) error {
+	err := s.st.Update(func(st *store.State) error {
+		st.Settings.LocalNode = on
 		return nil
 	})
 	if err == nil {
