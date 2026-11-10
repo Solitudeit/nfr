@@ -185,11 +185,15 @@ data_dir       = "/tmp/nfr-demo"
 TOML
 
 go run ./cmd/nfrs -c /tmp/nfr-demo.toml &           # 记下打印出来的密码
-# 打开 https://127.0.0.1:18443/nfr/ ，节点页生成加入码 ABC123，然后：
-go run ./cmd/nfrc join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123 &
 
 python3 -m http.server 8080 &                       # 一个假的内网服务
-# 面板里建 HTTP 隧道：内网地址 8080，公网端口填 20612（或点「获取端口」），然后：
+
+# 打开 https://127.0.0.1:18443/nfr/ → 新建隧道 → 选「＋ 新设备」，
+# 内网地址填 8080、公网端口填 20612（或点「获取端口」），保存后卡片上会给出
+# 这条命令（ABC123 换成卡片上的码）：
+go run ./cmd/nfrc join -c /tmp/nfr-agent.toml 127.0.0.1:18443 ABC123 &
+
+# 设备接入后隧道自动生效：
 curl http://127.0.0.1:20612/
 ```
 
