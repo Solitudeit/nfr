@@ -327,4 +327,24 @@
     });
     window.addEventListener("beforeunload", function () { stop = true; });
   }
+
+  // ── join-code countdown: awaiting cards show how long the command lives ──
+  function fmtLeft(sec) {
+    if (sec <= 0) return "已过期，请重新生成";
+    var m = Math.floor(sec / 60);
+    return "剩余 " + m + " 分钟";
+  }
+  var expiries = Array.prototype.slice.call(document.querySelectorAll("[data-expires]"));
+  if (expiries.length) {
+    function tickExpiries() {
+      var now = Math.floor(Date.now() / 1000);
+      expiries.forEach(function (el) {
+        var at = parseInt(el.getAttribute("data-expires"), 10);
+        if (isNaN(at)) return;
+        el.textContent = fmtLeft(at - now);
+      });
+    }
+    tickExpiries();
+    setInterval(tickExpiries, 30000);
+  }
 })();

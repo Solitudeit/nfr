@@ -240,6 +240,24 @@ func (s *Server) RegenerateTunnelCode(id string) (api.JoinCodeResponse, error) {
 	}, nil
 }
 
+// TunnelJoinCode returns the live join code bound to an awaiting tunnel, so
+// the panel can render the command a new device must run. Read-only.
+func (s *Server) TunnelJoinCode(id string) (api.JoinCodeResponse, bool) {
+	st := s.st.Snapshot()
+	jc, ok := store.FindJoinCodeByTunnel(&st, id)
+	if !ok {
+		return api.JoinCodeResponse{}, false
+	}
+	// joinHost reads the store, so it must run after Snapshot returned.
+	host, warning := s.joinHost()
+	return api.JoinCodeResponse{
+		Code:      jc.Code,
+		ExpiresAt: jc.ExpiresAt,
+		Command:   fmt.Sprintf("nfrc join %s %s", host, jc.Code),
+		Warning:   warning,
+	}, true
+}
+
 // SetTunnelEnabled flips the enabled switch.
 func (s *Server) SetTunnelEnabled(id string, on bool) error {
 	s.clearTargetDown(id)

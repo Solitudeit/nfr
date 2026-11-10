@@ -225,6 +225,8 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.tunnelSave(w, r, sess)
 	case r.URL.Path == "/nfr/tunnels/delete":
 		p.tunnelDelete(w, r, sess)
+	case r.URL.Path == "/nfr/tunnels/regen-code":
+		p.tunnelRegenCode(w, r, sess)
 	case r.URL.Path == "/nfr/tunnels/toggle":
 		p.tunnelToggle(w, r, sess)
 	case r.URL.Path == "/nfr/nodes":
