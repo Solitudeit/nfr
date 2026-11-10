@@ -127,6 +127,13 @@
         </dd></div>
         {{end}}
       </dl>
+      {{if and .Enabled (not .Awaiting) (not .NodeMissing) (not .Online)}}
+      <div class="await-box">
+        <div class="await-hint">客户端掉线了。在{{.NodeName}}上用已保存的配置重新拉起，不要重新 join（会多出一个节点）：</div>
+        <div class="copyfield"><code>nfrc -c /etc/nfr/agent.toml</code><button type="button" data-copy="nfrc -c /etc/nfr/agent.toml">复制</button></div>
+        <div class="await-hint muted">普通用户（非 root）的配置在 ~/.config/nfr/agent.toml</div>
+      </div>
+      {{end}}
       {{if .Awaiting}}{{$jc := index $.Codes .ID}}
       {{if $jc}}
       <div class="await-box">
