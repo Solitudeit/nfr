@@ -59,11 +59,15 @@ type tunnelsData struct {
 	// current server, keyed by tunnel id, so the card can show what a new
 	// device must run without a second request.
 	Codes map[string]api.JoinCodeResponse
-	// Stats block fields for the local view: online nodes come from
-	// OnlineNodes; the rest restate what the overview page used to render.
-	StatsEnabled int
-	StatsIn      int64
-	StatsOut     int64
+	// Stats block fields for the local view: StatsOnline/StatsTotalNodes
+	// count every node the server knows (console host included, matching
+	// the JS repaint); StatsEnabled and the traffic totals restate what the
+	// overview page used to render.
+	StatsOnline     int
+	StatsTotalNodes int
+	StatsEnabled    int
+	StatsIn         int64
+	StatsOut        int64
 }
 
 // cards renders every instance the console can reach, the local one first.
@@ -181,9 +185,15 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 		d.OnlineNodes = countOnline(d.Nodes)
 		d.LocalNodeOn = d.LocalTarget != nil
 		// The stats block keeps the four headline numbers the overview page
-		// used to show. Totals sum the tunnels loaded above: the server
+		// used to show. It must count the same node population as the JS
+		// repaint, which reads every node from /nfr/api/state — so it draws
+		// from p.srv.Nodes() directly, console host included, not from the
+		// agent-only split. Totals sum the tunnels loaded above: the server
 		// exposes no traffic aggregate, and the page repaints the block live
 		// from /nfr/api/state anyway.
+		all := p.srv.Nodes()
+		d.StatsOnline = countOnline(all)
+		d.StatsTotalNodes = len(all)
 		for _, t := range d.Tunnels {
 			if t.Enabled {
 				d.StatsEnabled++

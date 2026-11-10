@@ -253,6 +253,28 @@ func TestTunnelsCarriesStatsAndFourNavItems(t *testing.T) {
 	}
 }
 
+func TestTunnelsStatsCountsFullNodePopulation(t *testing.T) {
+	p, password := newPanel(t)
+	if err := p.srv.SetLocalNode(true); err != nil {
+		t.Fatal(err)
+	}
+	cookies := login(t, p, password)
+
+	// The stats block must count the same population the JS repaint uses:
+	// every node in p.srv.Nodes(), console host included — not just the
+	// agent nodes splitNodes hands the node list. With only the console
+	// host present, that is one node, online (api.Node marks Local always
+	// online), out of one.
+	rec := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tunnels = %d", rec.Code)
+	}
+	want := `data-stat="nodes-online">1 / 1<`
+	if !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("tunnels stats missing full population %q in body: %.400s", want, rec.Body.String())
+	}
+}
+
 func extractCSRF(t *testing.T, body string) string {
 	t.Helper()
 	const marker = `name="csrf" value="`
