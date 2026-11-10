@@ -132,7 +132,7 @@
                 <input id="port" name="remote_port" type="number" inputmode="numeric" min="0" value="{{if .Edit}}{{if .Edit.RemotePort}}{{.Edit.RemotePort}}{{end}}{{end}}" placeholder="请输入远程端口">
                 <button type="button" class="step" data-step="1" aria-label="端口加一">＋</button>
               </div>
-              <button type="button" class="btn grab-btn hidden" onclick="grab()">获取空闲端口</button>
+              <button type="button" class="btn grab-btn" onclick="grab()" hidden>获取空闲端口</button>
               <span class="tf-hint" id="leasehint">可分配范围 {{index .PortRange 0}}–{{index .PortRange 1}}；留空则在保存时自动分配。</span>
             </div>
           </div>

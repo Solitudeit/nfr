@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -286,8 +287,20 @@ func TestTunnelFormOffersNewDevice(t *testing.T) {
 			t.Fatalf("new-device form is missing %q", want)
 		}
 	}
-	if !strings.Contains(body, "hidden") && strings.Contains(body, "grab-btn") && !strings.Contains(body, `grab-btn hidden`) {
-		t.Fatalf("the allocate button should be hidden in the staged form")
+	// The manual grab button must ship hidden (the [hidden] attribute, which
+	// app.css turns into display:none — a bare class would not). grab() never
+	// clears the attribute, and the details-open auto-grab calls it without
+	// un-hiding, so the button stays invisible unless markup changes.
+	m := regexp.MustCompile(`<button[^>]*class="[^"]*grab-btn[^"]*"[^>]*>`)
+	btn := m.FindString(body)
+	if btn == "" {
+		t.Fatal("no grab button rendered in the staged form")
+	}
+	if !strings.Contains(btn, " hidden") || strings.Contains(btn, `class="[^"]*hidden`) {
+		t.Fatalf("grab button must hide via the hidden attribute, got: %s", btn)
+	}
+	if strings.Contains(btn, `class="btn grab-btn hidden"`) {
+		t.Fatalf("grab button must not rely on the non-existent .hidden class: %s", btn)
 	}
 	for _, gone := range []string{"192.168.1.1", "combo-list"} {
 		if strings.Contains(body, gone) {
