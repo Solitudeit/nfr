@@ -38,7 +38,7 @@
 ## 数据与协议改动
 
 - `internal/auth/auth.go:99` `JoinCode` 增加 `TunnelID string \`json:"tunnel_id,omitempty"\``。
-- `internal/server/control.go:152` `handleJoin`：兑换成功创建节点后，若 `jc.TunnelID` 非空则把对应隧道的 `NodeID` 设为新节点、清「待接入」态，并 bump 配置 revision 让 agent 立即收到隧道。
+- `internal/server/control.go:152` `handleJoin`：兑换成功创建节点后，若 `jc.TunnelID` 非空**且目标隧道 `NodeID==""`**（绝不重绑已接入的隧道），则在同一个 `st.Update` 里把隧道绑到新节点。无需显式 bump revision 或主动推送：`store.Update` 每次自增 revision（store.go:206），且新节点收到 Welcome 后才发起 handleControl，其首个 configFrame（control.go:295）就已包含该隧道。
 - `internal/api/types.go:116` `JoinCodeRequest` 增加 `TunnelID`；隧道创建响应在未指定节点时附带 join 块（code/expires/command）。
 - 隧道新增状态 `awaiting`（待接入）：`NodeID == ""` 且已创建。删除待接入隧道时作废其绑定码。
 
@@ -64,6 +64,16 @@
 
 ## 留给实现者
 
-- 自动分配端口沿用现有 `POST /api/v1/ports/allocate` 租约实现，表单提交时静默完成。
-- 待接入状态在 `tcard`/`ocard` 的 `StatusKind` 映射（新 kind）。
-- e2e 脚本补一条：建隧道(新设备) → 拿命令 → 模拟 join → 验证隧道 NodeID 与流量通路。
+- 自动分配端口沿用现有租约实现（面板走 `POST /nfr/api/allocate`，handlers.go:699），表单提交时静默完成。
+- 待接入状态在 `tcard`/`ocard` 的 `StatusKind` 映射：在 `tunnelStatus`（server.go:596）最上方加 `Awaiting` 分支，先于 NodeMissing 判断，新 kind 用 warn 色 + 「等待接入」。
+- 待接入隧道的创建走内部路径：`buildTunnel`（service.go:206）的节点校验不放宽，新设备流程在同一 `st.Update` 里跳过该校验并铸造绑定码，防止普通 API 悄悄建出孤儿隧道。
+- 端口立即绑定（已确认）：reconcile 不改，待接入期间端口监听、访问 502/关闭；设备接入后即通。
+- 名称留空时服务端自动生成（如 `tunnel-<port>` 或 4 位随机），buildTunnel 的 name 校验不放宽。
+- 概览合并后的隧道页顶部统计条：在线节点、启用隧道、入站/出站流量 四项（原概览的 stats 原样搬移）。
+- 命令展示不新建详情模板：创建后 302 回隧道列表，待接入卡片内联展示命令 + 复制 + 倒计时 + 「重新生成」（重生成 = 删除旧码 + 铸新码，保持一次性）。
+- 兑换时若隧道已被删除：节点照常创建，绑定静默丢弃，面板事件里提示「隧道已不存在」。
+- 吊销 = 删除待接入隧道时同时删除其绑定码，不新增 REST 路由。
+- federation 远端服务器永久隐藏「＋新设备」（JoinCodeRequest.TunnelID 字段远端忽略即可）。
+- 删除 tunnel_form.html 的 SUGGEST/combobox（234-288 行），地址与端口用普通输入框。
+- e2e 改动：scripts/e2e.py:200 断言「概览」改为「隧道」；新增用例：建待接入隧道 → 抓取命令 → nfrc join → 验证 NodeID 绑定与流量通路。
+- 单服务器 302 已存在（handlers.go:178-190），仅需验证。
