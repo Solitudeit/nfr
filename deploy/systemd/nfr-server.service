@@ -16,11 +16,17 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-# /var/lib/nfr holds state, certificates and the log; /etc/nfr must be
-# writable so a first start can drop server.toml there (ProtectSystem=strict
-# makes the rest of /etc read-only).
-ReadWritePaths=/var/lib/nfr /etc/nfr
-# Uncomment to run as an unprivileged user (chown /var/lib/nfr first):
+# systemd creates these two and keeps them writable under ProtectSystem=strict.
+# They must not be listed in ReadWritePaths: that option fails the whole unit
+# with status=226/NAMESPACE when a path does not exist yet, which is exactly
+# the situation on a fresh machine.
+StateDirectory=nfr
+StateDirectoryMode=0700
+ConfigurationDirectory=nfr
+ConfigurationDirectoryMode=0755
+# If you move data_dir in server.toml, add it here so the unit can write it:
+# ReadWritePaths=/srv/nfr
+# Uncomment to run as an unprivileged user:
 # User=nfr
 # Group=nfr
 

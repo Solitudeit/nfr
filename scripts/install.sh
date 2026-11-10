@@ -113,7 +113,10 @@ install_systemd() {
       *) echo "$out" ;;
     esac
   fi
-  mkdir -p /etc/nfr
+  # The unit uses StateDirectory=/ConfigurationDirectory=, which makes systemd
+  # create these; doing it here too keeps ReadWritePaths-style overrides and
+  # older units working.
+  mkdir -p /etc/nfr /var/lib/nfr
   unit=/etc/systemd/system/nfr-server.service
   tmp=$(mktemp)
   trap 'rm -f "$tmp"' EXIT
@@ -127,6 +130,15 @@ install_systemd() {
   sleep 2
   echo
   systemctl status nfr-server --no-pager --lines=12 || true
+  if ! systemctl is-active --quiet nfr-server; then
+    echo
+    echo "nfr-server did not stay up; last journal lines:" >&2
+    journalctl -u nfr-server -n 20 --no-pager >&2 || true
+    echo
+    echo "binaries are installed; fix the cause and run:" >&2
+    echo "  sudo systemctl restart nfr-server" >&2
+    exit 1
+  fi
 }
 
 # Report what landed. A partial install (NFR_ONLY) skips the other binary.
