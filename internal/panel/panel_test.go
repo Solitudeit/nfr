@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -644,5 +645,38 @@ func TestHiddenAttributeBeatsComponentDisplay(t *testing.T) {
 	// #nodewarn strip and the manual grab button render on the tunnel form.
 	if !regexp.MustCompile(`(?m)^\s*\[hidden\]\s*\{[^}]*display:\s*none\s*!important`).Match(css) {
 		t.Fatal(`app.css must carry a global "[hidden] { display: none !important }" rule`)
+	}
+}
+
+// The parked first-run password exists only so the operator can find it once.
+// A successful sign-in means it has been found, so the plaintext copy must not
+// outlive that moment.
+func TestLoginClearsTheParkedPassword(t *testing.T) {
+	p, password := newPanel(t)
+	parked := server.InitialPasswordPath(p.srv.DataDir())
+	if err := os.WriteFile(parked, []byte("  密码 "+password+"\n"), 0o600); err != nil {
+		t.Fatalf("park password: %v", err)
+	}
+
+	login(t, p, password)
+
+	if _, err := os.Stat(parked); !os.IsNotExist(err) {
+		t.Fatalf("the parked password survived a successful sign-in: %v", err)
+	}
+}
+
+// A wrong password must leave the file alone: the operator still has to be
+// able to read it.
+func TestFailedLoginKeepsTheParkedPassword(t *testing.T) {
+	p, password := newPanel(t)
+	parked := server.InitialPasswordPath(p.srv.DataDir())
+	if err := os.WriteFile(parked, []byte("  密码 "+password+"\n"), 0o600); err != nil {
+		t.Fatalf("park password: %v", err)
+	}
+
+	do(p, http.MethodPost, "/nfr/login", url.Values{"password": {"not-it"}}, nil)
+
+	if _, err := os.Stat(parked); err != nil {
+		t.Fatalf("a failed sign-in deleted the parked password: %v", err)
 	}
 }

@@ -150,8 +150,21 @@ install_systemd() {
   # Bound by time, not by line count: on an upgrade the previous first-run
   # banner may still sit within the last N lines, and re-printing that password
   # would put a stale secret back into the terminal.
-  journalctl -u nfr-server --since '-3 min' --no-pager -o cat 2>/dev/null |
-    grep -E '面板|密码|证书指纹' || echo "  (取不到日志，用 sudo journalctl -u nfr-server -n 20 自己看)"
+  shown=$(journalctl -u nfr-server --since '-3 min' --no-pager -o cat 2>/dev/null |
+    grep -E '面板|密码|证书指纹' || true)
+  if [ -n "$shown" ]; then
+    echo "$shown"
+  elif [ -f "$data_dir/initial-password.txt" ]; then
+    # Plenty of hosts have no journal at all (containers, journald disabled,
+    # volatile journal already rotated). The control node parks the same banner
+    # next to its state file and the panel deletes it on the first sign-in, so
+    # its presence means the password has not been used yet.
+    echo "  （这台机器没有可读的 journal，下面是 nfrs 写下的启动信息）"
+    cat "$data_dir/initial-password.txt"
+    echo "  （登录成功后这个文件会自动删除）"
+  else
+    echo "  (取不到日志，用 sudo journalctl -u nfr-server -n 20 自己看)"
+  fi
   if ! systemctl is-active --quiet nfr-server; then
     echo
     echo "nfr-server did not stay up; last journal lines:" >&2

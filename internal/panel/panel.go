@@ -330,6 +330,9 @@ func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/nfr/login?err="+url.QueryEscape("wrong password"), http.StatusSeeOther)
 		return
 	}
+	// The one-time password has been used for what it is for, so the plaintext
+	// copy parked for journal-less hosts has to go now.
+	p.srv.ClearInitialPassword()
 	id := randomToken()
 	s := &session{csrf: randomToken(), exp: time.Now().Add(sessionTTL)}
 	p.mu.Lock()
