@@ -179,6 +179,17 @@ agent 支持同时连多台服务器：多执行几次 `nfrc join`（指向不�
 ## 升级
 
 ```bash
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+  | sudo sh -s -- --systemd
+```
+
+已经装过并正在运行时，`install.sh` 会替你 `systemctl restart`——`enable --now`
+对运行中的 unit 不做事，不重启的话面板还是旧进程、旧界面。它不会重打密码，
+密码沿用 `state.json` 里那份。
+
+手动装二进制的话，重启要自己做：
+
+```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
 sudo systemctl restart nfr-server      # 内网机器上：sudo systemctl restart nfr-agent
 ```

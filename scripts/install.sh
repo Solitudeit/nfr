@@ -116,7 +116,8 @@ install_systemd() {
   # The unit uses StateDirectory=/ConfigurationDirectory=, which makes systemd
   # create these; doing it here too keeps ReadWritePaths-style overrides and
   # older units working.
-  mkdir -p /etc/nfr /var/lib/nfr
+  data_dir=/var/lib/nfr
+  mkdir -p /etc/nfr "$data_dir"
   unit=/etc/systemd/system/nfr-server.service
   tmp=$(mktemp)
   trap 'rm -f "$tmp"' EXIT
@@ -124,12 +125,34 @@ install_systemd() {
   mv "$tmp" "$unit"
   trap - EXIT
   echo "installed $unit"
+  # A fresh install prints the panel address and the one-time password exactly
+  # once, at first start. Note that before we start anything, so the banner can
+  # be echoed below instead of disappearing into the journal.
+  fresh=0
+  [ -f "$data_dir/state.json" ] || fresh=1
+  was_active=$(systemctl is-active nfr-server 2>/dev/null || true)
   systemctl daemon-reload
-  systemctl enable --now nfr-server
-  # First start writes the config and prints the panel password to the journal.
+  if [ "$was_active" = active ]; then
+    # `enable --now` leaves an already-running unit alone, so an upgrade would
+    # keep serving from the old binary in memory until the next reboot.
+    systemctl restart nfr-server
+  else
+    systemctl enable --now nfr-server
+  fi
   sleep 2
   echo
   systemctl status nfr-server --no-pager --lines=12 || true
+  if [ "$fresh" = 1 ]; then
+    # First start wrote the config and the credentials; surface them instead of
+    # making the operator dig through the journal.
+    echo
+    echo "首次启动的登录信息（只打印这一次）："
+    journalctl -u nfr-server -n 80 --no-pager -o cat 2>/dev/null |
+      grep -E '面板|密码|证书指纹|控制节点已就绪' || true
+  else
+    echo
+    echo "面板与密码沿用已有配置（$data_dir/state.json）；忘了密码见 docs/deploy.md。"
+  fi
   if ! systemctl is-active --quiet nfr-server; then
     echo
     echo "nfr-server did not stay up; last journal lines:" >&2
