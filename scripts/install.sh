@@ -125,9 +125,8 @@ install_systemd() {
   mv "$tmp" "$unit"
   trap - EXIT
   echo "installed $unit"
-  # A fresh install prints the panel address and the one-time password exactly
-  # once, at first start. Note that before we start anything, so the banner can
-  # be echoed below instead of disappearing into the journal.
+  # Every start prints the panel address, so echo it from the journal instead of
+  # making the operator scroll. The password is first-run only by design.
   fresh=0
   [ -f "$data_dir/state.json" ] || fresh=1
   was_active=$(systemctl is-active nfr-server 2>/dev/null || true)
@@ -142,17 +141,17 @@ install_systemd() {
   sleep 2
   echo
   systemctl status nfr-server --no-pager --lines=12 || true
+  echo
   if [ "$fresh" = 1 ]; then
-    # First start wrote the config and the credentials; surface them instead of
-    # making the operator dig through the journal.
-    echo
-    echo "首次启动的登录信息（只打印这一次）："
-    journalctl -u nfr-server -n 80 --no-pager -o cat 2>/dev/null |
-      grep -E '面板|密码|证书指纹|控制节点已就绪' || true
+    echo "首次启动的登录信息（密码只打印这一次）："
   else
-    echo
-    echo "面板与密码沿用已有配置（$data_dir/state.json）；忘了密码见 docs/deploy.md。"
+    echo "面板地址（密码沿用 $data_dir/state.json；忘了见 docs/deploy.md）："
   fi
+  # Bound by time, not by line count: on an upgrade the previous first-run
+  # banner may still sit within the last N lines, and re-printing that password
+  # would put a stale secret back into the terminal.
+  journalctl -u nfr-server --since '-3 min' --no-pager -o cat 2>/dev/null |
+    grep -E '面板|密码|证书指纹' || echo "  (取不到日志，用 sudo journalctl -u nfr-server -n 20 自己看)"
   if ! systemctl is-active --quiet nfr-server; then
     echo
     echo "nfr-server did not stay up; last journal lines:" >&2
