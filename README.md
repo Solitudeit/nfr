@@ -79,8 +79,9 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
   | sudo sh -s -- --systemd
 ```
 
-它装好 `nfrs` / `nfrc`、写入 `/etc/systemd/system/nfr-server.service`、
-`systemctl enable --now`，最后把 `systemctl status` 的一段打给你抄密码。
+它装好 `nfrs` / `nfrc`、写入 `/etc/systemd/system/nfr-server.service` 并启动；
+第一次装会把面板地址和一次性密码直接打出来。重复执行等于升级：已经在跑时会
+`systemctl restart`（否则面板还是旧进程），密码沿用原来那份。
 不加 `--systemd` 就只装二进制（内网机器用这个）。
 
 第一次启动会自己写 `/etc/nfr/server.toml`、生成自签证书和管理员密码，日志里长这样：
