@@ -254,6 +254,15 @@ func runServer(cfgPath string, child bool) {
 	// journal is the only place left to look. Only the one-time password stays
 	// first-run-only.
 	banner := serverBanner(cfg, generated, srv.Info().Pinned)
+	if generated != "" {
+		// Under systemd stdout ends up in the journal, and a host without
+		// journald keeps nothing at all. Park the same banner next to the
+		// state so the password is readable from the filesystem until the
+		// first successful sign-in clears it.
+		if werr := keepInitialPassword(cfg.DataDir, banner); werr != nil {
+			lg.Warn("could not park the first-run password", "err", werr)
+		}
+	}
 	if child {
 		// Hand the banner to the parent process, which prints it and returns
 		// the terminal. It is removed again once read; leftovers from a run
@@ -278,6 +287,13 @@ func runServer(cfgPath string, child bool) {
 	if err := srv.Run(ctx); err != nil {
 		fatal("run: %v", err)
 	}
+}
+
+// keepInitialPassword writes the first-run banner next to the state file so
+// the one-time password survives a start whose output went to a journal that
+// does not exist. The panel removes the file on the first successful sign-in.
+func keepInitialPassword(dataDir, banner string) error {
+	return os.WriteFile(server.InitialPasswordPath(dataDir), []byte(banner), 0o600)
 }
 
 // serverBanner renders the start-up message: where to sign in and, on the very
@@ -378,6 +394,9 @@ func cmdServerStatus(args []string) {
 		fmt.Printf("data        %s\n", cfg.DataDir)
 		if pid, err := readPID(cfg.DataDir); err == nil {
 			fmt.Printf("pid         %d\n", pid)
+		}
+		if server.HasInitialPassword(cfg.DataDir) {
+			fmt.Printf("password    %s (首次登录后自动删除)\n", server.InitialPasswordPath(cfg.DataDir))
 		}
 	} else {
 		fmt.Printf("config      %s (missing)\n", *cfgPath)

@@ -39,9 +39,23 @@ sudo mkdir -p /etc/nfr && sudo nfrs -c /etc/nfr/server.toml
 `bind: address already in use`。从手动换到 systemd 时先 `sudo nfrs stop`。
 
 面板地址在**每次启动时都会打印**（`journalctl -u nfr-server -n 15` 里能看到，
-`nfrs status` 也会列出来）；只有一次性密码是首次启动独有。忘了密码就在面板
-「设置」里改，或者删掉 `state.json` 里的 `panel_password` 字段再重启
-（会重新生成一个并打进日志）。
+`nfrs status` 也会列出来）；只有一次性密码是首次启动独有。
+
+有些机器没有可读的 journal——容器、journald 被关掉、日志已经轮转，
+`journalctl` 只会回一句 `No journal files were found`。所以首次启动时
+`nfrs` 会把同一段信息（含密码）写进 `/var/lib/nfr/initial-password.txt`，
+权限 `0600`：
+
+```bash
+sudo cat /var/lib/nfr/initial-password.txt   # 密码用掉之后这个文件就不存在了
+```
+
+安装脚本在 journal 里找不到内容时会自动读它；`nfrs status` 在有这个文件时
+也会单独列一行 `password`。**第一次登录成功后文件会被删除**，所以它不会
+长期躺着一个明文密码。
+
+忘了密码就在面板「设置」里改；彻底进不去时，删掉 `state.json` 里的
+`panel_password` 字段再重启，会重新生成一个并重新写出上面那个文件。
 
 建好的隧道默认按 **公网端口** 访问：面板里给隧道分配一个 `20000-29999` 的端口，
 访客直接打开 `http://服务器IP:端口`，不需要域名、证书或 nginx。只有想「一条 80/443

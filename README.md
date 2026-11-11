@@ -99,6 +99,11 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
 
 之后再启动就只剩地址和指纹（密码不再重复打印）。任何 `nfrs status` 也会列出面板地址。
 
+安装脚本从 journal 里取上面这段。有些机器根本没有可读的 journal（容器、
+journald 关掉、日志已轮转），所以首次启动时 `nfrs` 还会把同一段信息写进
+`/var/lib/nfr/initial-password.txt`（`0600`）；脚本取不到日志时直接读这个文件。
+**第一次登录成功后它会被自动删除**，密码用掉就不再留在磁盘上。
+
 不想用 systemd 就直接前台起一次：
 
 ```bash
