@@ -249,15 +249,18 @@ func runServer(cfgPath string, child bool) {
 	}
 	srv.SetPanel(panel.New(srv, lg))
 
-	if generated != "" {
-		banner := serverBanner(cfg, generated, srv.Info().Pinned)
-		if child {
-			// Hand the first-run banner to the parent process, which prints
-			// it and returns the terminal.
-			_ = os.WriteFile(filepath.Join(cfg.DataDir, "first-run.txt"), []byte(banner), 0o600)
-		} else {
-			fmt.Print(banner)
-		}
+	// Print the console address on every start, not just the first one: under
+	// systemd the banner scrolls out of the terminal within seconds and the
+	// journal is the only place left to look. Only the one-time password stays
+	// first-run-only.
+	banner := serverBanner(cfg, generated, srv.Info().Pinned)
+	if child {
+		// Hand the banner to the parent process, which prints it and returns
+		// the terminal. It is removed again once read; leftovers from a run
+		// that never saw a parent are cleared on the next start.
+		_ = os.WriteFile(filepath.Join(cfg.DataDir, "first-run.txt"), []byte(banner), 0o600)
+	} else {
+		fmt.Print(banner)
 	}
 	if child {
 		_ = os.WriteFile(filepath.Join(cfg.DataDir, "nfr.pid"), []byte(strconv.Itoa(os.Getpid())), 0o644)
@@ -277,8 +280,11 @@ func runServer(cfgPath string, child bool) {
 	}
 }
 
-// serverBanner renders the first-run message: where to sign in, the one-time
-// password and what to do next. Nothing else belongs here.
+// serverBanner renders the start-up message: where to sign in and, on the very
+// first start only, the one-time password. The address is repeated on every
+// start because that is the thing an operator comes back for; the password is
+// not, because a secret echoed on every restart becomes a permanent journal
+// entry.
 func serverBanner(cfg config.Server, generated, pin string) string {
 	cands := server.ConsoleCandidates(cfg)
 	var b strings.Builder
@@ -290,12 +296,16 @@ func serverBanner(cfg config.Server, generated, pin string) string {
 			b.WriteString("            " + c + "\n")
 		}
 	}
-	b.WriteString("  密码      " + generated + "\n")
+	if generated != "" {
+		b.WriteString("  密码      " + generated + "\n")
+	}
 	b.WriteString("  证书指纹  " + pin + "\n")
-	b.WriteString(`
-  密码只显示这一次，登录后请在「设置」里修改。
-  打不开时，把地址里的 IP 换成服务商控制台分配的公网 IP。
-  下一步：登录面板 → 节点 → 生成加入码，在内网机器上运行打印出的命令。
+	if generated != "" {
+		b.WriteString("\n  密码只显示这一次，登录后请在「设置」里修改。\n")
+	}
+	b.WriteString(`  打不开时，把地址里的 IP 换成服务商控制台分配的公网 IP。
+  下一步：登录面板 → 「隧道」→「新建隧道」；机器还没接入就点「＋ 新设备」，
+  卡上直接给出加入命令，在那台机器上跑一次就通了。
 `)
 	return b.String()
 }
@@ -361,6 +371,7 @@ func cmdServerStatus(args []string) {
 	fmt.Println()
 	if cfg, ok, err := config.LoadServer(*cfgPath); err == nil && ok {
 		fmt.Printf("config      %s\n", *cfgPath)
+		fmt.Printf("panel       %s\n", server.PanelBaseURL(cfg))
 		fmt.Printf("control     %s\n", cfg.ControlListen)
 		fmt.Printf("http        %s\n", cfg.HTTPListen)
 		fmt.Printf("https       %s\n", cfg.HTTPSListen)

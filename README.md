@@ -79,12 +79,13 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
   | sudo sh -s -- --systemd
 ```
 
-它装好 `nfrs` / `nfrc`、写入 `/etc/systemd/system/nfr-server.service` 并启动；
-第一次装会把面板地址和一次性密码直接打出来。重复执行等于升级：已经在跑时会
-`systemctl restart`（否则面板还是旧进程），密码沿用原来那份。
+它装好 `nfrs` / `nfrc`、写入 `/etc/systemd/system/nfr-server.service` 并启动，
+然后把面板地址从日志里挑出来打给你。重复执行等于升级：已经在跑时会
+`systemctl restart`（否则面板还是旧进程），地址照打，密码沿用原来那份。
 不加 `--systemd` 就只装二进制（内网机器用这个）。
 
-第一次启动会自己写 `/etc/nfr/server.toml`、生成自签证书和管理员密码，日志里长这样：
+每次启动都会打印面板地址；第一次启动还会自己写 `/etc/nfr/server.toml`、
+生成自签证书和管理员密码：
 
 ```
   NFR 控制节点已就绪
@@ -95,6 +96,8 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
 
   密码只显示这一次，登录后请在「设置」里修改。
 ```
+
+之后再启动就只剩地址和指纹（密码不再重复打印）。任何 `nfrs status` 也会列出面板地址。
 
 不想用 systemd 就直接前台起一次：
 
