@@ -31,30 +31,65 @@ jobs:
           cache: true
       - name: Build release archives
         run: python3 scripts/package.py --version "${GITHUB_REF_NAME}" --out dist
-      - name: Check custom release notes
-        id: notes
+      - name: Publish release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          if [ -f ".github/release-notes/${GITHUB_REF_NAME}.md" ]; then
-            echo "path=.github/release-notes/${GITHUB_REF_NAME}.md" >> "$GITHUB_OUTPUT"
-            echo "generate=false" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json, os, urllib.request
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
+          tag = os.environ["TAG"]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "nfr-release-cleanup",
+          }
+          req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases?per_page=100", headers=headers)
+          with urllib.request.urlopen(req, timeout=30) as r:
+              rels = json.loads(r.read().decode())
+          for rel in rels:
+              if rel.get("draft") and (rel.get("name") == tag or str(rel.get("tag_name", "")).startswith("untagged-")):
+                  dreq = urllib.request.Request(
+                      f"https://api.github.com/repos/{repo}/releases/{rel['id']}",
+                      headers=headers,
+                      method="DELETE",
+                  )
+                  with urllib.request.urlopen(dreq, timeout=30) as dr:
+                      dr.read()
+                  print(f"deleted stale draft release id={rel['id']} name={rel.get('name')}")
+          PY
+
+          PRE_FLAG=""
+          case "${TAG}" in
+            *-*) PRE_FLAG="--prerelease" ;;
+          esac
+
+          if gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+            if [ -f ".github/release-notes/${TAG}.md" ]; then
+              gh release edit "${TAG}" --repo "${REPO}" ${PRE_FLAG} --notes-file ".github/release-notes/${TAG}.md"
+            elif [ -n "${PRE_FLAG}" ]; then
+              gh release edit "${TAG}" --repo "${REPO}" ${PRE_FLAG}
+            fi
           else
-            echo "path=" >> "$GITHUB_OUTPUT"
-            echo "generate=true" >> "$GITHUB_OUTPUT"
+            if [ -f ".github/release-notes/${TAG}.md" ]; then
+              gh release create "${TAG}" --repo "${REPO}" --title "${TAG}" ${PRE_FLAG} --notes-file ".github/release-notes/${TAG}.md"
+            else
+              gh release create "${TAG}" --repo "${REPO}" --title "${TAG}" ${PRE_FLAG} --generate-notes
+            fi
           fi
-      - name: Publish
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          body_path: ${{ steps.notes.outputs.path }}
-          generate_release_notes: ${{ steps.notes.outputs.generate }}
-          files: |
-            dist/nfr_*.tar.gz
-            dist/nfr_*.zip
-            dist/nfrc_*.tar.gz
-            dist/nfrc_*.zip
-            dist/SHA256SUMS
-            scripts/install.sh
-            deploy/systemd/nfr-server.service
+
+          gh release upload "${TAG}" --repo "${REPO}" --clobber \
+            dist/nfr_*.tar.gz \
+            dist/nfr_*.zip \
+            dist/nfrc_*.tar.gz \
+            dist/nfrc_*.zip \
+            dist/SHA256SUMS \
+            scripts/install.sh \
+            deploy/systemd/nfr-server.service \
             deploy/systemd/nfr-agent.service
       - name: Mark previous releases as pre-release
         if: contains(github.ref_name, '-')
