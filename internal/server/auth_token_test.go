@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/solitudeit/nfr/internal/agent"
+	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/log"
 	"github.com/solitudeit/nfr/internal/proto"
@@ -172,6 +173,50 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 	}
 	if nodes := srv.Nodes(); len(nodes) != 1 || nodes[0].ID != firstID || !nodes[0].Online {
 		t.Fatalf("reconnect duplicated or failed to reuse node: %+v (want id %s)", nodes, firstID)
+	}
+
+	// Create a manual tunnel on the same node (ManagedByConfig=false), then
+	// reconnect with an EMPTY proxies list -> config-managed "echo-tcp" must be
+	// pruned while the manual tunnel MUST survive untouched!
+	if _, err := srv.CreateTunnel(apiTunnelReq("manual-web", firstID, echoLn.Addr().String())); err != nil {
+		t.Fatalf("CreateTunnel manual: %v", err)
+	}
+	a2Cancel()
+	time.Sleep(150 * time.Millisecond)
+
+	a3Ctx, a3Cancel := context.WithCancel(ctx)
+	defer a3Cancel()
+	ag3 := agent.New(agent.Options{
+		Addr:      target.Addr,
+		AuthToken: target.AuthToken,
+		Name:      target.Name,
+		Proxies:   nil, // removed all declarative proxies
+		Logger:    log.New("error", ""),
+	})
+	go ag3.Run(a3Ctx)
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tunnels := srv.Tunnels()
+		if len(tunnels) == 1 && tunnels[0].Name == "manual-web" {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	tunnels := srv.Tunnels()
+	if len(tunnels) != 1 || tunnels[0].Name != "manual-web" {
+		t.Fatalf("expected only manual-web after pruning config proxies, got %+v", tunnels)
+	}
+}
+
+func apiTunnelReq(name, nodeID, local string) api.TunnelRequest {
+	en := true
+	return api.TunnelRequest{
+		Name:    name,
+		NodeID:  nodeID,
+		Type:    "tcp",
+		Local:   local,
+		Enabled: &en,
 	}
 }
 

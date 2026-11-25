@@ -890,3 +890,29 @@ func TestTunnelSaveAutoNameAndDomainlessHTTPAndNodeSwitch(t *testing.T) {
 		t.Fatalf("tunnel did not migrate to n2: %+v", updated)
 	}
 }
+
+func TestPanelEventsEndpointAndStateEvents(t *testing.T) {
+	p, password := newPanel(t)
+	// Anonymous access to /nfr/api/events must return 401.
+	if rec := do(p, http.MethodGet, "/nfr/api/events", nil, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous /nfr/api/events = %d, want 401", rec.Code)
+	}
+	cookies := login(t, p, password)
+	// Trigger a change event by rotating auth_token via settings.
+	page := do(p, http.MethodGet, "/nfr/settings", nil, cookies)
+	csrf := extractCSRF(t, page.Body.String())
+	if rec := do(p, http.MethodPost, "/nfr/settings", url.Values{
+		"csrf":       {csrf},
+		"action":     {"auth_token"},
+		"auth_token": {"custom-token-999"},
+	}, cookies); rec.Code != http.StatusOK {
+		t.Fatalf("update auth_token = %d", rec.Code)
+	}
+	if p.srv.AuthToken() != "custom-token-999" {
+		t.Fatalf("AuthToken = %q, want custom-token-999", p.srv.AuthToken())
+	}
+	stRec := do(p, http.MethodGet, "/nfr/api/state", nil, cookies)
+	if stRec.Code != http.StatusOK || !strings.Contains(stRec.Body.String(), "auth token updated") {
+		t.Fatalf("/nfr/api/state did not include recent events: %s", stRec.Body.String())
+	}
+}

@@ -112,11 +112,11 @@
       <span class="node-pill-cta" aria-hidden="true">+</span>
     </a>
     {{end}}
-    <a class="node-pill add" href="/nfr/nodes">
+    <a class="node-pill add" href="/nfr/nodes#connect-config">
       <span class="node-pill-add-ico" aria-hidden="true">{{template "i-plus"}}</span>
       <span class="node-pill-main">
         <span class="node-pill-name">接入新机器</span>
-        <span class="node-pill-meta">生成一次性加入码</span>
+        <span class="node-pill-meta">获取 TOML / YAML 配置</span>
       </span>
     </a>
   </div>
@@ -204,8 +204,8 @@
       <div class="callout warn">
         <div class="callout-title">客户端已离线</div>
         <p class="callout-text">请在 {{.NodeName}} 上使用已保存的配置重新拉起，不要重新 join（会注册新节点）：</p>
-        <div class="copyfield"><code>nfrc -c /etc/nfr/agent.toml</code><button type="button" class="btn xs" data-copy="nfrc -c /etc/nfr/agent.toml">复制</button></div>
-        <div class="callout-sub">非 root 用户配置路径：<code>~/.config/nfr/agent.toml</code></div>
+        <div class="copyfield"><code>nfrc -c /etc/nfr/client.toml</code><button type="button" class="btn xs" data-copy="nfrc -c /etc/nfr/client.toml">复制</button></div>
+        <div class="callout-sub">也支持 <code>client.yaml</code> 或旧版 <code>agent.toml</code>（非 root 位于 <code>~/.config/nfr/</code>）</div>
       </div>
       {{end}}
 

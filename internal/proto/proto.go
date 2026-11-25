@@ -57,7 +57,10 @@ type Frame struct {
 	Tunnels  []TunnelSpec `json:"tunnels,omitempty"`
 	// Proxies carries optional declarative tunnels declared in the client's
 	// local config file (client.toml / client.yaml) during hello.
-	Proxies []ProxySpec `json:"proxies,omitempty"`
+	// SyncProxies signals that the server should reconcile config-managed
+	// tunnels for this node against Proxies (including removing deleted ones).
+	Proxies     []ProxySpec `json:"proxies,omitempty"`
+	SyncProxies bool        `json:"sync_proxies,omitempty"`
 
 	Code    string `json:"code,omitempty"`
 	Message string `json:"msg,omitempty"`

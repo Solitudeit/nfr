@@ -270,6 +270,8 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.allocate(w, r, sess)
 	case r.URL.Path == "/nfr/api/state":
 		p.state(w, r, sess)
+	case r.URL.Path == "/nfr/api/events":
+		p.events(w, r, sess)
 	default:
 		http.NotFound(w, r)
 	}

@@ -17,10 +17,14 @@ import (
 	"github.com/solitudeit/nfr/internal/transport"
 )
 
-// hub fan-outs change events to console subscribers.
+const maxRecentEvents = 100
+
+// hub fan-outs change events to console subscribers and keeps a bounded recent
+// history so the web console shows recent activity immediately on open.
 type hub struct {
-	mu   sync.Mutex
-	subs map[chan api.Event]struct{}
+	mu     sync.Mutex
+	subs   map[chan api.Event]struct{}
+	recent []api.Event
 }
 
 func newHub() *hub { return &hub{subs: make(map[chan api.Event]struct{})} }
@@ -43,12 +47,37 @@ func (h *hub) subscribe() (<-chan api.Event, func()) {
 func (h *hub) publish(ev api.Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.recent = append(h.recent, ev)
+	if len(h.recent) > maxRecentEvents {
+		h.recent = h.recent[len(h.recent)-maxRecentEvents:]
+	}
 	for ch := range h.subs {
 		select {
 		case ch <- ev:
 		default:
 		}
 	}
+}
+
+func (h *hub) history() []api.Event {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]api.Event, len(h.recent))
+	copy(out, h.recent)
+	return out
+}
+
+// RecentEvents returns a snapshot of the most recent server activity events.
+func (s *Server) RecentEvents() []api.Event {
+	if s.hub == nil {
+		return nil
+	}
+	return s.hub.history()
+}
+
+// SubscribeEvents subscribes to live server activity events.
+func (s *Server) SubscribeEvents() (<-chan api.Event, func()) {
+	return s.hub.subscribe()
 }
 
 // agentSession is one live control connection.
@@ -342,8 +371,8 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 	}
 
 	// Sync any tunnels declared directly in the client's TOML/YAML config file.
-	if len(hello.Proxies) > 0 {
-		if err := s.syncDeclarativeProxies(node.ID, hello.Proxies); err != nil {
+	if hello.SyncProxies || len(hello.Proxies) > 0 {
+		if err := s.syncDeclarativeProxies(node.ID, hello.Proxies, hello.SyncProxies); err != nil {
 			s.lg.Warn("sync client proxies failed", "node", node.Name, "err", err)
 			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "proxy config error: " + err.Error()})
 			sess.Close()
@@ -572,10 +601,18 @@ func (s *Server) openStream(nodeID string, h *proto.StreamHeader) (net.Conn, err
 }
 
 // syncDeclarativeProxies reconciles tunnels declared in a client's TOML/YAML
-// config file onto nodeID. Existing tunnels with the same name on this node are
-// updated in place; missing ones are created automatically.
-func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec) error {
+// config file onto nodeID. Existing tunnels with the same name are updated in
+// place; missing ones are created and tagged ManagedByConfig=true. When prune
+// is true, previously config-managed tunnels on nodeID that were removed from
+// the client's proxies list are cleaned up without ever touching tunnels
+// created manually through the web console or API.
+func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec, prune bool) error {
 	now := time.Now().UTC()
+	wanted := make(map[string]bool, len(proxies))
+	for _, p := range proxies {
+		wanted[strings.ToLower(strings.TrimSpace(p.Name))] = true
+	}
+	var removedIDs []string
 	changed, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
 		mutated := false
 		for _, p := range proxies {
@@ -632,7 +669,8 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 					strings.Join(existing.Hosts, ",") == strings.Join(built.Hosts, ",") &&
 					existing.Enabled == built.Enabled &&
 					existing.BandwidthKB == built.BandwidthKB &&
-					existing.QuotaMB == built.QuotaMB {
+					existing.QuotaMB == built.QuotaMB &&
+					existing.ManagedByConfig {
 					continue
 				}
 				existing.NodeID = built.NodeID
@@ -643,23 +681,43 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 				existing.Enabled = built.Enabled
 				existing.BandwidthKB = built.BandwidthKB
 				existing.QuotaMB = built.QuotaMB
+				existing.ManagedByConfig = true
 				existing.UpdatedAt = now
 				mutated = true
 			} else {
 				built.ID = store.NewID()
+				built.ManagedByConfig = true
 				built.CreatedAt = now
 				built.UpdatedAt = now
 				st.Tunnels = append(st.Tunnels, *built)
 				mutated = true
 			}
 		}
+		if prune {
+			kept := st.Tunnels[:0]
+			for _, t := range st.Tunnels {
+				if t.NodeID == nodeID && t.ManagedByConfig && !wanted[strings.ToLower(t.Name)] {
+					removedIDs = append(removedIDs, t.ID)
+					mutated = true
+					continue
+				}
+				kept = append(kept, t)
+			}
+			st.Tunnels = kept
+		}
 		return mutated, nil
 	})
 	if err != nil {
 		return err
 	}
+	for _, id := range removedIDs {
+		s.clearTargetDown(id)
+		s.met.Drop(id)
+		s.dropLimit(id)
+	}
 	if changed {
 		s.reconcile()
+		s.notify(fmt.Sprintf("synced %d config proxy(ies) for node %s", len(proxies), nodeID))
 	}
 	return nil
 }

@@ -174,14 +174,15 @@ func (a *Agent) session(ctx context.Context) error {
 	defer ctrl.Close()
 
 	hello := &proto.Frame{
-		Type:    proto.TypeHello,
-		Proto:   proto.Version,
-		Node:    a.opt.Name,
-		NodeID:  nodeID,
-		OS:      runtime.GOOS,
-		Arch:    runtime.GOARCH,
-		Version: version.String(),
-		Proxies: a.opt.Proxies,
+		Type:        proto.TypeHello,
+		Proto:       proto.Version,
+		Node:        a.opt.Name,
+		NodeID:      nodeID,
+		OS:          runtime.GOOS,
+		Arch:        runtime.GOARCH,
+		Version:     version.String(),
+		Proxies:     a.opt.Proxies,
+		SyncProxies: nodeID == "",
 	}
 	if err := proto.WriteFrame(ctrl, hello); err != nil {
 		return err

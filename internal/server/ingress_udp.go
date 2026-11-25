@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/solitudeit/nfr/internal/metrics"
@@ -17,14 +18,30 @@ import (
 // long as replies keep coming back, which mirrors how a NAT maps an outbound
 // flow. The stream payload uses a 2 byte big endian length prefix per packet,
 // so the agent can recover datagram boundaries inside the byte stream.
-//
-// Session liveness is the reply loop's read deadline, so nothing pings here:
-// yamux keepalive keeps the underlying link healthy and a silent visitor
-// simply re-sessions with its next packet.
 const (
-	udpIdleTimeout = 90 * time.Second // close a visitor session after this much silence
-	udpMaxPacket   = 65_507           // largest possible UDP payload
+	udpIdleTimeout  = 90 * time.Second // close a visitor session after this much silence
+	udpWriteTimeout = 5 * time.Second  // bound stalled stream writes
+	udpMaxPacket    = 65_507           // largest possible UDP payload
+	udpSendQueueCap = 64               // buffered datagrams per visitor session
 )
+
+// maxUDPSessionsPerTunnel bounds active visitor sessions per UDP tunnel to
+// protect against spoofed source-port floods. Overridable in tests.
+var maxUDPSessionsPerTunnel = 2048
+
+// udpBufPool recycles framed packet buffers ([2-byte len][payload]) to avoid
+// per-datagram heap allocations under high-PPS UDP workloads (WireGuard, DNS).
+var udpBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 2+udpMaxPacket)
+		return &b
+	},
+}
+
+type udpPacket struct {
+	buf *[]byte
+	n   int // total framed bytes (2 + payload len)
+}
 
 // serveUDPPort accepts datagrams on one public tunnel port and fans them out
 // to per-visitor agent streams. The tunnel is looked up per packet so
@@ -64,7 +81,9 @@ func (s *Server) tunnelUDPByPort(port int) (store.Tunnel, bool) {
 	return out, okf
 }
 
-// udpSession is one visitor address pinned to one agent stream.
+// udpSession is one visitor address pinned to one agent stream. Outbound writes
+// run in a dedicated writer goroutine fed by a bounded queue so one stalled
+// stream can never block serveUDPPort for other visitors on the same port.
 type udpSession struct {
 	srv    *Server
 	tunnel store.Tunnel
@@ -73,13 +92,18 @@ type udpSession struct {
 	stream net.Conn
 	ctr    *metrics.Counter
 	lim    *tunnelLimit // nil when the tunnel has no bandwidth cap
-	last   time.Time    // guarded by srv.mu
+	sendCh chan udpPacket
+	done   chan struct{}
+	last   time.Time // guarded by srv.mu
 	closed bool
 }
 
-// udpDeliver routes one datagram from a visitor into (or into) the session
-// for its source address, creating the agent stream on first contact.
+// udpDeliver routes one datagram from a visitor into the session for its source
+// address, creating the agent stream on first contact.
 func (s *Server) udpDeliver(conn *net.UDPConn, src *net.UDPAddr, t store.Tunnel, payload []byte) {
+	if len(payload) > udpMaxPacket {
+		return
+	}
 	key := t.ID + "|" + src.String()
 	s.mu.Lock()
 	sess, ok := s.udpSess[key]
@@ -88,8 +112,29 @@ func (s *Server) udpDeliver(conn *net.UDPConn, src *net.UDPAddr, t store.Tunnel,
 	}
 	s.mu.Unlock()
 	if ok {
-		sess.send(payload)
+		sess.enqueue(payload)
 		return
+	}
+
+	// Enforce per-tunnel session cap before dialing a new agent stream: if the
+	// tunnel is already at capacity, evict its oldest idle session.
+	var evict *udpSession
+	s.mu.Lock()
+	count := 0
+	for _, cur := range s.udpSess {
+		if cur.tunnel.ID == t.ID {
+			count++
+			if evict == nil || cur.last.Before(evict.last) {
+				evict = cur
+			}
+		}
+	}
+	if count < maxUDPSessionsPerTunnel {
+		evict = nil
+	}
+	s.mu.Unlock()
+	if evict != nil {
+		evict.close()
 	}
 
 	ctr := s.met.For(t.ID)
@@ -113,6 +158,8 @@ func (s *Server) udpDeliver(conn *net.UDPConn, src *net.UDPAddr, t store.Tunnel,
 		stream: stream,
 		ctr:    ctr,
 		lim:    s.limiterFor(t),
+		sendCh: make(chan udpPacket, udpSendQueueCap),
+		done:   make(chan struct{}),
 		last:   time.Now(),
 	}
 	s.mu.Lock()
@@ -122,32 +169,65 @@ func (s *Server) udpDeliver(conn *net.UDPConn, src *net.UDPAddr, t store.Tunnel,
 		s.mu.Unlock()
 		ctr.Active.Add(-1)
 		stream.Close()
-		old.send(payload)
+		old.enqueue(payload)
 		return
 	}
 	s.udpSess[key] = sess
 	s.mu.Unlock()
 
+	go sess.writeLoop()
 	go sess.replyLoop()
-	sess.send(payload)
+	sess.enqueue(payload)
 }
 
-// send frames one visitor datagram onto the agent stream.
-func (sess *udpSession) send(payload []byte) {
-	if len(payload) > udpMaxPacket {
-		return
-	}
-	if sess.lim != nil {
-		sess.lim.up.take(len(payload))
-	}
-	buf := make([]byte, 2+len(payload))
+// enqueue copies payload into a pooled framed buffer and hands it to the
+// session writer without blocking the public UDP reader loop.
+func (sess *udpSession) enqueue(payload []byte) {
+	bp := udpBufPool.Get().(*[]byte)
+	buf := *bp
 	binary.BigEndian.PutUint16(buf[:2], uint16(len(payload)))
 	copy(buf[2:], payload)
-	if _, err := sess.stream.Write(buf); err != nil {
-		sess.close()
-		return
+	pkt := udpPacket{buf: bp, n: 2 + len(payload)}
+	select {
+	case <-sess.done:
+		udpBufPool.Put(bp)
+	case sess.sendCh <- pkt:
+	default:
+		// Queue full for this visitor flow; drop datagram cleanly (UDP semantics)
+		// rather than stalling other visitors on the shared public socket.
+		udpBufPool.Put(bp)
+		sess.ctr.Errs.Add(1)
 	}
-	sess.ctr.In.Add(int64(len(payload)))
+}
+
+func (sess *udpSession) writeLoop() {
+	defer sess.close()
+	for {
+		select {
+		case <-sess.done:
+			// Drain any queued buffers back into the pool.
+			for {
+				select {
+				case pkt := <-sess.sendCh:
+					udpBufPool.Put(pkt.buf)
+				default:
+					return
+				}
+			}
+		case pkt := <-sess.sendCh:
+			payloadLen := pkt.n - 2
+			if sess.lim != nil {
+				sess.lim.up.take(payloadLen)
+			}
+			_ = sess.stream.SetWriteDeadline(time.Now().Add(udpWriteTimeout))
+			_, err := sess.stream.Write((*pkt.buf)[:pkt.n])
+			udpBufPool.Put(pkt.buf)
+			if err != nil {
+				return
+			}
+			sess.ctr.In.Add(int64(payloadLen))
+		}
+	}
 }
 
 // replyLoop reads framed datagrams from the agent and writes them back to the
@@ -155,7 +235,9 @@ func (sess *udpSession) send(payload []byte) {
 // the session is torn down and the visitor re-sessions on the next packet.
 func (sess *udpSession) replyLoop() {
 	defer sess.close()
-	buf := make([]byte, 2+udpMaxPacket)
+	bp := udpBufPool.Get().(*[]byte)
+	defer udpBufPool.Put(bp)
+	buf := *bp
 	for {
 		_ = sess.stream.SetReadDeadline(time.Now().Add(udpIdleTimeout))
 		if _, err := io.ReadFull(sess.stream, buf[:2]); err != nil {
@@ -189,6 +271,7 @@ func (sess *udpSession) close() {
 		return
 	}
 	sess.closed = true
+	close(sess.done)
 	key := sess.tunnel.ID + "|" + sess.src.String()
 	if cur, ok := sess.srv.udpSess[key]; ok && cur == sess {
 		delete(sess.srv.udpSess, key)

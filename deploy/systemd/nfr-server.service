@@ -6,7 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/nfrs -c /etc/nfr/server.toml
+# Automatically loads /etc/nfr/server.toml, server.yaml, or server.yml.
+ExecStart=/usr/local/bin/nfrs
 Restart=always
 RestartSec=5
 # Ports 80/443 need either root or this capability.
@@ -24,7 +25,7 @@ StateDirectory=nfr
 StateDirectoryMode=0700
 ConfigurationDirectory=nfr
 ConfigurationDirectoryMode=0755
-# If you move data_dir in server.toml, add it here so the unit can write it:
+# If you move data_dir in server.toml / server.yaml, add it here:
 # ReadWritePaths=/srv/nfr
 # Uncomment to run as an unprivileged user:
 # User=nfr

@@ -148,6 +148,7 @@ docker run -d --name nfr-server --restart=unless-stopped --network host \
 
 ```bash
 # 服务端（支持 .toml 与 .yaml / .yml）
+nfrs init -c /etc/nfr/server.toml               # 生成带注释的 TOML 或 YAML 配置模板
 nfrs -c /etc/nfr/server.toml                    # 前台启动（推荐由 systemd / Docker 托管）
 nfrs -c /etc/nfr/server.yaml                    # 使用 YAML 配置启动
 nfrs -d -c /etc/nfr/server.toml                 # 显式转后台运行（停止用 nfrs stop）
@@ -157,10 +158,12 @@ nfrs status -c /etc/nfr/server.toml             # 查看当前配置与面板地
 nfrs proxy-config app.example.com               # 输出 nginx 反向代理配置模板
 
 # 客户端（支持 .toml 与 .yaml / .yml）
+nfrc init -c /etc/nfr/client.toml               # 生成客户端配置模板（支持 .toml / .yaml）
 nfrc -c /etc/nfr/client.toml                    # 使用 TOML 配置启动
 nfrc -c /etc/nfr/client.yaml                    # 使用 YAML 配置启动
 nfrc verify -c /etc/nfr/client.toml             # 校验客户端配置
 nfrc status -c /etc/nfr/client.toml             # 查看已配置的服务端与隧道数
+sudo systemctl reload nfr-agent                 # 修改客户端配置后热重载（SIGHUP）
 
 # 卸载（仅移除二进制与 systemd unit，保留 /etc/nfr 与 /var/lib/nfr）
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \

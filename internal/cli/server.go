@@ -28,7 +28,8 @@ import (
 const serverUsage = `%[1]s — NFR control node
 
   %[1]s                      start the control node in the foreground (no daemon)
-  %[1]s verify               validate server.toml syntax and paths
+  %[1]s init                 generate a starter server.toml or server.yaml
+  %[1]s verify               validate server.toml / server.yaml syntax and paths
   %[1]s reset-password [pw]  reset the console admin password (random if omitted)
   %[1]s status               show the local configuration
   %[1]s stop                 stop a node started with -d / --daemon
@@ -61,6 +62,9 @@ Documentation: https://github.com/Solitudeit/nfr
 func RunServer(args []string) {
 	if len(args) > 0 {
 		switch args[0] {
+		case "init":
+			cmdServerInit(args[1:])
+			return
 		case "verify":
 			cmdServerVerify(args[1:])
 			return

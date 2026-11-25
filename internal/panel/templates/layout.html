@@ -52,6 +52,9 @@
           <span class="live-dot" aria-hidden="true"></span>
           <span>实时同步</span>
         </span>
+        <button class="icon-btn" type="button" data-events-toggle title="实时活动日志" aria-label="实时活动日志" aria-expanded="false">
+          {{template "i-activity"}}<span class="badge-dot" data-events-dot hidden></span>
+        </button>
         <button class="icon-btn" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
           {{template "i-moon"}}{{template "i-sun"}}
         </button>
@@ -65,6 +68,9 @@
         <span class="mhead-title">{{.Title}}</span>
       </a>
       <div class="mhead-actions">
+        <button class="icon-btn" type="button" data-events-toggle title="实时活动日志" aria-label="实时活动日志" aria-expanded="false">
+          {{template "i-activity"}}<span class="badge-dot" data-events-dot hidden></span>
+        </button>
         <button class="icon-btn" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
           {{template "i-moon"}}{{template "i-sun"}}
         </button>
@@ -80,6 +86,19 @@
   </div>
 </div>
 <nav class="tabbar" aria-label="底部导航">{{template "nav" .}}</nav>
+<div class="drawer-backdrop" id="events-backdrop" hidden></div>
+<aside class="drawer" id="events-drawer" aria-label="实时活动日志" hidden>
+  <div class="drawer-head">
+    <div>
+      <h2>实时活动日志</h2>
+      <p class="muted">节点上下线、隧道变更与异常告警实时推送</p>
+    </div>
+    <button type="button" class="icon-btn" data-events-close aria-label="关闭">×</button>
+  </div>
+  <div class="drawer-body" id="events-list">
+    <div class="events-empty">等待事件…</div>
+  </div>
+</aside>
 {{end}}
 <script src="/nfr/static/app.js?v={{.Ver}}" defer></script>
 </body>
@@ -112,4 +131,5 @@
 {{define "i-shield"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v6c0 4.6 3 7.8 7 9 4-1.2 7-4.4 7-9V6l-7-3Z"/><path d="m9.5 12 1.8 1.8 3.5-3.8"/></svg>{{end}}
 {{define "i-eye"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>{{end}}
 {{define "i-ext"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5"/><path d="M10 14 19 5"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>{{end}}
+{{define "i-activity"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>{{end}}
 {{define "i-empty"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M6.5 7v11a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V7"/><path d="M9.5 4h5"/></svg>{{end}}

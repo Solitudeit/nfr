@@ -79,7 +79,19 @@
     }
 
     var x = ev.target.closest("[data-dismiss]");
-    if (x) { dismiss(x.closest(".flash")); }
+    if (x) { dismiss(x.closest(".flash")); return; }
+
+    var et = ev.target.closest("[data-events-toggle]");
+    if (et) { toggleEventsDrawer(); return; }
+
+    if (ev.target.closest("[data-events-close]") || ev.target.id === "events-backdrop") {
+      closeEventsDrawer();
+      return;
+    }
+  });
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") closeEventsDrawer();
   });
 
   document.addEventListener("submit", function (ev) {
@@ -242,6 +254,8 @@
     setText(document.querySelector('[data-stat="rate-in"]'), "实时 " + fmtRate(rin));
     setText(document.querySelector('[data-stat="rate-out"]'), "实时 " + fmtRate(rout));
 
+    if (Array.isArray(state.events)) renderEvents(state.events);
+
     nodes.forEach(function (n) {
       var row = document.querySelector('[data-nid="' + n.id + '"]');
       if (!row) return;
@@ -284,6 +298,101 @@
       if (!document.hidden && timer) { clearTimeout(timer); tick(); }
     });
     window.addEventListener("beforeunload", function () { stop = true; });
+  }
+
+  // ── live activity events drawer ────────────────────────────────────
+  var drawerEl = document.getElementById("events-drawer");
+  var backdropEl = document.getElementById("events-backdrop");
+  var eventsListEl = document.getElementById("events-list");
+  var eventDots = Array.prototype.slice.call(document.querySelectorAll("[data-events-dot]"));
+  var eventItems = [];
+  var lastSeenEventKey = "";
+
+  function eventKey(ev) { return (ev.at || "") + "|" + (ev.type || "") + "|" + (ev.message || ""); }
+  function eventKind(t) {
+    if (!t) return "idle";
+    if (t.indexOf("online") !== -1 || t.indexOf("joined") !== -1 || t.indexOf("bound") !== -1) return "on";
+    if (t.indexOf("offline") !== -1 || t.indexOf("down") !== -1 || t.indexOf("err") !== -1) return "err";
+    if (t.indexOf("quota") !== -1 || t.indexOf("warn") !== -1) return "warn";
+    return "idle";
+  }
+  function eventLabel(t) {
+    var map = {
+      "node-online": "节点上线",
+      "node-offline": "节点离线",
+      "node-joined": "新节点接入",
+      "tunnel-bound": "隧道已绑定",
+      "tunnel-target-down": "内网目标不可达",
+      "change": "状态变更"
+    };
+    return map[t] || t || "事件";
+  }
+  function fmtTime(ts) {
+    if (!ts) return "";
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString([], { hour12: false });
+  }
+  function renderEvents(list) {
+    if (!eventsListEl) return;
+    eventItems = list.slice(-80);
+    if (!eventItems.length) {
+      eventsListEl.innerHTML = '<div class="events-empty">暂无活动记录</div>';
+      return;
+    }
+    var latest = eventKey(eventItems[eventItems.length - 1]);
+    if (drawerEl && drawerEl.hidden && lastSeenEventKey && latest !== lastSeenEventKey) {
+      eventDots.forEach(function (d) { d.hidden = false; });
+    }
+    if (!lastSeenEventKey) lastSeenEventKey = latest;
+    var frag = document.createDocumentFragment();
+    for (var i = eventItems.length - 1; i >= 0; i--) {
+      var ev = eventItems[i];
+      var row = document.createElement("div");
+      row.className = "ev-row";
+      var dot = document.createElement("span");
+      dot.className = "dot " + eventKind(ev.type);
+      var main = document.createElement("div");
+      main.className = "ev-main";
+      var head = document.createElement("div");
+      head.className = "ev-head";
+      var lbl = document.createElement("b");
+      lbl.textContent = eventLabel(ev.type);
+      var tm = document.createElement("span");
+      tm.className = "mono muted";
+      tm.textContent = fmtTime(ev.at);
+      head.appendChild(lbl);
+      head.appendChild(tm);
+      var msg = document.createElement("div");
+      msg.className = "ev-msg";
+      msg.textContent = ev.message || "";
+      main.appendChild(head);
+      if (ev.message) main.appendChild(msg);
+      row.appendChild(dot);
+      row.appendChild(main);
+      frag.appendChild(row);
+    }
+    eventsListEl.innerHTML = "";
+    eventsListEl.appendChild(frag);
+  }
+  function openEventsDrawer() {
+    if (!drawerEl) return;
+    drawerEl.hidden = false;
+    if (backdropEl) backdropEl.hidden = false;
+    if (eventItems.length) lastSeenEventKey = eventKey(eventItems[eventItems.length - 1]);
+    eventDots.forEach(function (d) { d.hidden = true; });
+    document.querySelectorAll("[data-events-toggle]").forEach(function (b) { b.setAttribute("aria-expanded", "true"); });
+  }
+  function closeEventsDrawer() {
+    if (!drawerEl || drawerEl.hidden) return;
+    drawerEl.hidden = true;
+    if (backdropEl) backdropEl.hidden = true;
+    document.querySelectorAll("[data-events-toggle]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+  }
+  function toggleEventsDrawer() {
+    if (!drawerEl) return;
+    if (drawerEl.hidden) openEventsDrawer();
+    else closeEventsDrawer();
   }
 
   // ── join-code countdown ────────────────────────────────────────────

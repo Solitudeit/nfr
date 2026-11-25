@@ -1,141 +1,187 @@
-# 部署
+# 部署指南
 
-## 一台公网服务器最省事的做法
+NFR 服务端（`nfrs`）与客户端（`nfrc`）均原生支持 **TOML**（`.toml`）与 **YAML**（`.yaml` / `.yml`）两种格式配置文件，默认前台运行，开箱适配 `systemd`、Docker / Docker Compose 与多平台二进制直接运行。
 
-要求：Linux amd64/arm64、root、一个公网 IP、防火墙放行下面这些端口。
+---
 
-| 端口 | 用途 | 能否改 |
-|---|---|---|
-| 8443/tcp | 控制通道 + 面板 + REST API | `control_listen` |
-| 80/tcp | 域名模式的 HTTP 入口（可选） | `http_listen`，可设 `"off"` |
-| 443/tcp | 域名模式的 HTTPS 入口（可选） | `https_listen`，可设 `"off"` |
-| 20000-29999/tcp | HTTP 与 TCP 隧道的公网端口 | `port_range`（面板里也能改） |
+## 1. 端口规划与防火墙
 
-从一台干净的机器到能用的面板，一条命令（可通过 `NFR_PASSWORD` 直接指定首次密码；脚本会自动校验 `SHA256SUMS`）：
+| 端口 | 协议 | 用途 | 配置项 |
+| --- | --- | --- | --- |
+| `8443` | TCP | 控制通道 + Web 控制台（`/nfr/`）+ REST API | `control_listen`（必填） |
+| `80` | TCP | HTTP 域名分流 / ACME HTTP-01（可选） | `http_listen`，可设 `"off"` |
+| `443` | TCP | HTTPS SNI 分流 / ACME TLS-ALPN-01（可选） | `https_listen`，可设 `"off"` |
+| `20000-29999` | TCP / UDP | 隧道动态端口池 | `port_range` |
 
-```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
-  | sudo NFR_PASSWORD='change-me-now' sh -s -- --server --systemd
-```
-
-它依次做三件事：下载并校验 `nfrs` 到 `/usr/local/bin`；下载
-`nfr-server.service` 到 `/etc/systemd/system` 并 `daemon-reload`；`enable --now`
-后把 `systemctl status` 打出来。若未传 `NFR_PASSWORD`，首次启动会生成随机密码并打进日志
-（`sudo journalctl -u nfr-server -n 15` 可再看）。unit 用
-`StateDirectory=nfr` / `ConfigurationDirectory=nfr` 让 systemd 先建好
-`/var/lib/nfr` 与 `/etc/nfr` 并保持可写，所以全新机器上首次启动就能写出配置。
-别把它们改成 `ReadWritePaths=`——目录不存在时那个选项会让 unit 以
-`status=226/NAMESPACE` 直接失败。
-
-不想用 systemd，就只装二进制，直接前台运行（想手动转后台显式传 `-d` / `--daemon`，用 `nfrs stop` 停）：
-
-```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-nfrs verify -c /etc/nfr/server.toml
-sudo nfrs -c /etc/nfr/server.toml
-```
-
-**两种方式别同时跑**：都监听 `control_listen`（默认 8443），后起的会
-`bind: address already in use`。从 `-d` 后台模式换到 systemd 时先 `sudo nfrs stop`。
-
-面板地址在**每次启动时都会打印**（`journalctl -u nfr-server -n 15` 里能看到，
-`nfrs status` 也会列出来）；只有未显式设置密码时生成的随机密码是首次启动独有。
-
-有些机器没有可读的 journal——容器、journald 被关掉、日志已经轮转，
-`journalctl` 只会回一句 `No journal files were found`。所以未指定 `NFR_PASSWORD` 时，
-首次启动 `nfrs` 会把同一段信息（含随机密码）写进 `/var/lib/nfr/initial-password.txt`，
-权限 `0600`：
-
-```bash
-sudo cat /var/lib/nfr/initial-password.txt   # 密码用掉之后这个文件就不存在了
-```
-
-安装脚本在 journal 里找不到内容时会自动读它；`nfrs status` 在有这个文件时
-也会单独列一行 `password`。**第一次登录成功后文件会被删除**，所以它不会
-长期躺着一个明文密码。
-
-忘了密码直接用命令行重置（无需手改 `state.json`），然后重启服务：
-
-```bash
-sudo nfrs reset-password -c /etc/nfr/server.toml 'new-strong-password'
-sudo systemctl restart nfr-server
-```
-
-建好的隧道默认按 **公网端口** 访问：面板里给隧道分配一个 `20000-29999` 的端口，
-访客直接打开 `http://服务器IP:端口`，不需要域名、证书或 nginx。只有想「一条 80/443
-挂多个站点」时才需要看后面的「域名与证书」。
-
-### 防火墙
+防火墙放行示例：
 
 ```bash
 # ufw
-ufw allow 8443/tcp && ufw allow 80,443/tcp && ufw allow 20000:29999/tcp
-# 或者 firewalld
-firewall-cmd --permanent --add-port=8443/tcp --add-port=80/tcp --add-port=443/tcp \
-  --add-port=20000-29999/tcp && firewall-cmd --reload
+sudo ufw allow 8443/tcp
+sudo ufw allow 80,443/tcp
+sudo ufw allow 20000:29999/tcp
+sudo ufw allow 20000:29999/udp
+
+# firewalld
+sudo firewall-cmd --permanent --add-port=8443/tcp --add-port=80/tcp --add-port=443/tcp \
+  --add-port=20000-29999/tcp --add-port=20000-29999/udp
+sudo firewall-cmd --reload
 ```
 
-云厂商的安全组要单独放行，尤其是端口段。
+云服务器请同步在安全组放行上述端口。
 
-## 域名与证书
+---
 
-把 `example.com` 和 `*.example.com` 都解析到这台机器（A / AAAA 都行），
-然后二选一：
+## 2. 公网服务端部署（`nfrs`）
 
-**A. 自签证书（默认，零配置）**
-面板地址是 `https://IP:8443/nfr/`，浏览器会警告一次。
-`nfrc join` 和纳管服务器会自动钉指纹，所以命令行侧不会报错。
-
-**B. Let's Encrypt**
-```toml
-domain = "example.com"
-
-[acme]
-enabled = true
-email   = "you@example.com"
-```
-重启后 NFR 会在需要时自动申请证书，存在 `<data_dir>/acme`。
-这要求 443 能从公网访问（HTTP-01 走 80，TLS-ALPN-01 走 443）。
-拿到公网证书后，`nfrc join` 和纳管都会改用系统根证书校验，不再钉指纹。
-
-**C. 自己的证书**
-```toml
-tls_cert = "/etc/letsencrypt/live/example.com/fullchain.pem"
-tls_key  = "/etc/letsencrypt/live/example.com/privkey.pem"
-```
-优先级：显式证书文件 > ACME > 自签。
-
-## Docker / Docker Compose
-
-镜像同时打包了 `nfrs` 与 `nfrc`，默认前台运行并自带 `HEALTHCHECK`：
+### 方式 A：Linux 一键安装 + `systemd`
 
 ```bash
-docker run -d --name nfr-server --restart=unless-stopped --network host \
-  -e NFR_PASSWORD='change-me-now' \
-  -e NFR_PUBLIC_HOST='203.0.113.10' \
-  -v nfr-data:/var/lib/nfr \
-  ghcr.io/solitudeit/nfr:latest
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+  | sudo NFR_PASSWORD='change-me-now' NFR_AUTH_TOKEN='my-shared-token' sh -s -- --server --systemd
 ```
 
-也可以使用仓库自带的 [deploy/docker/compose.yml](../deploy/docker/compose.yml)：
+- 脚本会自动校验 `SHA256SUMS`，安装 `/usr/local/bin/nfrs`、生成 `/etc/nfr/server.toml`（可加 `--format yaml` 生成 `server.yaml`），安装并启动 `nfr-server.service`。
+- `nfr-server.service` 默认执行 `/usr/local/bin/nfrs`，会自动探测 `/etc/nfr/server.toml`、`server.yaml` 或 `server.yml`。
+- 未传 `NFR_PASSWORD` 时，首次启动会生成随机密码并打印到日志（同时暂存于 `/var/lib/nfr/initial-password.txt`，首次成功登录后自动删除）。
+- 忘记密码时执行：
+  ```bash
+  sudo nfrs reset-password 'new-strong-password'
+  sudo systemctl restart nfr-server
+  ```
+
+### 方式 B：手动初始化配置并启动（Linux / macOS / Windows）
 
 ```bash
-# 公网服务端
-NFR_PASSWORD='change-me-now' docker compose -f deploy/docker/compose.yml up -d nfrs
+# 生成带中文注释的 TOML 或 YAML 配置模板
+nfrs init -c server.toml          # 或 nfrs init -c server.yaml
 
-# 内网客户端（同一镜像，首次自动 join 并保存 agent.toml，之后重启自动重连）
-NFR_SERVER='203.0.113.10:8443' NFR_CODE='ABC123' \
+# 校验配置语法与端口范围
+nfrs verify -c server.toml
+
+# 前台运行（推荐交给 systemd / Docker / supervisor 托管）
+nfrs -c server.toml
+
+# 如需手动转后台运行
+nfrs -d -c server.toml
+nfrs stop -c server.toml
+```
+
+---
+
+## 3. 内网客户端部署（`nfrc`）
+
+### 方式 A：Linux 一键安装 + 自动生成配置文件 + `systemd`
+
+```bash
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+  | sudo sh -s -- --client \
+      --server-addr 203.0.113.10:8443 \
+      --token my-shared-token \
+      --name nas-home \
+      --systemd
+```
+
+如偏好 YAML 格式，追加 `--format yaml` 即可生成 `/etc/nfr/client.yaml`。
+
+修改 `/etc/nfr/client.toml` 或 `/etc/nfr/client.yaml` 里的 `proxies` 后，无需重启服务，支持 **`SIGHUP` 热重载**：
+
+```bash
+sudo systemctl reload nfr-agent
+```
+
+### 方式 B：手动编写配置文件（Windows / macOS / Linux / Android Termux）
+
+可以直接在 Web 面板的 **节点** 页面切换 TOML / YAML 并一键复制或下载，也可以用命令生成模板：
+
+```bash
+nfrc init -c client.toml --server 203.0.113.10:8443 --token my-shared-token --name office-pc
+# 或 YAML 格式
+nfrc init -c client.yaml --server 203.0.113.10:8443 --token my-shared-token --name office-pc
+
+nfrc verify -c client.toml
+nfrc -c client.toml
+```
+
+**TOML 配置示例（`client.toml`）**：
+
+```toml
+server_addr = "203.0.113.10:8443"
+auth_token  = "my-shared-token"
+name        = "nas-home"
+
+# 可选：直接声明隧道；也可以不写，连上后在 Web 面板里可视化创建与管理
+[[proxies]]
+name        = "ssh"
+type        = "tcp"
+local       = "127.0.0.1:22"
+remote_port = 20022
+
+[[proxies]]
+name  = "blog"
+type  = "http"
+local = "127.0.0.1:8080"
+hosts = ["blog.example.com"]
+```
+
+**YAML 配置示例（`client.yaml`）**：
+
+```yaml
+server_addr: "203.0.113.10:8443"
+auth_token: "my-shared-token"
+name: "nas-home"
+
+proxies:
+  - name: ssh
+    type: tcp
+    local: "127.0.0.1:22"
+    remote_port: 20022
+  - name: blog
+    type: http
+    local: "127.0.0.1:8080"
+    hosts:
+      - blog.example.com
+```
+
+> 同名节点重连会自动复用服务端已有节点，不会重复创建。配置文件声明的 `proxies` 与 Web 面板手动创建的隧道互相隔离：增删配置文件里的 `proxies` 并热重载只会同步配置托管的隧道，不会误删面板里手动创建的隧道。
+
+---
+
+## 4. Docker / Docker Compose
+
+同一镜像 `ghcr.io/solitudeit/nfr:latest` 同时包含 `nfrs` 与 `nfrc`（详见 [deploy/docker/compose.yml](../deploy/docker/compose.yml)）：
+
+```bash
+# 服务端
+NFR_PASSWORD='change-me-now' NFR_AUTH_TOKEN='my-shared-token' \
+  docker compose -f deploy/docker/compose.yml up -d nfrs
+
+# 客户端（零文件环境变量启动）
+NFR_SERVER='203.0.113.10:8443' NFR_AUTH_TOKEN='my-shared-token' NFR_NAME='homelab' \
   docker compose -f deploy/docker/compose.yml --profile client up -d nfrc
 ```
 
-推荐 `--network host`（这样 `nfrs` 可以自由绑定 `port_range` 里的任意公网端口，无需在 Docker 里映射一万个端口；`nfrc` 也能直接访问宿主机的 `127.0.0.1` 服务）。如需桥接模式，只映射 8443/80/443 与所需端口段即可。
+推荐 `--network host`：服务端可直接绑定 `port_range` 任意端口，客户端可直接访问宿主机 `127.0.0.1` 服务。
 
-## 和已有的 nginx / Caddy 共存
+---
 
-只有「域名模式」才需要 80/443；端口模式的 HTTP 隧道和 TCP 隧道都不经过 nginx，
-直接跳过这一节。nginx 已经占着 80/443 时，改成 **nginx 在前、NFR 在后**：
+## 5. 域名、证书与 Nginx/Caddy 共存
 
-**1. `server.toml` 让出入口**
+### 证书优先级：`tls_cert/tls_key` > `acme` > 自签（默认）
+
+- **自动 HTTPS（ACME / Let's Encrypt）**：将 `example.com` 与 `*.example.com` 解析到服务端，放行 80 与 443，在配置中开启：
+  ```toml
+  domain = "example.com"
+  [acme]
+  enabled = true
+  email   = "ops@example.com"
+  ```
+  客户端对应设置 `ca = true` 即可改用系统根证书校验。
+- **自有证书文件**：在服务端配置中同时填写 `tls_cert` 与 `tls_key`。
+
+### 与已有 Nginx / Caddy 共存
+
+当 80 / 443 已被占用时，让 NFR 的 HTTP 入口只监听回环地址并关闭 `https_listen`：
 
 ```toml
 control_listen = ":8443"
@@ -143,123 +189,18 @@ http_listen    = "127.0.0.1:8080"
 https_listen   = "off"
 ```
 
-`control_listen` 仍然直接对公网提供面板与 agent 接入；HTTP 入口只监听回环，由 nginx 转发进来。
+执行 `nfrs proxy-config app.example.com` 即可打印完整含 WebSocket 支持的 Nginx 反向代理片段。
 
-**2. 生成反代配置**
+---
 
-```bash
-nfrs proxy-config app.example.com       # 换成你的域名
-```
-
-把打印出来的 `server { … }` 粘到该站点的配置里，或者写到 `/etc/nginx/conf.d/nfr.conf`。片段里已经带好 `Host`、`X-Forwarded-*` 和 WebSocket 的升级头；
-其中 `map $http_upgrade $connection_upgrade` 需要放在 nginx 的 `http {}` 里，否则 `nginx -t` 会报未知变量。
-
-**3. 重载并建隧道**
+## 6. 升级与卸载
 
 ```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-回到面板建 HTTP 隧道，域名填 `app.example.com`、内网地址填内网机器的 `127.0.0.1:端口`。
-TLS 由 nginx 的证书终止，NFR 会从 `X-Forwarded-Proto` 知道访客其实是 HTTPS，再转给后端。
-
-**多域名**：建一个泛解析站点 `server_name *.example.com;` 指向同一个 8080，之后每条 HTTP
-隧道填各自域名即可；也可以一个域名一个站点，反代目标都写 `http://127.0.0.1:8080`。
-
-**TCP 隧道**不受这一节影响：它们直接监听 `port_range` 里的端口，不经过 nginx。
-
-## 内网机器
-
-隧道由内网那台机器发起（`nfrc` 拨回来），服务器从不代替它拨「内网地址」——
-这是「内网地址永远是客户端视角」这条铁律的落地方式。
-
-```bash
-nfrc join example.com ABC123                 # 加入码在面板「节点」页生成
-```
-
-地址只写主机名、不写端口时，端口取面板给出的那个（默认 8443）。
-如果你是从本机直接连、而服务器只监听内网/回环，就把完整地址和端口写全，例如
-`nfrc join 10.0.0.5:8443 ABC123`；`join` 用你输入的主机地址，不用服务器通告的地址。
-
-面板生成的命令取地址的顺序是：设置里的**公网域名** → 设置里的**对外地址** →
-探测到的本机网卡地址。三者都没有（例如云主机在内网网卡后面）时，面板会在命令旁
-给出警告——先去「设置」填对外地址，再把命令粘到别的机器上。
-
-最省事的方式是一条命令完成「装 `nfrc` + 兑换加入码 + 装好 `nfr-agent.service` 开机自启」：
-
-```bash
+# 升级（保留配置与 state.json，已安装 systemd 时自动重启）
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
-  | sudo sh -s -- --client --join example.com:8443 ABC123 --systemd
-```
+  | sudo sh -s -- --server --systemd
 
-手动安装时，`join` 默认写完配置就一直前台连着，适合 `tmux`/`screen` 里直接跑；交给 systemd 时：
-
-```bash
-nfrc join --no-start example.com:8443 ABC123
-sudo cp deploy/systemd/nfr-agent.service /etc/systemd/system/
-sudo systemctl enable --now nfr-agent
-```
-
-卸载（保留 `/etc/nfr` 配置和 `/var/lib/nfr` 数据）：
-
-```bash
+# 卸载（移除二进制与 systemd unit，保留 /etc/nfr 与 /var/lib/nfr）
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
   | sudo sh -s -- --uninstall
 ```
-
-加入码只用来换一次令牌，换完就作废。**之后重启客户端不要再 `join`**（每 `join`
-一次都会在服务端新增一个节点），而是用已保存的配置启动：
-
-```bash
-nfrc -c /etc/nfr/agent.toml          # 前台（非 root 用户：~/.config/nfr/agent.toml）
-sudo systemctl restart nfr-agent     # 已装成服务时
-```
-
-这条命令在 `join` 的输出、`--no-start` 的提示和面板「等待接入」卡片上都会给出。
-`nfr-agent.service` 的 `ExecStart` 就是它（附带 `-c /etc/nfr/agent.toml`），
-所以装成服务之后重启机器会自动恢复。
-
-agent 支持同时连多台服务器：多执行几次 `nfrc join`（指向不同服务器）即可，
-`agent.toml` 里会有多个 `[[server]]` 段。
-
-## 升级
-
-```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
-  | sudo sh -s -- --systemd
-```
-
-已经装过并正在运行时，`install.sh` 会替你 `systemctl restart`——`enable --now`
-对运行中的 unit 不做事，不重启的话面板还是旧进程、旧界面。它不会重打密码，
-密码沿用 `state.json` 里那份。
-
-手动装二进制的话，重启要自己做：
-
-```bash
-curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo systemctl restart nfr-server      # 内网机器上：sudo systemctl restart nfr-agent
-```
-
-旧的 systemd unit 也要换（`ExecStart` 从 `nfr server` 改成 `nfrs`）。v0.9.1 起
-unit 文件直接作为 release 资产发布，按上面的「四条命令」重下一遍即可：
-
-```bash
-sudo curl -fsSL -o /etc/systemd/system/nfr-server.service \
-  https://github.com/Solitudeit/nfr/releases/latest/download/nfr-server.service
-sudo systemctl daemon-reload && sudo systemctl restart nfr-server
-```
-
-从 0.8.x 的单二进制 `nfr` 升级上来时，旧命令要换名：
-
-| 旧 | 新 |
-| --- | --- |
-| `nfr server --foreground -c …` | `nfrs --foreground -c …` |
-| `nfr agent -c …` | `nfrc -c …` |
-| `nfr join <addr> <code>` | `nfrc join <addr> <code>` |
-| `nfr stop` / `nfr status` | `nfrs stop` / `nfrs status` |
-
-`install.sh` 会同时装 `nfrs` 与 `nfrc`；只要一个时用
-`NFR_ONLY=server`（或 `client`）。旧的 `nfr` 二进制可以删掉。
-
-`state.json` 带 schema 版本，小版本升级直接覆盖二进制即可。
-升级前备份：`cp /var/lib/nfr/state.json /var/lib/nfr/state.json.bak`。

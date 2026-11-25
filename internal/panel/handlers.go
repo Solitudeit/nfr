@@ -2,7 +2,9 @@ package panel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -894,7 +896,64 @@ func (p *Panel) state(w http.ResponseWriter, r *http.Request, s *session) {
 		"info":    p.srv.Info(),
 		"tunnels": p.srv.Tunnels(),
 		"nodes":   p.srv.Nodes(),
+		"events":  p.srv.RecentEvents(),
 	})
+}
+
+func (p *Panel) events(w http.ResponseWriter, r *http.Request, s *session) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	send := func(ev api.Event) bool {
+		b, err := json.Marshal(ev)
+		if err != nil {
+			return true
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, b); err != nil {
+			return false
+		}
+		fl.Flush()
+		return true
+	}
+
+	// Subscribe before snapshotting history so no event is missed in between.
+	ch, unsub := p.srv.SubscribeEvents()
+	defer unsub()
+
+	for _, ev := range p.srv.RecentEvents() {
+		if !send(ev) {
+			return
+		}
+	}
+	_, _ = fmt.Fprint(w, ": connected\n\n")
+	fl.Flush()
+
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ping.C:
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			fl.Flush()
+		case ev, open := <-ch:
+			if !open {
+				return
+			}
+			if !send(ev) {
+				return
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

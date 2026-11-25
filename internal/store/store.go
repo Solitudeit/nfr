@@ -73,21 +73,22 @@ type Settings struct {
 
 // Tunnel is one published service.
 type Tunnel struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	NodeID      string    `json:"node_id"`
-	Type        string    `json:"type"`
-	Local       string    `json:"local"`
-	RemotePort  int       `json:"remote_port"`
-	Hosts       []string  `json:"hosts,omitempty"`
-	Enabled     bool      `json:"enabled"`
-	BandwidthKB int       `json:"bandwidth_kb,omitempty"` // per direction, 0 = unlimited
-	QuotaMB     int64     `json:"quota_mb,omitempty"`     // per calendar month, 0 = unlimited
-	UsedBytes   int64     `json:"used_bytes,omitempty"`   // bytes used in UsageMonth
-	UsageMonth  string    `json:"usage_month,omitempty"`  // "2006-01", resets the counters
-	QuotaPaused bool      `json:"quota_paused,omitempty"` // disabled by the quota guard
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	NodeID          string    `json:"node_id"`
+	Type            string    `json:"type"`
+	Local           string    `json:"local"`
+	RemotePort      int       `json:"remote_port"`
+	Hosts           []string  `json:"hosts,omitempty"`
+	Enabled         bool      `json:"enabled"`
+	BandwidthKB     int       `json:"bandwidth_kb,omitempty"`      // per direction, 0 = unlimited
+	QuotaMB         int64     `json:"quota_mb,omitempty"`          // per calendar month, 0 = unlimited
+	UsedBytes       int64     `json:"used_bytes,omitempty"`        // bytes used in UsageMonth
+	UsageMonth      string    `json:"usage_month,omitempty"`       // "2006-01", resets the counters
+	QuotaPaused     bool      `json:"quota_paused,omitempty"`      // disabled by the quota guard
+	ManagedByConfig bool      `json:"managed_by_config,omitempty"` // synced from client.toml / client.yaml proxies
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Node is a registered edge agent.

@@ -1,108 +1,77 @@
-# 架构
+# 架构说明
 
-## 进程与角色
+## 1. 双进程模型
 
-两个二进制，一个在内网、一个在公网，共用 `internal/` 里的同一套逻辑：
+NFR 由两个纯 Go 静态二进制组成（零 CGO、零外部数据库、零前端构建工具），共用 `internal/` 下的核心包：
 
-| 程序 | 部署位置 | 启动 | 职责 |
-|---|---|---|---|
-| `nfrs` | 公网服务器 | `nfrs` | 公网入口（80/443 + 端口池）、控制通道、面板、REST API、`state.json` |
-| `nfrc` | 内网机器 | `nfrc` | 主动外连控制通道、按服务端下发的隧道列表拨内网服务 |
+| 二进制 | 运行位置 | 职责 |
+| --- | --- | --- |
+| `nfrs` | 公网服务器 | 终止公网流量（TCP / UDP 端口池 + HTTP/HTTPS 域名入口）、控制通道、内置 Web 控制台（`/nfr/`）、REST API、Prometheus `/metrics`、状态持久化 |
+| `nfrc` | 内网机器 | 按 `client.toml` / `client.yaml` 主动建立 TLS 1.3 + yamux 长连接、上报声明式 `proxies`、接收下发路由并转发至本地服务 |
 
-`nfrc join <server> <code>` 是一次性动作：拿到加入码 → 换长期令牌 → 写 `agent.toml`。
-加入码也可以在创建隧道时绑定到那条待接入的隧道，兑换时设备接入、隧道自动激活。
-不加 `--no-start` 时它接着就把连接挂上，等于 `nfrs` 侧再也不需要碰第二条命令。
+两者的命令行入口统一收拢在 `internal/cli/`，均默认**前台运行**（适配 systemd 与容器），服务端另支持 `-d` / `--daemon` 显式后台化；客户端支持 Unix `SIGHUP`（`systemctl reload nfr-agent`）无中断热重载配置。
 
-命令行的分发逻辑集中在 `internal/cli`：`cmd/nfrs` 与 `cmd/nfrc` 只负责设置
-`cli.Program` 并交给 `cli.RunServer` / `cli.RunClient`，所以两边的帮助、版本、
-配置路径和错误文案不会各写一套。
+---
 
-## 连接建立
+## 2. 控制通道与认证协议
 
 ```
 nfrc ──TCP──▶ nfrs:8443
-   TLS 1.3 握手（ALPN nfr/1）
-   yamux 会话
-   ├─ stream 0：控制流
-   │    hello   {node_id, os, arch, version}
-   │    challenge {nonce}
-   │    auth    {mac = HMAC-SHA256(sha256(token), nonce)}
-   │    welcome {node_id, revision}
-   │    config  {tunnels…}        ← 之后每次变更都会重发
-   │    dial_failed {tunnel, msg} ← 拨不通内网地址时上报，面板据此显示「目标不可达」
-   │    ping/pong 每 25s，90s 无帧判定掉线
-   └─ stream N：一个公网连接一条流
-        2 字节长度 + JSON {tunnel, remote}
-        nfrc 拨 local → 双向 copy → 半关闭
+   TLS 1.3 握手（ALPN: nfr/1）
+   yamux 多路复用会话（2 MiB 窗口 + TCP KeepAlive 30s + 25s 双向心跳）
+   ├─ stream 0：控制流（4 字节长度前缀 JSON 帧）
+   │    hello        {node, node_id, os, arch, ver, proxies, sync_proxies}
+   │    challenge    {nonce (32B)}
+   │    auth         {mac = HMAC-SHA256(sha256(secret), nonce)}
+   │    welcome      {node_id, rev}
+   │    config       {tunnels…}        ← 每次配置变更全量下发
+   │    dial_failed  {code, msg}       ← 内网拨号失败实时上报
+   │    ping / pong                    ← 25s 主动保活，90s 读超时断链重连
+   └─ stream N：数据流（每个访客连接/UDP 会话一条 yamux 流）
+        2 字节长度前缀 + JSON {tunnel, remote}
+        双向转发（支持半关闭 CloseWrite 与令牌桶限速）
 ```
 
-令牌本身从不上网：server 存 `sha256(token)`，agent 用它算 HMAC 证明持有令牌。
-加入码换令牌那一步走的是同一条 TLS 连接上的 `join` 流。
+认证采用 **挑战-响应 HMAC-SHA256**，密钥明文从不在线路上传输：
+- **配置文件共享密钥模式（主推）**：客户端配置 `server_addr` + `auth_token` + `name` 直连；服务端校验通过后按 `name` 幂等复用或创建节点，并同步客户端声明的 `proxies`（标记 `managed_by_config = true`，与面板手动创建的隧道互不干扰）。
+- **一次性加入码模式（兼容保留）**：通过 `join` 流兑换单节点长期令牌。
 
-## 数据面
+---
 
-- **HTTP 隧道**有两种入口：分配了公网端口的，server 在那个端口上跑一个
-  HTTP 服务，所有请求都送给这条隧道（访客用 `http://服务器IP:端口`）；
-  没分配端口的，server 在 80/443 上按 `Host`（TLS 下优先看 SNI）匹配域名。
-  两种都通过按隧道复用的标准 `httputil.ReverseProxy` + `http.Transport` 连接池，
-  经 yamux 流转发给内网服务（自动补齐 `X-Forwarded-*`，原生支持流式响应与
-  WebSocket/Upgrade，并按字节准确计入入站/出站流量与限速）。
-- **TCP 隧道**：server 在端口池里 listen，来一个连接开一条流，agent 拨
-  `local` 后双向拷贝。
-- **半关闭**：HTTP/1.0 和 ssh 依赖 FIN 语义。yamux 的 `Close()` 是半关闭
-  （发完数据再 FIN），`*net.TCPConn` 用 `CloseWrite()`，两端各自处理。
+## 3. 数据面实现
 
-每个连接都会计入 metrics（字节、连接数、错误数），只存内存：
-5 分钟秒级点 + 24 小时分钟级点。
+- **TCP 隧道**：服务端在 `port_range` 监听公网 TCP 端口，每个入站连接通过 `openStream` 在目标节点会话上打开一条 yamux stream，双向零额外封装拷贝并支持 TCP 半关闭（`CloseWrite`）。
+- **HTTP / HTTPS 隧道**：支持独立公网端口访问或 80 / 443 按 `Host` / TLS SNI 分流。每条隧道复用独立的 `http.Transport` 连接池与标准 `httputil.ReverseProxy`，自动补齐 `X-Forwarded-*`，原生支持 Chunked 流式传输与 WebSocket（`101 Switching Protocols`），通过 `httpStreamConn` 在连接层统一完成字节计数、限速与目标恢复检测。
+- **UDP 隧道**：公网单 UDP Socket 按「隧道 + 访客地址」映射到独立的 yamux stream，数据报以 2 字节大端长度定界。每个会话配备独立的有界发送队列（64 包）+ 专用写协程（5 秒写超时）+ `sync.Pool` 缓冲池，避免单条拥塞流阻塞同端口其他访客；每隧道设活跃会话上限（默认 2048，超限时淘汰最久未活跃会话）以抵御伪造源端口洪泛。
 
-## 隧道状态怎么来的
+---
 
-服务端不猜。一个状态由四份事实合成：
+## 4. 状态持久化与安全
 
-- `enabled` / `quota_paused`：来自 `state.json`，操作员或配额自动关的。
-- 节点在不在：控制通道有没有活跃的 yamux 会话（`s.agents`），不看 `last_seen`。
-- `node_missing`：隧道指向的 node_id 已经不在节点表里（换了机器、删了节点）。
-- `target_down`：agent 上一条 `dial_failed` 帧，拨号成功一次或隧道被改动就清掉。
+- **引导配置**：`internal/config` 原生支持 `.toml` 与 `.yaml` / `.yml` 自动识别，优先级为 `默认值 < 配置文件 < NFR_* 环境变量 < CLI 参数`。
+- **运行时状态**：持久化在 `<data_dir>/state.json`（权限 `0600`），写入采用「临时文件 → `fsync` → 原子 `rename` → 目录 `fsync`」，失败时通过结构化深拷贝 `cloneState` 完整回滚。
+- **敏感凭据加密**：共享 `auth_token` 与多机纳管的远端 `api_key` 使用 `<data_dir>/secret.key`（`0600`）以 **AES-256-GCM** 加密落盘；管理员密码使用 bcrypt 存储；API 密钥仅存 SHA-256 哈希。
+- **实时活动事件**：内存环形缓冲区保留最近 100 条运行事件（节点上下线、隧道变更、目标不可达、配额触发等），同时服务于 REST API `/api/v1/events` 与 Web 面板实时活动抽屉（`/nfr/api/events`）。
 
-合起来只输出一个词（就绪 / 活跃 / 已停用 / 配额停用 / 节点离线 / 需重新选择节点 /
-目标不可达），渲染和 4 秒轮询用的是同一个字段，所以页面不会自相矛盾。
+---
 
-## 状态
-
-`<data_dir>/state.json`，0600，写入走「临时文件 → fsync → rename → 目录 fsync」。
-内容是 tunnels / nodes / joins / leases / remotes / api_keys / settings / 面板密码哈希。
-没有数据库：单进程持锁读写，`Update` 失败会整体回滚，不会出现内存和文件不一致；
-被纳管远端的 `api_key` 使用 `<data_dir>/secret.key`（0600）以 AES-256-GCM 加密后落盘。
-
-端口租约也在里面：面板点「获取端口」→ `POST /api/v1/ports/allocate` →
-服务端确认「state 里没被占 + OS 层能 bind」→ 10 分钟租约；保存隧道时校验租约，
-冲突返回 409 并给出新建议。
-
-## 多实例纳管（联邦）
-
-没有中心节点。每台 server 都是完整独立的，A 通过 HTTPS 调用 B 的
-`/api/v1/*` 来读写在 B 上的隧道，界面用 `?server=<id>` 区分。
-
-- 认证：B 上生成的 API key（scope read/write/admin），A 加密存进自己的 state
-- 信任：首次连接 TOFU 钉证书指纹；B 用 ACME 时改为系统根证书校验
-- 断连：B 不可达时卡片变灰，不影响 A 自己的隧道
-
-所以「多服务器管理」不是把数据集中到一处，而是把多个控制台拼成一个视图。
-
-## 包结构
+## 5. 目录结构
 
 ```
-cmd/nfrs             公网服务器的入口（裸命令 = 后台启动）
-cmd/nfrc             内网机器的入口（裸命令 = 按 agent.toml 连接）
-internal/cli         两个二进制共用的命令行：参数、横幅、后台化、join
-internal/config      引导配置（TOML）
-internal/store       state.json + 查询
-internal/auth        join code、token、HMAC、API key
-internal/proto       帧与流首部
-internal/transport   TLS 配置、自签证书、指纹
-internal/server      控制通道、入口、端口池、API、metrics
-internal/agent       外连、配置应用、流量转发
-internal/federation 调用其它实例的客户端
-internal/panel       服务端渲染面板（go:embed）
-internal/metrics     内存统计
+cmd/nfrs              服务端入口
+cmd/nfrc              客户端入口
+configs/              TOML 与 YAML 服务端/客户端配置模板
+deploy/               systemd unit 与 Docker Compose 模板
+internal/cli          统一 CLI：启动、init、verify、reset-password、SIGHUP 重载、后台化
+internal/config       TOML / YAML 双格式配置解析、校验与环境变量覆盖
+internal/store        state.json 原子存储、AES-256-GCM 凭据加密与查询
+internal/auth         HMAC-SHA256、bcrypt、API Key、Join Code
+internal/proto        控制帧与数据流首部编解码
+internal/transport    TLS 1.3、自签证书/TOFU、公共 CA、yamux 参数
+internal/server       控制通道、HTTP/TCP/UDP 数据面、限速、配额、REST API、Prometheus
+internal/agent        客户端外连、配置热应用、TCP/UDP 本地转发
+internal/federation   多服务器纳管 HTTP 客户端
+internal/panel        go:embed 服务端渲染 Web 控制台（零外部前端依赖）
+internal/metrics      内存流量计数与瞬时速率采样
+scripts/              install.sh、多平台打包 package.py、4 套 E2E 与截图脚本
 ```

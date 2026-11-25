@@ -33,6 +33,7 @@ import (
 const clientUsage = `%[1]s — NFR client (the side that lives inside your network)
 
   %[1]s -c <config>            connect with client.toml or client.yaml (foreground)
+  %[1]s init                   generate a starter client.toml or client.yaml
   %[1]s verify -c <config>     validate TOML / YAML config syntax
   %[1]s status -c <config>     show the local configuration
   %[1]s join <server> <code>   (optional) one-time join code onboarding
@@ -63,6 +64,9 @@ Documentation: https://github.com/Solitudeit/nfr
 func RunClient(args []string) {
 	if len(args) > 0 {
 		switch args[0] {
+		case "init":
+			cmdClientInit(args[1:])
+			return
 		case "join":
 			cmdJoin(args[1:])
 			return
@@ -142,7 +146,7 @@ func cmdAgent(args []string) {
 	if err := cfg.Validate(); err != nil {
 		fatal("invalid config: %v", err)
 	}
-	runAgents(cfg, log.New(cfg.LogLevel, cfg.LogFile))
+	runAgentsWithReload(*cfgPath, cfg, log.New(cfg.LogLevel, cfg.LogFile))
 }
 
 type wellKnown struct {
@@ -268,12 +272,57 @@ func printJoinSummaryNoStart(cfgPath string) {
 `, Program, cfgPath)
 }
 
+// runAgentsWithReload runs all configured agents and supports live config reload
+// on SIGHUP (e.g. `systemctl reload nfr-agent`). If the reloaded file has a
+// syntax or validation error, the running agents stay up uninterrupted.
+func runAgentsWithReload(cfgPath string, cfg config.Agent, lg *slog.Logger) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	reloadCh, stopReload := notifyReload()
+	defer stopReload()
+
+	for {
+		runCtx, runCancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func(c config.Agent) {
+			defer close(done)
+			runAgentsContext(runCtx, c, lg)
+		}(cfg)
+
+		select {
+		case <-ctx.Done():
+			runCancel()
+			<-done
+			return
+		case <-reloadCh:
+			next, _, err := config.LoadAgent(cfgPath)
+			if err != nil {
+				lg.Error("reload failed: cannot parse config, keeping current session", "path", cfgPath, "err", err)
+				continue
+			}
+			next.ApplyEnv()
+			if err := next.Validate(); err != nil {
+				lg.Error("reload failed: invalid config, keeping current session", "path", cfgPath, "err", err)
+				continue
+			}
+			lg.Info("reloading client configuration", "path", cfgPath, "servers", len(next.EffectiveServers()))
+			runCancel()
+			<-done
+			cfg = next
+		}
+	}
+}
+
 // runAgents keeps one connection per configured server until the process is
 // asked to stop.
 func runAgents(cfg config.Agent, lg *slog.Logger) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	runAgentsContext(ctx, cfg, lg)
+}
 
+func runAgentsContext(ctx context.Context, cfg config.Agent, lg *slog.Logger) {
 	servers := cfg.EffectiveServers()
 	var wg sync.WaitGroup
 	for _, s := range servers {

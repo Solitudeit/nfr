@@ -5,12 +5,17 @@
 #   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
 #     | sudo sh -s -- --server --systemd
 #
-#   # Optional: set the initial console password directly instead of random:
-#   curl -fsSL .../install.sh | sudo NFR_PASSWORD='my-strong-password' sh -s -- --server --systemd
+#   # Optional: preset admin password & shared auth_token on fresh install:
+#   curl -fsSL .../install.sh \
+#     | sudo NFR_PASSWORD='change-me-now' NFR_AUTH_TOKEN='my-shared-token' sh -s -- --server --systemd
 #
-# Private machine (install nfrc + join + install & start systemd service in one command):
+# Private machine (install nfrc + write client.toml/client.yaml + enable systemd):
 #   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
-#     | sudo sh -s -- --client --join example.com:8443 ABC123 --systemd
+#     | sudo sh -s -- --client --server-addr 203.0.113.10:8443 --token my-shared-token --name nas --systemd
+#
+#   # Prefer YAML format:
+#   curl -fsSL .../install.sh \
+#     | sudo sh -s -- --client --server-addr 203.0.113.10:8443 --token my-shared-token --format yaml --systemd
 #
 # Binaries only (Linux / macOS / Android Termux):
 #   curl -fsSL .../install.sh | sh
@@ -19,11 +24,12 @@
 #   curl -fsSL .../install.sh | sudo sh -s -- --uninstall
 #
 # Environment:
-#   NFR_VERSION   pin a release (e.g. v0.11.0), default: latest
-#   NFR_PREFIX    install directory (default: /usr/local/bin, or $PREFIX/bin on Termux)
-#   NFR_ONLY      "server" or "client" to install just one binary
-#   NFR_SYSTEMD   set to 1 to install and start the corresponding systemd unit
-#   NFR_PASSWORD  initial admin password on a fresh server install (>= 8 chars)
+#   NFR_VERSION     pin a release (e.g. v0.12.0), default: latest
+#   NFR_PREFIX      install directory (default: /usr/local/bin, or $PREFIX/bin on Termux)
+#   NFR_ONLY        "server" or "client" to install just one binary
+#   NFR_SYSTEMD     set to 1 to install and start the corresponding systemd unit
+#   NFR_PASSWORD    initial admin password on a fresh server install (>= 8 chars)
+#   NFR_AUTH_TOKEN  shared client auth_token (written to server/client config when given)
 set -eu
 
 repo="Solitudeit/nfr"
@@ -36,9 +42,12 @@ version="${NFR_VERSION:-latest}"
 only="${NFR_ONLY:-}"
 systemd="${NFR_SYSTEMD:-}"
 password="${NFR_PASSWORD:-}"
+auth_token="${NFR_AUTH_TOKEN:-}"
+server_addr=""
+node_name=""
+cfg_format="toml"
 join_server=""
 join_code=""
-join_name=""
 uninstall=0
 
 while [ "$#" -gt 0 ]; do
@@ -52,10 +61,29 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -gt 0 ] || { echo "--password requires a value" >&2; exit 1; }
       password="$1"
       ;;
+    --token)
+      shift
+      [ "$#" -gt 0 ] || { echo "--token requires a value" >&2; exit 1; }
+      auth_token="$1"
+      ;;
+    --server-addr)
+      shift
+      [ "$#" -gt 0 ] || { echo "--server-addr requires <host:port>" >&2; exit 1; }
+      server_addr="$1"
+      if [ -z "$only" ]; then only=client; fi
+      ;;
     --name)
       shift
       [ "$#" -gt 0 ] || { echo "--name requires a value" >&2; exit 1; }
-      join_name="$1"
+      node_name="$1"
+      ;;
+    --format)
+      shift
+      [ "$#" -gt 0 ] || { echo "--format requires toml or yaml" >&2; exit 1; }
+      case "$1" in
+        toml|yaml|yml) cfg_format="$1" ;;
+        *) echo "unsupported --format: $1 (use toml or yaml)" >&2; exit 1 ;;
+      esac
       ;;
     --join)
       shift
@@ -66,7 +94,7 @@ while [ "$#" -gt 0 ]; do
       if [ -z "$only" ]; then only=client; fi
       ;;
     -h|--help)
-      sed -n '2,27p' "$0" 2>/dev/null || echo "see comments at the top of install.sh"
+      sed -n '2,32p' "$0" 2>/dev/null || echo "see comments at the top of install.sh"
       exit 0
       ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -231,10 +259,10 @@ install_server_systemd() {
     exit 1
   fi
   if [ ! -d /run/systemd/system ]; then
-    echo "systemd not detected; binaries are installed, start them yourself: $prefix/nfrs -c /etc/nfr/server.toml" >&2
+    echo "systemd not detected; start server yourself: $prefix/nfrs" >&2
     return 0
   fi
-  if out=$("$prefix/nfrs" stop -c /etc/nfr/server.toml 2>&1); then
+  if out=$("$prefix/nfrs" stop 2>&1); then
     case "$out" in
       *没有正在运行*) ;;
       *) echo "$out" ;;
@@ -242,6 +270,17 @@ install_server_systemd() {
   fi
   data_dir=/var/lib/nfr
   mkdir -p /etc/nfr "$data_dir"
+
+  # Write a starter server config on a fresh install if none exists yet.
+  if [ ! -f /etc/nfr/server.toml ] && [ ! -f /etc/nfr/server.yaml ] && [ ! -f /etc/nfr/server.yml ]; then
+    srv_cfg="/etc/nfr/server.${cfg_format}"
+    if [ -n "$auth_token" ]; then
+      "$prefix/nfrs" init -c "$srv_cfg" --token "$auth_token"
+    else
+      "$prefix/nfrs" init -c "$srv_cfg"
+    fi
+  fi
+
   unit=/etc/systemd/system/nfr-server.service
   fetch "$base/nfr-server.service" "$workdir/nfr-server.service"
   mv "$workdir/nfr-server.service" "$unit"
@@ -250,7 +289,7 @@ install_server_systemd() {
   fresh=0
   [ -f "$data_dir/state.json" ] || fresh=1
   if [ "$fresh" = 1 ] && [ -n "$password" ]; then
-    "$prefix/nfrs" reset-password -c /etc/nfr/server.toml "$password"
+    "$prefix/nfrs" reset-password "$password"
     fresh=0
   fi
 
@@ -268,10 +307,10 @@ install_server_systemd() {
   if [ "$fresh" = 1 ]; then
     echo "首次启动的登录信息（密码只打印这一次）："
   else
-    echo "面板地址（密码沿用 $data_dir/state.json；忘了用 sudo nfrs reset-password）："
+    echo "面板与连接密钥（密码沿用 $data_dir/state.json；忘了用 sudo nfrs reset-password）："
   fi
   shown=$(journalctl -u nfr-server --since '-3 min' --no-pager -o cat 2>/dev/null |
-    grep -E '面板|密码|证书指纹' || true)
+    grep -E '面板|密码|连接密钥|证书指纹' || true)
   if [ -n "$shown" ]; then
     echo "$shown"
   elif [ -f "$data_dir/initial-password.txt" ]; then
@@ -279,7 +318,7 @@ install_server_systemd() {
     cat "$data_dir/initial-password.txt"
     echo "  （登录成功后这个文件会自动删除）"
   else
-    "$prefix/nfrs" status -c /etc/nfr/server.toml || true
+    "$prefix/nfrs" status || true
   fi
   if ! systemctl is-active --quiet nfr-server; then
     echo
@@ -294,11 +333,11 @@ install_server_systemd() {
 
 install_client_systemd() {
   if [ "$(id -u)" != 0 ]; then
-    echo "--systemd needs root (try: curl ... | sudo sh -s -- --client --join <server> <code> --systemd)" >&2
+    echo "--systemd needs root (try: curl ... | sudo sh -s -- --client --server-addr <addr> --token <tok> --systemd)" >&2
     exit 1
   fi
   if [ ! -d /run/systemd/system ]; then
-    echo "systemd not detected; start client yourself: $prefix/nfrc -c /etc/nfr/agent.toml" >&2
+    echo "systemd not detected; start client yourself: $prefix/nfrc" >&2
     return 0
   fi
   mkdir -p /etc/nfr
@@ -321,9 +360,20 @@ install_client_systemd() {
 if command -v "$prefix/nfrs" >/dev/null 2>&1; then "$prefix/nfrs" version; fi
 if command -v "$prefix/nfrc" >/dev/null 2>&1; then "$prefix/nfrc" version; fi
 
-if [ -n "$join_server" ] && [ -n "$join_code" ]; then
-  if [ -n "$join_name" ]; then
-    "$prefix/nfrc" join --no-start --name "$join_name" "$join_server" "$join_code"
+if [ -n "$server_addr" ] && [ -n "$auth_token" ]; then
+  if [ "$(id -u)" = 0 ]; then
+    cli_cfg="/etc/nfr/client.${cfg_format}"
+  else
+    cli_cfg="${HOME:-.}/.config/nfr/client.${cfg_format}"
+  fi
+  if [ -n "$node_name" ]; then
+    "$prefix/nfrc" init --force -c "$cli_cfg" --server "$server_addr" --token "$auth_token" --name "$node_name"
+  else
+    "$prefix/nfrc" init --force -c "$cli_cfg" --server "$server_addr" --token "$auth_token"
+  fi
+elif [ -n "$join_server" ] && [ -n "$join_code" ]; then
+  if [ -n "$node_name" ]; then
+    "$prefix/nfrc" join --no-start --name "$node_name" "$join_server" "$join_code"
   else
     "$prefix/nfrc" join --no-start "$join_server" "$join_code"
   fi

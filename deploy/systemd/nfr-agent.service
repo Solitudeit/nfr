@@ -6,16 +6,17 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/nfrc -c /etc/nfr/agent.toml
+# Automatically loads /etc/nfr/client.toml, client.yaml, client.yml, or legacy agent.toml.
+ExecStart=/usr/local/bin/nfrc
+# Live reload client.toml / client.yaml without dropping the systemd unit:
+#   sudo systemctl reload nfr-agent
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-# Created and kept writable by systemd. Listing /etc/nfr in ReadWritePaths
-# instead would fail the unit (226/NAMESPACE) when the directory does not
-# exist yet, which is the case on a machine that has not run `nfrc join`.
 ConfigurationDirectory=nfr
 ConfigurationDirectoryMode=0755
 

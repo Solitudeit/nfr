@@ -135,7 +135,10 @@
     <div class="code-panel">
       <div class="code-panel-bar">
         <span class="mono" id="cfg_filename">client.toml</span>
-        <button type="button" class="btn xs primary" id="cfg_copy" data-copy="">复制配置文件</button>
+        <div class="code-panel-acts">
+          <button type="button" class="btn xs" id="cfg_dl">下载文件</button>
+          <button type="button" class="btn xs primary" id="cfg_copy" data-copy="">复制配置文件</button>
+        </div>
       </div>
       <pre class="code-pre"><code id="cfg_preview"></code></pre>
     </div>
@@ -190,6 +193,7 @@
   var nameInput = document.getElementById('cfg_name');
   var preview = document.getElementById('cfg_preview');
   var copyBtn = document.getElementById('cfg_copy');
+  var dlBtn = document.getElementById('cfg_dl');
   var fnameEl = document.getElementById('cfg_filename');
   var cmdEl = document.getElementById('cfg_cmd');
   var cmdCopy = document.getElementById('cfg_cmd_copy');
@@ -240,6 +244,17 @@
     });
   });
   nameInput.addEventListener('input', render);
+  if (dlBtn) {
+    dlBtn.addEventListener('click', function () {
+      var blob = new Blob([preview.textContent || ''], { type: 'text/plain;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fnameEl.textContent || 'client.toml';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    });
+  }
   render();
 })();
 </script>
