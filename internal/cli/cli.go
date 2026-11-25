@@ -14,6 +14,7 @@ import (
 
 	"github.com/hashicorp/yamux"
 
+	"github.com/solitudeit/nfr/internal/transport"
 	"github.com/solitudeit/nfr/internal/version"
 )
 
@@ -60,11 +61,7 @@ func samePin(a, b string) bool {
 }
 
 func yamuxClientConfig() *yamux.Config {
-	cfg := yamux.DefaultConfig()
-	cfg.EnableKeepAlive = false
-	cfg.LogOutput = io.Discard
-	cfg.AcceptBacklog = 256
-	return cfg
+	return transport.YamuxConfig()
 }
 
 // isCommand reports whether arg names a subcommand of this binary.

@@ -282,7 +282,8 @@ func (s *Server) startControl() error {
 	if disabled(s.cfg.ControlListen) {
 		return errors.New("control_listen is required")
 	}
-	ln, err := net.Listen("tcp", s.cfg.ControlListen)
+	lc := transport.ListenConfig()
+	ln, err := lc.Listen(context.Background(), "tcp", s.cfg.ControlListen)
 	if err != nil {
 		return fmt.Errorf("listen control %s: %w", s.cfg.ControlListen, err)
 	}
@@ -369,7 +370,8 @@ func (s *Server) startHTTP() error {
 	if disabled(s.cfg.HTTPListen) {
 		return nil
 	}
-	ln, err := net.Listen("tcp", s.cfg.HTTPListen)
+	lc := transport.ListenConfig()
+	ln, err := lc.Listen(context.Background(), "tcp", s.cfg.HTTPListen)
 	if err != nil {
 		return err
 	}
@@ -393,7 +395,8 @@ func (s *Server) startHTTPS() error {
 	if disabled(s.cfg.HTTPSListen) {
 		return nil
 	}
-	ln, err := net.Listen("tcp", s.cfg.HTTPSListen)
+	lc := transport.ListenConfig()
+	ln, err := lc.Listen(context.Background(), "tcp", s.cfg.HTTPSListen)
 	if err != nil {
 		return err
 	}

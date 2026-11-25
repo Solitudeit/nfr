@@ -114,7 +114,7 @@ func (a *Agent) session(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bad server address %q: %w", a.opt.Addr, err)
 	}
-	dialer := &net.Dialer{Timeout: 15 * time.Second}
+	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 	raw, err := dialer.DialContext(ctx, "tcp", a.opt.Addr)
 	if err != nil {
 		return err
@@ -217,8 +217,26 @@ func (a *Agent) session(ctx context.Context) error {
 
 	go a.acceptLoop(ctx, sess)
 
+	// Proactive client-side heartbeat so NAT drops or blackholed links are
+	// detected promptly instead of waiting passively for a long read timeout.
+	go func() {
+		t := time.NewTicker(25 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if err := a.sendFrame(&proto.Frame{Type: proto.TypePing, TS: time.Now().Unix()}); err != nil {
+					sess.Close()
+					return
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+
 	for {
-		_ = ctrl.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		_ = ctrl.SetReadDeadline(time.Now().Add(90 * time.Second))
 		f, err := proto.ReadFrame(ctrl)
 		if err != nil {
 			return err
@@ -356,9 +374,5 @@ func halfClose(c net.Conn) {
 }
 
 func yamuxConfig() *yamux.Config {
-	cfg := yamux.DefaultConfig()
-	cfg.EnableKeepAlive = false
-	cfg.LogOutput = io.Discard
-	cfg.AcceptBacklog = 256
-	return cfg
+	return transport.YamuxConfig()
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/solitudeit/nfr/internal/metrics"
 	"github.com/solitudeit/nfr/internal/proto"
 	"github.com/solitudeit/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/transport"
 )
 
 // reconcile opens and closes public listeners to match the registry. TCP and
@@ -71,8 +72,9 @@ func (s *Server) reconcile() {
 		pl.close()
 	}
 
+	lc := transport.ListenConfig()
 	for _, port := range open {
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		ln, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf(":%d", port))
 		if err != nil {
 			s.lg.Warn("cannot open public port", "port", port, "err", err)
 			continue

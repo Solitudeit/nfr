@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/solitudeit/nfr/internal/auth"
 	"github.com/solitudeit/nfr/internal/proto"
 	"github.com/solitudeit/nfr/internal/store"
+	"github.com/solitudeit/nfr/internal/transport"
 )
 
 // hub fan-outs change events to console subscribers.
@@ -85,11 +85,7 @@ func (a *agentSession) sendFrame(f *proto.Frame) error {
 }
 
 func yamuxConfig() *yamux.Config {
-	cfg := yamux.DefaultConfig()
-	cfg.EnableKeepAlive = false
-	cfg.LogOutput = io.Discard
-	cfg.AcceptBacklog = 256
-	return cfg
+	return transport.YamuxConfig()
 }
 
 // serveAgentConn upgrades a TLS connection to a yamux session and runs the

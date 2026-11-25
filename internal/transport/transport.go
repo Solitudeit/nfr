@@ -16,6 +16,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -23,8 +24,30 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/yamux"
+
 	"github.com/solitudeit/nfr/internal/proto"
 )
+
+// YamuxConfig returns tuned multiplexing parameters shared by nfrs and nfrc.
+// The 2 MiB stream window keeps high-latency links from stalling behind the
+// default 256 KiB window, while application-level ping/pong handles liveness.
+func YamuxConfig() *yamux.Config {
+	cfg := yamux.DefaultConfig()
+	cfg.EnableKeepAlive = false
+	cfg.LogOutput = io.Discard
+	cfg.AcceptBacklog = 256
+	cfg.MaxStreamWindowSize = 2 << 20
+	cfg.StreamOpenTimeout = 15 * time.Second
+	cfg.StreamCloseTimeout = 2 * time.Minute
+	return cfg
+}
+
+// ListenConfig returns a TCP ListenConfig with OS-level keepalive enabled so
+// half-open NAT sessions are detected promptly.
+func ListenConfig() net.ListenConfig {
+	return net.ListenConfig{KeepAlive: 30 * time.Second}
+}
 
 // CertFingerprint returns the lowercase hex sha256 of a certificate.
 func CertFingerprint(cert *x509.Certificate) string {
