@@ -25,6 +25,7 @@ import (
 	"github.com/solitudeit/nfr/internal/transport"
 	"github.com/solitudeit/nfr/internal/version"
 	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // Options configures a control node.
@@ -42,6 +43,7 @@ type Server struct {
 	met        *metrics.Registry
 	hub        *hub
 	tls        *tls.Config
+	acmeMgr    *autocert.Manager
 	pin        string
 	certMode   string
 	certSource string
@@ -101,7 +103,10 @@ func New(opts Options) (*Server, string, error) {
 	if lg == nil {
 		lg = slog.Default()
 	}
-	tc, pin, mode, source, err := loadTLS(opts.Config)
+	if err := seedSettings(opts.Store, opts.Config); err != nil {
+		return nil, "", fmt.Errorf("seed settings: %w", err)
+	}
+	tc, pin, mode, source, acmeMgr, err := loadTLS(opts.Config, opts.Store)
 	if err != nil {
 		return nil, "", fmt.Errorf("load certificate: %w", err)
 	}
@@ -112,6 +117,7 @@ func New(opts Options) (*Server, string, error) {
 		met:          metrics.New(),
 		hub:          newHub(),
 		tls:          tc,
+		acmeMgr:      acmeMgr,
 		pin:          pin,
 		certMode:     mode,
 		certSource:   source,
@@ -124,9 +130,6 @@ func New(opts Options) (*Server, string, error) {
 		lastUsed:     make(map[string]time.Time),
 		limits:       make(map[string]*tunnelLimit),
 		flushed:      make(map[string]int64),
-	}
-	if err := seedSettings(opts.Store, opts.Config); err != nil {
-		return nil, "", fmt.Errorf("seed settings: %w", err)
 	}
 
 	// The public HTTPS listener offers HTTP/1.1 as well as the tunnel
@@ -371,7 +374,11 @@ func (s *Server) startHTTP() error {
 		return err
 	}
 	s.httpLn = ln
-	srv := s.newIngress()
+	srv := &http.Server{
+		Handler:           s.httpIngressHandler(),
+		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       90 * time.Second,
+	}
 	s.httpSrv = srv
 	s.wg.Add(1)
 	go func() {

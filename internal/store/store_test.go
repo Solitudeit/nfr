@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +160,42 @@ func TestUpdateIfSkipsNoopAndClonesDeeply(t *testing.T) {
 	snap.Tunnels[0].Hosts[0] = "external.example.com"
 	if got := st.Snapshot().Tunnels[0].Hosts[0]; got != "a.example.com" {
 		t.Fatalf("Snapshot mutation leaked into store: %q", got)
+	}
+}
+
+func TestRemoteAPIKeyEncryptedAtRest(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	const secret = "nfr_super_secret_remote_key_12345"
+	if err := st.Update(func(s *State) error {
+		s.Remotes = append(s.Remotes, Remote{
+			ID: "r1", Name: "hk", URL: "https://hk.example.com:8443", APIKey: secret,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil {
+		t.Fatalf("read state.json: %v", err)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatal("plaintext remote API key leaked into state.json")
+	}
+	if !strings.Contains(string(raw), encPrefix) {
+		t.Fatal("encrypted prefix missing in state.json")
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	snap := reopened.Snapshot()
+	if len(snap.Remotes) != 1 || snap.Remotes[0].APIKey != secret {
+		t.Fatalf("decrypted key mismatch: %+v", snap.Remotes)
 	}
 }

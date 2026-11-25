@@ -214,3 +214,14 @@ func PublicClientConfig(serverName string) *tls.Config {
 		ServerName: serverName,
 	}
 }
+
+// PublicWebClientConfig verifies a public-CA peer for plain HTTPS API calls.
+// Unlike PublicClientConfig, it never offers the tunnel ALPN so the control
+// port routes the connection to the HTTP/API server rather than the agent handler.
+func PublicWebClientConfig(serverName string) *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		NextProtos: []string{"http/1.1"},
+		ServerName: serverName,
+	}
+}

@@ -164,6 +164,7 @@ func (s *Server) target(r *http.Request) (string, *federation.Client, error) {
 func (s *Server) apiInfo(w http.ResponseWriter, r *http.Request) {
 	if _, c, err := s.target(r); err != nil {
 		writeErr2(w, err)
+		return
 	} else if c != nil {
 		info, err := c.Info(r.Context())
 		if err != nil {

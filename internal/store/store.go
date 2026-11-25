@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -130,6 +131,7 @@ type Remote struct {
 type Store struct {
 	mu    sync.Mutex
 	path  string
+	key   []byte
 	state State
 }
 
@@ -138,7 +140,11 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	s := &Store{path: filepath.Join(dir, "state.json")}
+	key, err := loadOrCreateKey(dir)
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{path: filepath.Join(dir, "state.json"), key: key}
 	raw, err := os.ReadFile(s.path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -163,10 +169,30 @@ func Open(dir string) (*Store, error) {
 		if s.state.Settings.PortRange[1] == 0 {
 			s.state.Settings.PortRange = [2]int{20000, 29999}
 		}
+		needsSave := false
+		for i := range s.state.Remotes {
+			ak := s.state.Remotes[i].APIKey
+			if ak == "" {
+				continue
+			}
+			if !strings.HasPrefix(ak, encPrefix) {
+				// Migrate legacy plaintext remote API keys to encrypted storage.
+				needsSave = true
+				continue
+			}
+			plain, err := decryptSecret(s.key, ak)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt remote %s api key: %w", s.state.Remotes[i].ID, err)
+			}
+			s.state.Remotes[i].APIKey = plain
+		}
 		// states written before v0.4 called the instance "nfr"; the product
 		// name is upper case everywhere else, so normalise the default.
 		if s.state.Name == "nfr" {
 			s.state.Name = "NFR"
+			needsSave = true
+		}
+		if needsSave {
 			if err := s.saveLocked(); err != nil {
 				return nil, err
 			}
@@ -292,7 +318,17 @@ func cloneState(in State) State {
 }
 
 func (s *Store) saveLocked() error {
-	body, err := json.MarshalIndent(s.state, "", "  ")
+	disk := cloneState(s.state)
+	for i := range disk.Remotes {
+		if disk.Remotes[i].APIKey != "" {
+			enc, err := encryptSecret(s.key, disk.Remotes[i].APIKey)
+			if err != nil {
+				return err
+			}
+			disk.Remotes[i].APIKey = enc
+		}
+	}
+	body, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return err
 	}

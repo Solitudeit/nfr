@@ -110,3 +110,22 @@ func TestVerifyMode(t *testing.T) {
 		t.Fatalf("pin = %q, want %q", pin, pinOf(srv))
 	}
 }
+
+func TestTrustedClientUsesWebALPNAndParsesHostWithPath(t *testing.T) {
+	c := NewTrusted("https://hk.example.com:8443/nfr/", "secret")
+	tr, ok := c.HTTP.Transport.(*http.Transport)
+	if !ok || tr.TLSClientConfig == nil {
+		t.Fatal("missing TLSClientConfig on trusted federation client")
+	}
+	if tr.TLSClientConfig.ServerName != "hk.example.com" {
+		t.Fatalf("ServerName = %q, want hk.example.com", tr.TLSClientConfig.ServerName)
+	}
+	for _, p := range tr.TLSClientConfig.NextProtos {
+		if p == "nfr/1" {
+			t.Fatal("trusted federation HTTP client must not advertise tunnel ALPN nfr/1")
+		}
+	}
+	if len(tr.TLSClientConfig.NextProtos) == 0 || tr.TLSClientConfig.NextProtos[0] != "http/1.1" {
+		t.Fatalf("NextProtos = %v, want [http/1.1]", tr.TLSClientConfig.NextProtos)
+	}
+}

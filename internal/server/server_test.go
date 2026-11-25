@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -1268,5 +1269,52 @@ func TestHTTPReverseProxyPoolingChunkedAndUpgrade(t *testing.T) {
 	reply, err := br.ReadString('\n')
 	if err != nil || reply != "ECHO:hello-ws\n" {
 		t.Fatalf("upgrade echo = %q err=%v", reply, err)
+	}
+}
+
+func TestACMEHostPolicyAllowsConfiguredSubdomains(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.Domain = "example.com" })
+	addNode(t, st, "n1")
+	if _, err := s.CreateTunnel(api.TunnelRequest{
+		Name: "blog", NodeID: "n1", Type: "http", Local: "8080",
+	}); err != nil {
+		t.Fatalf("create tunnel: %v", err)
+	}
+	policy := acmeHostPolicy("example.com", st)
+	if err := policy(context.Background(), "example.com"); err != nil {
+		t.Fatalf("root domain rejected: %v", err)
+	}
+	if err := policy(context.Background(), "blog.example.com"); err != nil {
+		t.Fatalf("configured tunnel subdomain rejected: %v", err)
+	}
+	if err := policy(context.Background(), "random.evil.com"); err == nil {
+		t.Fatal("unconfigured domain was allowed by ACME host policy")
+	}
+}
+
+func TestAPIInfoUnknownServerReturnsSingleErrorJSON(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+	if err := s.ToggleAPI(true); err != nil {
+		t.Fatalf("enable api: %v", err)
+	}
+	keyResp, err := s.CreateAPIKey(api.APIKeyRequest{Label: "test", Scope: "read"})
+	if err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/info?server=missing", nil)
+	req.Header.Set("Authorization", "Bearer "+keyResp.Key)
+	rec := httptest.NewRecorder()
+	s.api.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var e api.Error
+	dec := json.NewDecoder(strings.NewReader(rec.Body.String()))
+	if err := dec.Decode(&e); err != nil {
+		t.Fatalf("invalid error json: %v (body=%q)", err, rec.Body.String())
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		t.Fatalf("apiInfo emitted trailing payload after error: %q", rec.Body.String())
 	}
 }

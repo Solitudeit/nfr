@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ func newClient(baseURL, key, pin string, ca bool) *Client {
 	host := hostOf(baseURL)
 	tlsCfg := transport.WebClientConfig(host, pin)
 	if ca {
-		tlsCfg = transport.PublicClientConfig(host)
+		tlsCfg = transport.PublicWebClientConfig(host)
 	}
 	return &Client{
 		BaseURL: baseURL,
@@ -60,11 +61,21 @@ func newClient(baseURL, key, pin string, ca bool) *Client {
 }
 
 func hostOf(baseURL string) string {
-	raw := strings.TrimPrefix(strings.TrimPrefix(baseURL, "https://"), "http://")
+	raw := strings.TrimSpace(baseURL)
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	raw = strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
+	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
+		raw = raw[:i]
+	}
 	if h, _, err := net.SplitHostPort(raw); err == nil {
 		return h
 	}
-	return strings.TrimSuffix(raw, "/")
+	return raw
 }
 
 // Do performs an authenticated request and decodes the result into out.
