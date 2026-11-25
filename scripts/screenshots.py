@@ -314,16 +314,17 @@ def main():
         cookies = panel.cookie_header()
         base = panel.base
         print("rendering…")
+        shoot("login", base + "/nfr/login", [], tmp, viewport=(1440, 900))
         shoot("tunnels", base + "/nfr/tunnels?server=local", cookies, tmp, full_page=True)
         shoot("tunnels-dark", base + "/nfr/tunnels?server=local", cookies, tmp, dark=True,
               full_page=True)
         shoot("tunnels-phone", base + "/nfr/tunnels?server=local", cookies, tmp,
-              viewport=(390, 844), full_page=True)
+              viewport=(390, 844), full_page=False)
         shoot("tunnel-new", base + "/nfr/tunnels/new?server=local", cookies, tmp,
-              viewport=(1440, 1000))
-        shoot("nodes", base + "/nfr/nodes", cookies, tmp)
-        shoot("servers", base + "/nfr/servers", cookies, tmp, viewport=(1440, 760))
-        shoot("settings", base + "/nfr/settings", cookies, tmp, viewport=(1440, 1500))
+              viewport=(1440, 960), full_page=True)
+        shoot("nodes", base + "/nfr/nodes", cookies, tmp, viewport=(1440, 900))
+        shoot("servers", base + "/nfr/servers", cookies, tmp, viewport=(1440, 880))
+        shoot("settings", base + "/nfr/settings", cookies, tmp, viewport=(1440, 1200), full_page=True)
         print("wrote screenshots to " + OUT)
     finally:
         cleanup()

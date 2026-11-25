@@ -1,113 +1,123 @@
 <div class="page-head">
   <div>
-    <h1>服务器</h1>
-    <p class="lead">这里列着可以被本控制台管理的实例。每台实例彼此独立 —— 这里只是通过它们的 API 操作，不会改变谁是入口。</p>
+    <div class="page-title-row">
+      <h1>服务器</h1>
+      <span class="badge-count">{{len .Cards}} 台已纳管</span>
+    </div>
+    <p class="lead">通过 REST API 在同一面板中统一管理多台独立部署的 NFR 实例。</p>
   </div>
 </div>
 
-<section class="panel">
-  <div class="panel-head">
-    <h2>已纳管的服务器</h2>
-    <span class="card-sub">{{len .Cards}} 台</span>
-  </div>
+<section class="section">
   {{if .Cards}}
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>名称</th>
-          <th>地区</th>
-          <th>控制地址</th>
-          <th>版本</th>
-          <th class="num">节点</th>
-          <th class="num">隧道</th>
-          <th>状态</th>
-          <th class="shrink"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Cards}}
-        <tr>
-          <td>
-            <span class="dot {{if .Reachable}}on{{else}}err{{end}}"></span>
-            <span class="name">{{.Name}}</span>
-          </td>
-          <td>{{if .Region}}<span class="chip loc">{{.Region}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
-          <td class="addr">{{.URL}}</td>
-          <td>{{if .Version}}<span class="chip key">{{.Version}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
-          <td class="num">{{.Nodes}}</td>
-          <td class="num">{{.Tunnels}}</td>
-          <td>{{if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}</td>
-          <td class="shrink">
-            <div class="actions">
-              <a class="btn sm" href="/nfr/tunnels?server={{.ID}}">隧道</a>
-              <form method="post" action="/nfr/servers" data-confirm="不再管理「{{.Name}}」？只影响这个控制台，不会动那台服务器上的东西。">
-                <input type="hidden" name="csrf" value="{{$.CSRF}}">
-                <input type="hidden" name="action" value="delete">
-                <input type="hidden" name="id" value="{{.ID}}">
-                <button class="btn danger sm" type="submit">移除</button>
-              </form>
-            </div>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+  <div class="card pad0 tbl-card">
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>服务器</th>
+            <th>地区</th>
+            <th>控制地址</th>
+            <th>版本</th>
+            <th class="num">节点</th>
+            <th class="num">隧道</th>
+            <th>状态</th>
+            <th class="shrink">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Cards}}
+          <tr>
+            <td>
+              <div class="tbl-title">
+                <span class="dot {{if .Reachable}}on{{else}}err{{end}}"></span>
+                <span class="name">{{.Name}}</span>
+              </div>
+            </td>
+            <td>{{if .Region}}<span class="chip loc sm">{{.Region}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+            <td class="mono addr">{{.URL}}</td>
+            <td>{{if .Version}}<span class="chip key sm mono">{{vshort .Version}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+            <td class="num mono">{{.Nodes}}</td>
+            <td class="num mono">{{.Tunnels}}</td>
+            <td>{{if .Reachable}}<span class="chip on">在线</span>{{else}}<span class="chip err">不可达</span>{{end}}</td>
+            <td class="shrink">
+              <div class="tbl-actions">
+                <a class="btn sm" href="/nfr/tunnels?server={{.ID}}">隧道</a>
+                <form method="post" action="/nfr/servers" data-confirm="不再管理「{{.Name}}」？只影响这个控制台，不会动那台服务器上的东西。">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="id" value="{{.ID}}">
+                  <button class="btn danger sm" type="submit">移除</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   </div>
   {{else}}
-  <div class="empty">
-    {{template "i-servers"}}
+  <div class="card empty">
+    <div class="empty-ico">{{template "i-servers"}}</div>
     <b>还没有纳管其他服务器</b>
-    <p>在另一台机器上装好 NFR 后，用下面的表单把它接进来，之后就能在同一个面板里管理它的隧道。</p>
+    <p>在另一台 VPS 部署 NFR 后，填写下方的控制地址与 API 密钥即可跨机统一管理。</p>
   </div>
   {{end}}
 </section>
 
-<div class="grid2" style="margin-top:16px">
-  <form class="card form" method="post" action="/nfr/servers">
-    <div class="card-head"><h2>添加服务器</h2></div>
+<div class="grid2 section-gap">
+  <form class="card form-card" method="post" action="/nfr/servers">
+    <div class="card-head">
+      <h2>添加服务器</h2>
+      <p class="card-desc">凭据在本地加密落盘，首次连接支持 TOFU 证书指纹校验。</p>
+    </div>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="field">
-      <label for="url">控制地址</label>
+      <label class="field-lbl" for="url">控制地址 <i class="req">*</i></label>
       <input id="url" name="url" placeholder="https://hk.example.com:8443" required>
-      <span class="hint">目标服务器的 NFR 控制端口地址，通常以 <code>:8443</code> 结尾。</span>
+      <span class="hint">目标服务器的 NFR 控制端口地址，默认以 <code>:8443</code> 结尾。</span>
     </div>
     <div class="field">
-      <label for="api_key">API 密钥</label>
+      <label class="field-lbl" for="api_key">API 密钥 <i class="req">*</i></label>
       <input id="api_key" name="api_key" placeholder="nfr_..." required>
-      <span class="hint">在对方面板的 <b>设置</b> 页创建，建议使用 <code>admin</code> 权限。</span>
+      <span class="hint">在目标面板的 <b>设置 → REST API</b> 创建，建议使用 <code>admin</code> 权限。</span>
     </div>
-    <div class="field">
-      <label for="name">显示名称</label>
-      <input id="name" name="name" placeholder="香港">
+    <div class="form-grid2">
+      <div class="field">
+        <label class="field-lbl" for="name">显示名称</label>
+        <input id="name" name="name" placeholder="香港节点">
+      </div>
+      <div class="field">
+        <label class="field-lbl" for="pin">证书指纹 <span class="muted">可选</span></label>
+        <input id="pin" name="pin" placeholder="AA:BB:CC:...">
+      </div>
     </div>
-    <div class="field">
-      <label for="pin">证书指纹 <span class="muted">可选</span></label>
-      <input id="pin" name="pin" placeholder="AA:BB:CC:...">
-      <span class="hint">留空则首次连接时信任并记住指纹；之后指纹变化会被拒绝。</span>
+    <span class="hint">证书指纹留空时，首次连接自动信任并记住（TOFU）；后续变化将拒绝连接。</span>
+    <div class="card-actions">
+      <button class="btn primary" type="submit">{{template "i-plus"}}连接并纳管</button>
     </div>
-    <div class="actions"><button class="btn primary" type="submit">连接并纳管</button></div>
   </form>
 
-  <div class="card stack">
-    <div>
-      <h2>怎样把另一台接进来</h2>
-      <ol class="note" style="margin:10px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:8px">
-        <li>在对方机器上启动 <code>nfrs</code>。</li>
-        <li>打开它的面板，在 <b>设置</b> 里启用 REST API。</li>
-        <li>到 <b>设置 → API 密钥</b> 创建一把 <code>admin</code> 密钥并复制。</li>
-        <li>回到这里填写地址与密钥即可。</li>
-      </ol>
+  <div class="card guide-card">
+    <div class="card-head">
+      <h2>跨服务器纳管指南</h2>
+      <p class="card-desc">被纳管实例仍保持完全独立，数据流量不经由本机中转。</p>
     </div>
+    <ol class="steps">
+      <li><b>部署并启动目标 <code>nfrs</code></b><span>确保其 <code>8443</code> 控制端口可由本机访问。</span></li>
+      <li><b>开启目标实例的 REST API</b><span>在对方控制台的 <b>设置</b> 页启用 REST API 开关。</span></li>
+      <li><b>创建 <code>admin</code> 权限密钥</b><span>复制一次性明文密钥并填入左侧表单即可。</span></li>
+    </ol>
     {{if .Pin}}
     <div class="divider"></div>
-    <div>
-      <div class="label" style="margin-bottom:8px">这台服务器的证书指纹</div>
+    <div class="field">
+      <label class="field-lbl">本机证书指纹</label>
       <div class="copyfield">
         <code>{{.Pin}}</code>
-        <button type="button" class="btn sm" data-copy="{{.Pin}}">复制</button>
+        <button type="button" class="btn xs" data-copy="{{.Pin}}">复制</button>
       </div>
-      <p class="note" style="margin-top:8px">在别处添加这台机器时，可以粘贴它来跳过首次信任。</p>
+      <span class="hint">在其他面板纳管本服务器时，可预先粘贴此指纹以校验身份。</span>
     </div>
     {{end}}
   </div>

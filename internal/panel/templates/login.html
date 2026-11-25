@@ -1,16 +1,36 @@
-<div class="login">
-  <form class="login-card" method="post" action="/nfr/login">
-    <div class="login-wordmark">
-      <span class="brand-mark">N</span>
-      <span class="brand-name">NFR</span>
-    </div>
-    <div class="card-head"><h2>登录控制台</h2></div>
-    {{if .Error}}<div class="flash err" role="alert">{{.Error}}</div>{{end}}
-    <div class="field">
-      <label for="pw">面板密码</label>
-      <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
-    </div>
-    <button class="btn primary" type="submit">登录</button>
-    <p class="login-foot">密码在首次启动时随日志打印一次。</p>
-  </form>
+<div class="login-page">
+  <div class="login-topbar">
+    <button class="icon-btn" type="button" data-theme-toggle title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
+      {{template "i-moon"}}{{template "i-sun"}}
+    </button>
+  </div>
+
+  <div class="login-wrap">
+    <form class="login-card" method="post" action="/nfr/login">
+      <div class="login-head">
+        <span class="brand-logo lg" aria-hidden="true">{{template "i-logo"}}</span>
+        <div>
+          <h1>NFR 控制台</h1>
+          <p>请输入管理员密码以继续</p>
+        </div>
+      </div>
+
+      {{if .Error}}<div class="flash err" role="alert"><span class="flash-body">{{.Error}}</span></div>{{end}}
+
+      <div class="field">
+        <label for="pw">面板密码</label>
+        <div class="pw-wrap">
+          <input id="pw" name="password" type="password" autocomplete="current-password" placeholder="输入密码" autofocus required>
+          <button type="button" class="pw-toggle" data-pw-toggle="pw" aria-label="显示或隐藏密码" title="显示 / 隐藏密码">{{template "i-eye"}}</button>
+        </div>
+      </div>
+
+      <button class="btn primary full lg" type="submit">登录控制台</button>
+
+      <div class="login-foot">
+        <p>首次启动时密码会输出在服务端日志中。</p>
+        <p>忘记密码可在服务端运行 <code>nfrs reset-password</code> 重置。</p>
+      </div>
+    </form>
+  </div>
 </div>

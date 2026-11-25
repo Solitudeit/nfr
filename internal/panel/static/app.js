@@ -1,6 +1,6 @@
 // NFR console — progressive enhancement only. The panel is fully usable without
-// JavaScript: this file adds theme switching, copy buttons, live status polling,
-// a traffic chart and small motion touches (press feedback, materialize-in).
+// JavaScript: this script adds theme switching, copy buttons, password reveal,
+// tunnel filtering, join-code countdowns, and 4s live status polling.
 (function () {
   "use strict";
 
@@ -23,21 +23,43 @@
     root.setAttribute("data-theme", next);
     try { localStorage.setItem("nfr-theme", next); } catch (e) {}
     clearTimeout(themeTimer);
-    themeTimer = setTimeout(function () { root.classList.remove("theme-anim"); }, 320);
+    themeTimer = setTimeout(function () { root.classList.remove("theme-anim"); }, 260);
   }
 
-  // iOS only paints :active if a touch listener exists somewhere.
   document.addEventListener("touchstart", function () {}, { passive: true });
 
   // ── delegated clicks ───────────────────────────────────────────────
+  var checkSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+
   document.addEventListener("click", function (ev) {
     var t = ev.target.closest("[data-theme-toggle]");
     if (t) { setTheme(currentTheme() === "light" ? "dark" : "light"); return; }
 
+    var pw = ev.target.closest("[data-pw-toggle]");
+    if (pw) {
+      var input = document.getElementById(pw.getAttribute("data-pw-toggle"));
+      if (input) {
+        input.type = input.type === "password" ? "text" : "password";
+        input.focus();
+      }
+      return;
+    }
+
     var c = ev.target.closest("[data-copy]");
     if (c) {
       var text = c.getAttribute("data-copy");
+      var isIconOnly = c.classList.contains("mini-copy");
       var done = function () {
+        if (isIconOnly) {
+          if (!c.hasAttribute("data-orig-html")) c.setAttribute("data-orig-html", c.innerHTML);
+          c.innerHTML = checkSVG;
+          c.classList.add("copied");
+          setTimeout(function () {
+            c.innerHTML = c.getAttribute("data-orig-html");
+            c.classList.remove("copied");
+          }, 1400);
+          return;
+        }
         var old = c.getAttribute("data-label") || c.textContent;
         if (!c.hasAttribute("data-label")) c.setAttribute("data-label", old);
         c.textContent = "已复制";
@@ -57,7 +79,7 @@
     }
 
     var x = ev.target.closest("[data-dismiss]");
-    if (x) { dismiss(x.closest(".flash"), 0); }
+    if (x) { dismiss(x.closest(".flash")); }
   });
 
   document.addEventListener("submit", function (ev) {
@@ -77,19 +99,50 @@
     document.body.removeChild(ta);
   }
 
-  // ── flash: materialize in, fade out along the same path ────────────
-  function dismiss(el, delay) {
+  // ── flash notices (auto-dismiss page-level flashes only) ───────────
+  function dismiss(el) {
     if (!el || el.hasAttribute("data-leaving")) return;
     el.setAttribute("data-leaving", "");
-    setTimeout(function () { el.remove(); }, reduce() ? 120 : 200);
+    setTimeout(function () { el.remove(); }, reduce() ? 100 : 200);
   }
 
-  Array.prototype.forEach.call(document.querySelectorAll(".flash"), function (el) {
+  Array.prototype.forEach.call(document.querySelectorAll(".content > .flash"), function (el) {
     setTimeout(function () { dismiss(el); }, 6000);
   });
 
-  // ── live state ─────────────────────────────────────────────────────
+  // ── tunnel quick filter & search ───────────────────────────────────
+  var filterBar = document.querySelector("[data-tunnel-filter]");
+  if (filterBar) {
+    var protoBtns = Array.prototype.slice.call(filterBar.querySelectorAll("[data-filter-proto]"));
+    var qInput = filterBar.querySelector("[data-filter-q]");
+    var cards = Array.prototype.slice.call(document.querySelectorAll(".tunnel-grid .tcard"));
+    var emptyEl = document.querySelector("[data-filter-empty]");
+    var activeProto = "all";
 
+    function applyFilter() {
+      var q = (qInput ? qInput.value : "").trim().toLowerCase();
+      var shown = 0;
+      cards.forEach(function (card) {
+        var proto = (card.getAttribute("data-proto") || "").toLowerCase();
+        var hay = (card.getAttribute("data-search") || "").toLowerCase();
+        var ok = (activeProto === "all" || proto === activeProto) && (!q || hay.indexOf(q) !== -1);
+        card.hidden = !ok;
+        if (ok) shown++;
+      });
+      if (emptyEl) emptyEl.hidden = shown > 0;
+    }
+
+    protoBtns.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        activeProto = btn.getAttribute("data-filter-proto") || "all";
+        protoBtns.forEach(function (b) { b.classList.toggle("active", b === btn); });
+        applyFilter();
+      });
+    });
+    if (qInput) qInput.addEventListener("input", applyFilter);
+  }
+
+  // ── live state polling ─────────────────────────────────────────────
   function fmtBytes(n) {
     n = Number(n) || 0;
     if (n < 1024) return n + " B";
@@ -111,19 +164,17 @@
     var enabled = tunnels.filter(function (t) { return t.enabled; }).length;
     setText(document.querySelector('[data-stat="tunnels-enabled"]'), enabled + " / " + tunnels.length);
 
-    var tin = 0, tout = 0;
+    var tin = 0, tout = 0, rin = 0, rout = 0;
     tunnels.forEach(function (t) {
       tin += t.in || 0;
       tout += t.out || 0;
+      rin += t.in_rate || 0;
+      rout += t.out_rate || 0;
 
       var row = document.querySelector('[data-tid="' + t.id + '"]');
       if (row) {
         var dot = row.querySelector(".dot");
-        if (dot) {
-          // The server decides the state; the page only paints it, so a
-          // poller tick can never disagree with the rendered list.
-          dot.className = "dot " + (t.status_kind || "off");
-        }
+        if (dot) dot.className = "dot " + (t.status_kind || "off");
         setText(row.querySelector("[data-live-rate]"), fmtRate(t.in_rate || 0) + " / " + fmtRate(t.out_rate || 0));
         var chip = row.querySelector("[data-live-chip]");
         if (chip && t.status) {
@@ -143,6 +194,8 @@
     });
     setText(document.querySelector('[data-stat="total-in"]'), fmtBytes(tin));
     setText(document.querySelector('[data-stat="total-out"]'), fmtBytes(tout));
+    setText(document.querySelector('[data-stat="rate-in"]'), "实时 " + fmtRate(rin));
+    setText(document.querySelector('[data-stat="rate-out"]'), "实时 " + fmtRate(rout));
 
     nodes.forEach(function (n) {
       var row = document.querySelector('[data-nid="' + n.id + '"]');
@@ -178,7 +231,7 @@
       fetch("/nfr/api/state", { credentials: "same-origin", cache: "no-store" })
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (state) { if (state) apply(state); })
-        .catch(function () { /* offline for a moment; the next tick will retry */ })
+        .catch(function () {})
         .then(function () { timer = setTimeout(tick, document.hidden ? 15000 : 4000); });
     }
     tick();
@@ -188,7 +241,7 @@
     window.addEventListener("beforeunload", function () { stop = true; });
   }
 
-  // ── join-code countdown: awaiting cards show how long the command lives ──
+  // ── join-code countdown ────────────────────────────────────────────
   function fmtLeft(sec) {
     if (sec <= 0) return "已过期，请重新生成";
     var m = Math.floor(sec / 60);

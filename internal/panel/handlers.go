@@ -63,6 +63,8 @@ type tunnelsData struct {
 	StatsEnabled    int
 	StatsIn         int64
 	StatsOut        int64
+	StatsInRate     float64
+	StatsOutRate    float64
 }
 
 // cards renders every instance the console can reach, the local one first.
@@ -180,6 +182,8 @@ func (p *Panel) tunnels(w http.ResponseWriter, r *http.Request, s *session) {
 			}
 			d.StatsIn += t.In
 			d.StatsOut += t.Out
+			d.StatsInRate += t.InRate
+			d.StatsOutRate += t.OutRate
 		}
 		p.labelNodes(r.Context(), d.Nodes)
 		d.CurRegion = p.region(r.Context(), d.CurURL, true)
