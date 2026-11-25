@@ -145,44 +145,6 @@ func (c *throttledConn) Write(p []byte) (int, error) {
 	return writeThrottled(c.Conn, c.down, p)
 }
 
-// throttleReader paces a reader.
-type throttleReader struct {
-	r io.Reader
-	b *bucket
-}
-
-func (t throttleReader) Read(p []byte) (int, error) {
-	n, err := t.r.Read(p)
-	if n > 0 {
-		t.b.take(n)
-	}
-	return n, err
-}
-
-// throttleReadCloser paces a ReadCloser, e.g. a proxied request body.
-type throttleReadCloser struct {
-	io.ReadCloser
-	b *bucket
-}
-
-func (t *throttleReadCloser) Read(p []byte) (int, error) {
-	n, err := t.ReadCloser.Read(p)
-	if n > 0 {
-		t.b.take(n)
-	}
-	return n, err
-}
-
-// throttleWriter paces a writer.
-type throttleWriter struct {
-	w io.Writer
-	b *bucket
-}
-
-func (t throttleWriter) Write(p []byte) (int, error) {
-	return writeThrottled(t.w, t.b, p)
-}
-
 // writeThrottled sends p through b in chunks, yielding to the bucket between
 // chunks so io.Copy sized buffers do not bypass the cap.
 func writeThrottled(w io.Writer, b *bucket, p []byte) (int, error) {

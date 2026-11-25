@@ -461,14 +461,20 @@ func (s *Server) setSession(nodeID string, a *agentSession) {
 	if old != nil && old != a {
 		old.close()
 	}
+	s.dropHTTPProxiesForNode(nodeID)
 }
 
 func (s *Server) dropSession(nodeID string, a *agentSession) {
+	dropped := false
 	s.mu.Lock()
 	if cur, ok := s.agents[nodeID]; ok && cur == a {
 		delete(s.agents, nodeID)
+		dropped = true
 	}
 	s.mu.Unlock()
+	if dropped {
+		s.dropHTTPProxiesForNode(nodeID)
+	}
 }
 
 // openStream dials one stream to the named node's agent.

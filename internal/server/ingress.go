@@ -1,13 +1,13 @@
 package server
 
 import (
-	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strconv"
+	"net/http/httputil"
 	"strings"
 	"sync"
 	"time"
@@ -17,23 +17,12 @@ import (
 	"github.com/solitudeit/nfr/internal/store"
 )
 
-// hopHeaders are connection scoped and must not cross the tunnel.
-var hopHeaders = []string{
-	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
-	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
-}
-
-func removeHopHeaders(h http.Header) {
-	for _, k := range hopHeaders {
-		h.Del(k)
-	}
-}
-
 // reconcile opens and closes public listeners to match the registry. TCP and
 // HTTP tunnels share the TCP port space; UDP tunnels listen in their own.
 func (s *Server) reconcile() {
 	st := s.st.Snapshot()
 	s.pruneLimits(st.Tunnels)
+	s.pruneHTTPProxies(st.Tunnels)
 	desired := make(map[int]store.Tunnel, len(st.Tunnels))
 	udpDesired := make(map[int]store.Tunnel)
 	for _, t := range st.Tunnels {
@@ -300,17 +289,227 @@ func (s *Server) serveTunnelHTTP(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// proxyHTTP forwards one HTTP exchange to the tunnel's node.
-func (s *Server) proxyHTTP(w http.ResponseWriter, r *http.Request, t store.Tunnel) {
-	if isUpgrade(r) {
-		s.proxyUpgrade(w, r, t)
-		return
-	}
-	s.proxyRequest(w, r, t)
+// httpTunnelProxy caches a pooled http.Transport and ReverseProxy for one HTTP
+// tunnel so consecutive visitor requests reuse yamux streams and keep-alive
+// connections to the private service instead of dialling per request.
+type httpTunnelProxy struct {
+	nodeID      string
+	local       string
+	name        string
+	bandwidthKB int
+	sess        *agentSession
+	tr          *http.Transport
+	rp          *httputil.ReverseProxy
 }
 
-func isUpgrade(r *http.Request) bool {
-	return r.Header.Get("Upgrade") != "" && strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+func (p *httpTunnelProxy) close() {
+	if p != nil && p.tr != nil {
+		p.tr.CloseIdleConnections()
+	}
+}
+
+// httpStreamConn wraps a yamux stream with bidirectional traffic accounting
+// and optional token-bucket pacing. On a stream dialled toward the agent,
+// Write carries visitor->origin traffic (In) and Read carries origin->visitor
+// traffic (Out).
+type httpStreamConn struct {
+	net.Conn
+	ctr *metrics.Counter
+	lim *tunnelLimit
+}
+
+func (c *httpStreamConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		if c.lim != nil {
+			c.lim.down.take(n)
+		}
+		c.ctr.Out.Add(int64(n))
+	}
+	return n, err
+}
+
+func (c *httpStreamConn) Write(p []byte) (int, error) {
+	if c.lim != nil {
+		n, err := writeThrottled(c.Conn, c.lim.up, p)
+		if n > 0 {
+			c.ctr.In.Add(int64(n))
+		}
+		return n, err
+	}
+	n, err := c.Conn.Write(p)
+	if n > 0 {
+		c.ctr.In.Add(int64(n))
+	}
+	return n, err
+}
+
+type httpClientIPKey struct{}
+
+func (s *Server) httpProxyFor(t store.Tunnel) (*httpTunnelProxy, error) {
+	sess := s.sessionFor(t.NodeID)
+	if sess == nil || sess.sess == nil {
+		return nil, errors.New("node offline")
+	}
+
+	s.mu.Lock()
+	if cur := s.httpProxies[t.ID]; cur != nil &&
+		cur.nodeID == t.NodeID &&
+		cur.local == t.Local &&
+		cur.name == t.Name &&
+		cur.bandwidthKB == t.BandwidthKB &&
+		cur.sess == sess {
+		s.mu.Unlock()
+		return cur, nil
+	}
+	old := s.httpProxies[t.ID]
+	s.mu.Unlock()
+
+	ctr := s.met.For(t.ID)
+	lim := s.limiterFor(t)
+	tunnelID := t.ID
+	nodeID := t.NodeID
+	tunnelName := t.Name
+
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			remote, _ := ctx.Value(httpClientIPKey{}).(string)
+			st, err := s.openStream(nodeID, &proto.StreamHeader{Tunnel: tunnelID, Remote: remote})
+			if err != nil {
+				return nil, err
+			}
+			return &httpStreamConn{Conn: st, ctr: ctr, lim: lim}, nil
+		},
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   32,
+		IdleConnTimeout:       60 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		DisableCompression:    true,
+	}
+
+	rp := &httputil.ReverseProxy{
+		Transport:     tr,
+		FlushInterval: -1,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = "http"
+			pr.Out.URL.Host = "nfr-tunnel.internal"
+			pr.Out.Host = pr.In.Host
+			ip := clientIP(pr.In)
+			if prior := pr.In.Header.Get("X-Forwarded-For"); prior != "" {
+				pr.Out.Header.Set("X-Forwarded-For", prior+", "+ip)
+			} else {
+				pr.Out.Header.Set("X-Forwarded-For", ip)
+			}
+			pr.Out.Header.Set("X-Forwarded-Proto", schemeOf(pr.In))
+			pr.Out.Header.Set("X-Forwarded-Host", pr.In.Host)
+			pr.Out.Header.Set("X-Nfr-Tunnel", tunnelName)
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			// Receiving response headers proves the agent dialled the local
+			// service successfully, so clear any stale TargetDown report.
+			s.clearTargetDown(tunnelID)
+			return nil
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			ctr.Errs.Add(1)
+			if strings.Contains(err.Error(), "node offline") {
+				http.Error(w, "nfr: tunnel node is offline", http.StatusBadGateway)
+				return
+			}
+			http.Error(w, "nfr: bad response from node", http.StatusBadGateway)
+		},
+	}
+
+	p := &httpTunnelProxy{
+		nodeID:      t.NodeID,
+		local:       t.Local,
+		name:        t.Name,
+		bandwidthKB: t.BandwidthKB,
+		sess:        sess,
+		tr:          tr,
+		rp:          rp,
+	}
+
+	s.mu.Lock()
+	if s.httpProxies == nil {
+		s.httpProxies = make(map[string]*httpTunnelProxy)
+	}
+	s.httpProxies[t.ID] = p
+	s.mu.Unlock()
+	old.close()
+	return p, nil
+}
+
+func (s *Server) pruneHTTPProxies(tunnels []store.Tunnel) {
+	desired := make(map[string]store.Tunnel, len(tunnels))
+	for _, t := range tunnels {
+		if t.Enabled && t.Type == store.TunnelHTTP {
+			desired[t.ID] = t
+		}
+	}
+	var drop []*httpTunnelProxy
+	s.mu.Lock()
+	for id, p := range s.httpProxies {
+		t, ok := desired[id]
+		if !ok || p.nodeID != t.NodeID || p.local != t.Local || p.name != t.Name || p.bandwidthKB != t.BandwidthKB {
+			drop = append(drop, p)
+			delete(s.httpProxies, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, p := range drop {
+		p.close()
+	}
+}
+
+func (s *Server) dropHTTPProxiesForNode(nodeID string) {
+	var drop []*httpTunnelProxy
+	s.mu.Lock()
+	for id, p := range s.httpProxies {
+		if p.nodeID == nodeID {
+			drop = append(drop, p)
+			delete(s.httpProxies, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, p := range drop {
+		p.close()
+	}
+}
+
+func (s *Server) closeAllHTTPProxies() {
+	var drop []*httpTunnelProxy
+	s.mu.Lock()
+	for id, p := range s.httpProxies {
+		drop = append(drop, p)
+		delete(s.httpProxies, id)
+	}
+	s.mu.Unlock()
+	for _, p := range drop {
+		p.close()
+	}
+}
+
+// proxyHTTP forwards one HTTP (or WebSocket/Upgrade) exchange to the tunnel's
+// node using a pooled ReverseProxy.
+func (s *Server) proxyHTTP(w http.ResponseWriter, r *http.Request, t store.Tunnel) {
+	ctr := s.met.For(t.ID)
+	ctr.Conns.Add(1)
+	ctr.Active.Add(1)
+	defer ctr.Active.Add(-1)
+
+	p, err := s.httpProxyFor(t)
+	if err != nil {
+		ctr.Errs.Add(1)
+		http.Error(w, "nfr: tunnel node is offline", http.StatusBadGateway)
+		return
+	}
+	req := r.WithContext(context.WithValue(r.Context(), httpClientIPKey{}, clientIP(r)))
+	p.rp.ServeHTTP(w, req)
 }
 
 func clientIP(r *http.Request) string {
@@ -356,210 +555,4 @@ func peerHost(r *http.Request) string {
 func isLoopback(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
-}
-
-func (s *Server) openFor(t store.Tunnel, remote string) (net.Conn, error) {
-	return s.openStream(t.NodeID, &proto.StreamHeader{Tunnel: t.ID, Remote: remote})
-}
-
-func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, t store.Tunnel) {
-	ctr := s.met.For(t.ID)
-	lim := s.limiterFor(t)
-	ctr.Conns.Add(1)
-	stream, err := s.openFor(t, clientIP(r))
-	if err != nil {
-		ctr.Errs.Add(1)
-		http.Error(w, "nfr: tunnel node is offline", http.StatusBadGateway)
-		return
-	}
-	defer stream.Close()
-
-	out := r.Clone(r.Context())
-	out.RequestURI = ""
-	out.URL.Scheme = ""
-	out.URL.Host = ""
-	out.Header.Del("Proxy-Connection")
-	out.Header.Del("Expect")
-	if prior := out.Header.Get("X-Forwarded-For"); prior != "" {
-		out.Header.Set("X-Forwarded-For", prior+", "+clientIP(r))
-	} else {
-		out.Header.Set("X-Forwarded-For", clientIP(r))
-	}
-	out.Header.Set("X-Forwarded-Proto", schemeOf(r))
-	out.Header.Set("X-Forwarded-Host", r.Host)
-	out.Header.Set("X-Nfr-Tunnel", t.Name)
-	if lim != nil {
-		// Pace the request body (visitor -> origin) at the tunnel's up rate.
-		out.Body = &throttleReadCloser{ReadCloser: out.Body, b: lim.up}
-	}
-
-	if err := out.Write(stream); err != nil {
-		ctr.Errs.Add(1)
-		http.Error(w, "nfr: failed to forward request", http.StatusBadGateway)
-		return
-	}
-
-	br := bufio.NewReader(stream)
-	resp, err := http.ReadResponse(br, out)
-	if err != nil {
-		ctr.Errs.Add(1)
-		http.Error(w, "nfr: bad response from node", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	removeHopHeaders(resp.Header)
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	var body io.Reader = resp.Body
-	if lim != nil {
-		// Pace the response body (origin -> visitor) at the tunnel's down rate.
-		body = throttleReader{r: resp.Body, b: lim.down}
-	}
-	n, _ := io.Copy(flushWriter{w}, body)
-
-	in := r.ContentLength
-	if in < 0 {
-		in = 0
-	}
-	ctr.In.Add(in)
-	ctr.Out.Add(n)
-}
-
-// flushWriter pushes each write out immediately so streaming responses reach
-// the client without buffering the whole body.
-type flushWriter struct{ w http.ResponseWriter }
-
-func (f flushWriter) Write(p []byte) (int, error) {
-	n, err := f.w.Write(p)
-	if fl, ok := f.w.(http.Flusher); ok {
-		fl.Flush()
-	}
-	return n, err
-}
-
-// proxyUpgrade tunnels a protocol upgrade (websocket and friends) after
-// hijacking the client connection.
-func (s *Server) proxyUpgrade(w http.ResponseWriter, r *http.Request, t store.Tunnel) {
-	ctr := s.met.For(t.ID)
-	lim := s.limiterFor(t)
-	ctr.Conns.Add(1)
-	stream, err := s.openFor(t, clientIP(r))
-	if err != nil {
-		ctr.Errs.Add(1)
-		http.Error(w, "nfr: tunnel node is offline", http.StatusBadGateway)
-		return
-	}
-	defer stream.Close()
-
-	req := r.Clone(r.Context())
-	req.RequestURI = ""
-	req.URL.Scheme = ""
-	req.URL.Host = ""
-	req.Header.Set("X-Forwarded-For", clientIP(r))
-	req.Header.Set("X-Forwarded-Proto", schemeOf(r))
-	req.Header.Set("X-Forwarded-Host", r.Host)
-	if err := req.Write(stream); err != nil {
-		ctr.Errs.Add(1)
-		http.Error(w, "nfr: failed to forward upgrade", http.StatusBadGateway)
-		return
-	}
-
-	br := bufio.NewReader(stream)
-	status, err := br.ReadString('\n')
-	if err != nil {
-		ctr.Errs.Add(1)
-		http.Error(w, "nfr: bad upgrade response", http.StatusBadGateway)
-		return
-	}
-	code := 0
-	parts := strings.SplitN(strings.TrimSpace(status), " ", 3)
-	if len(parts) >= 2 {
-		code, _ = strconv.Atoi(parts[1])
-	}
-	hdrText, err := readHeaderBlock(br)
-	if err != nil {
-		ctr.Errs.Add(1)
-		http.Error(w, "nfr: bad upgrade headers", http.StatusBadGateway)
-		return
-	}
-	hdr, _ := parseHeaderBlock(hdrText)
-
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "nfr: upgrades unsupported", http.StatusInternalServerError)
-		return
-	}
-	client, rw, err := hj.Hijack()
-	if err != nil {
-		ctr.Errs.Add(1)
-		return
-	}
-	defer client.Close()
-
-	fmt.Fprintf(client, "HTTP/1.1 %d %s\r\n", code, http.StatusText(code))
-	for k, vs := range hdr {
-		for _, v := range vs {
-			fmt.Fprintf(client, "%s: %s\r\n", k, v)
-		}
-	}
-	io.WriteString(client, "\r\n")
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		var src io.Reader = io.MultiReader(br, stream)
-		if lim != nil {
-			src = throttleReader{r: src, b: lim.down}
-		}
-		n, _ := io.Copy(client, src)
-		ctr.Out.Add(n)
-		halfClose(client)
-	}()
-	go func() {
-		defer wg.Done()
-		var dst io.Writer = stream
-		if lim != nil {
-			dst = throttleWriter{w: dst, b: lim.up}
-		}
-		n, _ := io.Copy(dst, rw)
-		ctr.In.Add(n)
-		halfClose(stream)
-	}()
-	wg.Wait()
-}
-
-func readHeaderBlock(br *bufio.Reader) (string, error) {
-	var b strings.Builder
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil {
-			return b.String(), err
-		}
-		b.WriteString(line)
-		if line == "\r\n" || line == "\n" {
-			return b.String(), nil
-		}
-	}
-}
-
-func parseHeaderBlock(text string) (http.Header, error) {
-	h := make(http.Header)
-	for _, line := range strings.Split(text, "\r\n") {
-		if line == "" {
-			continue
-		}
-		i := strings.Index(line, ":")
-		if i <= 0 {
-			continue
-		}
-		k := strings.TrimSpace(line[:i])
-		v := strings.TrimSpace(line[i+1:])
-		h.Add(k, v)
-	}
-	return h, nil
 }

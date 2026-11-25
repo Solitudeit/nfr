@@ -56,6 +56,7 @@ type Server struct {
 	listeners    map[int]*portListener
 	udpListeners map[int]*net.UDPConn
 	udpSess      map[string]*udpSession
+	httpProxies  map[string]*httpTunnelProxy
 	attempts     map[string]*attempt
 	lastUsed     map[string]time.Time
 	limits       map[string]*tunnelLimit  // per tunnel bandwidth shaping
@@ -118,6 +119,7 @@ func New(opts Options) (*Server, string, error) {
 		listeners:    make(map[int]*portListener),
 		udpListeners: make(map[int]*net.UDPConn),
 		udpSess:      make(map[string]*udpSession),
+		httpProxies:  make(map[string]*httpTunnelProxy),
 		attempts:     make(map[string]*attempt),
 		lastUsed:     make(map[string]time.Time),
 		limits:       make(map[string]*tunnelLimit),
@@ -258,6 +260,7 @@ func (s *Server) shutdown() error {
 	for _, a := range agents {
 		a.close()
 	}
+	s.closeAllHTTPProxies()
 	s.closeUDPSessions()
 	if consoleSrv != nil {
 		_ = consoleSrv.Close()

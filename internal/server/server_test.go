@@ -1,13 +1,17 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1085,5 +1089,184 @@ func TestServePortExitsOnClose(t *testing.T) {
 	case <-exited:
 	case <-time.After(time.Second):
 		t.Fatal("servePort leaked goroutine after listener close")
+	}
+}
+
+func TestHTTPReverseProxyPoolingChunkedAndUpgrade(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.Domain = "example.com" })
+	addNode(t, st, "n1")
+
+	// Start a local backend supporting normal GET, chunked POST, and 101 Upgrade.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "echo") {
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "no hijack", http.StatusInternalServerError)
+				return
+			}
+			conn, rw, err := hj.Hijack()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n")
+			_ = rw.Flush()
+			line, err := rw.ReadString('\n')
+			if err == nil {
+				_, _ = rw.WriteString("ECHO:" + line)
+				_ = rw.Flush()
+			}
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("X-Seen-Host", r.Host)
+		w.Header().Set("X-Seen-Tunnel", r.Header.Get("X-Nfr-Tunnel"))
+		_, _ = fmt.Fprintf(w, "ok:%s:%d", r.URL.Path, len(body))
+	}))
+	defer backend.Close()
+	backendAddr := strings.TrimPrefix(backend.URL, "http://")
+
+	tun, err := s.CreateTunnel(api.TunnelRequest{
+		Name: "app", NodeID: "n1", Type: "http", Local: backendAddr,
+	})
+	if err != nil {
+		t.Fatalf("create http tunnel: %v", err)
+	}
+
+	// Wire a real yamux session between server and a minimal inline agent.
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+	srvSess, err := yamux.Server(c1, yamuxConfig())
+	if err != nil {
+		t.Fatalf("yamux server: %v", err)
+	}
+	defer srvSess.Close()
+	cliSess, err := yamux.Client(c2, yamuxConfig())
+	if err != nil {
+		t.Fatalf("yamux client: %v", err)
+	}
+	defer cliSess.Close()
+
+	var streams atomic.Int32
+	go func() {
+		for {
+			stream, err := cliSess.Accept()
+			if err != nil {
+				return
+			}
+			streams.Add(1)
+			go func(st net.Conn) {
+				defer st.Close()
+				if _, err := proto.ReadStreamHeader(st); err != nil {
+					return
+				}
+				up, err := net.Dial("tcp", backendAddr)
+				if err != nil {
+					return
+				}
+				defer up.Close()
+				go func() {
+					_, _ = io.Copy(up, st)
+					halfClose(up)
+				}()
+				_, _ = io.Copy(st, up)
+				halfClose(st)
+			}(stream)
+		}
+	}()
+
+	a := &agentSession{nodeID: "n1", sess: srvSess, send: make(chan *proto.Frame, 8), done: make(chan struct{})}
+	s.setSession("n1", a)
+	defer s.dropSession("n1", a)
+
+	// Mark target down first; a successful HTTP response must clear it.
+	s.markTargetDown("n1", tun.ID, "refused", time.Now().Unix())
+	if got := mustTunnel(t, s, tun.ID); !got.TargetDown {
+		t.Fatal("expected TargetDown before HTTP recovery")
+	}
+
+	ingressSrv := httptest.NewServer(http.HandlerFunc(s.serveIngress))
+	defer ingressSrv.Close()
+
+	// 1. Two sequential GETs should reuse the pooled yamux stream.
+	client := ingressSrv.Client()
+	for i := 0; i < 2; i++ {
+		req, _ := http.NewRequest(http.MethodGet, ingressSrv.URL+"/ping", nil)
+		req.Host = "app.example.com"
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("get %d: %v", i, err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || string(b) != "ok:/ping:0" {
+			t.Fatalf("get %d: status=%d body=%q", i, resp.StatusCode, b)
+		}
+		if resp.Header.Get("X-Seen-Host") != "app.example.com" {
+			t.Fatalf("host not preserved: %q", resp.Header.Get("X-Seen-Host"))
+		}
+		if resp.Header.Get("X-Seen-Tunnel") != "app" {
+			t.Fatalf("X-Nfr-Tunnel = %q", resp.Header.Get("X-Seen-Tunnel"))
+		}
+	}
+	if n := streams.Load(); n != 1 {
+		t.Fatalf("expected connection pooling to reuse 1 yamux stream, opened %d", n)
+	}
+	if got := mustTunnel(t, s, tun.ID); got.TargetDown {
+		t.Fatal("successful HTTP response did not clear TargetDown")
+	}
+
+	// 2. Chunked POST (ContentLength = -1) must still count inbound bytes.
+	beforeIn := s.met.For(tun.ID).In.Load()
+	payload := bytes.Repeat([]byte("chunked-data-"), 512)
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write(payload)
+		_ = pw.Close()
+	}()
+	postReq, _ := http.NewRequest(http.MethodPost, ingressSrv.URL+"/upload", pr)
+	postReq.Host = "app.example.com"
+	postReq.ContentLength = -1
+	resp, err := client.Do(postReq)
+	if err != nil {
+		t.Fatalf("chunked post: %v", err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || string(b) != fmt.Sprintf("ok:/upload:%d", len(payload)) {
+		t.Fatalf("chunked post: status=%d body=%q", resp.StatusCode, b)
+	}
+	afterIn := s.met.For(tun.ID).In.Load()
+	if delta := afterIn - beforeIn; delta < int64(len(payload)) {
+		t.Fatalf("chunked inbound bytes not counted: delta=%d want>=%d", delta, len(payload))
+	}
+
+	// 3. Protocol upgrade (101 Switching Protocols) must proxy bidirectionally.
+	raw, err := net.DialTimeout("tcp", strings.TrimPrefix(ingressSrv.URL, "http://"), 3*time.Second)
+	if err != nil {
+		t.Fatalf("dial ingress: %v", err)
+	}
+	defer raw.Close()
+	_ = raw.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = io.WriteString(raw, "GET /ws HTTP/1.1\r\nHost: app.example.com\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n")
+	br := bufio.NewReader(raw)
+	statusLine, err := br.ReadString('\n')
+	if err != nil || !strings.Contains(statusLine, "101") {
+		t.Fatalf("upgrade status = %q err=%v", statusLine, err)
+	}
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("upgrade header: %v", err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	_, _ = io.WriteString(raw, "hello-ws\n")
+	reply, err := br.ReadString('\n')
+	if err != nil || reply != "ECHO:hello-ws\n" {
+		t.Fatalf("upgrade echo = %q err=%v", reply, err)
 	}
 }
