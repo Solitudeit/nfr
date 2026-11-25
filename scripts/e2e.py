@@ -270,8 +270,14 @@ def main():
             print("server never listened")
             return 1
 
-        text = open(os.path.join(tmp, "server.log"), errors="replace").read()
-        m = re.search(r"密码\s+(\S+)", text)
+        m = None
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            text = open(os.path.join(tmp, "server.log"), errors="replace").read()
+            m = re.search(r"密码\s+(\S+)", text)
+            if m:
+                break
+            time.sleep(0.1)
         if not m:
             print("could not find the first-run password in the banner")
             return 1

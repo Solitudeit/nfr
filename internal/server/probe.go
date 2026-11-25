@@ -243,6 +243,9 @@ func (s *Server) executeProbe(ctx context.Context, a *agentSession, t store.Tunn
 	select {
 	case rep := <-resCh:
 		rttMs := time.Since(start).Milliseconds()
+		if rttMs < 1 {
+			rttMs = 1
+		}
 		switch rep.status {
 		case proto.ProbeOK:
 			s.clearTargetDown(t.ID)

@@ -177,8 +177,14 @@ def start_server(nfrs, tmp, name):
     proc = subprocess.Popen([nfrs, "--foreground", "-c", cfg], stdout=log, stderr=subprocess.STDOUT)
     if not wait_port(control):
         raise RuntimeError("server " + name + " never listened on " + str(control))
-    text = open(os.path.join(base, "server.log"), errors="replace").read()
-    m = re.search(r"密码\s+(\S+)", text)
+    m = None
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        text = open(os.path.join(base, "server.log"), errors="replace").read()
+        m = re.search(r"密码\s+(\S+)", text)
+        if m:
+            break
+        time.sleep(0.1)
     if not m:
         raise RuntimeError("no first-run password for " + name)
     return proc, control, ingress, m.group(1)
