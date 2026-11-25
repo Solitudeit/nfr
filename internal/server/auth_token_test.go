@@ -108,7 +108,44 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 		})
 	}
 
-	// Connect agent #1 with auth_token (zero join codes!).
+	// First, verify a client declaring an unregistered proxy ("echo-tcp") is
+	// STRICTLY REJECTED and creates ZERO nodes and ZERO tunnels on the server.
+	rejectCtx, rejectCancel := context.WithTimeout(ctx, 4*time.Second)
+	defer rejectCancel()
+	agReject := agent.New(agent.Options{
+		Addr:      target.Addr,
+		AuthToken: target.AuthToken,
+		Name:      target.Name,
+		Proxies:   specs,
+		Logger:    log.New("error", ""),
+	})
+	rejectDone := make(chan struct{})
+	go func() {
+		agReject.Run(rejectCtx)
+		close(rejectDone)
+	}()
+	select {
+	case <-rejectDone:
+	case <-time.After(4 * time.Second):
+		t.Fatal("agent declaring unregistered tunnel did not stop on server rejection")
+	}
+	if len(srv.Tunnels()) != 0 || len(srv.Nodes()) != 0 {
+		t.Fatalf("unregistered client proxy created state on server: nodes=%+v tunnels=%+v", srv.Nodes(), srv.Tunnels())
+	}
+
+	// Now create the tunnel in the panel first (panel is the single source of truth).
+	en := true
+	if _, err := srv.CreateStandaloneTunnel(api.TunnelRequest{
+		Name:       "echo-tcp",
+		Type:       "tcp",
+		Local:      echoLn.Addr().String(),
+		RemotePort: pubPort,
+		Enabled:    &en,
+	}); err != nil {
+		t.Fatalf("CreateStandaloneTunnel: %v", err)
+	}
+
+	// Connect agent #1 with auth_token -> claims the existing panel tunnel!
 	a1Ctx, a1Cancel := context.WithCancel(ctx)
 	ag1 := agent.New(agent.Options{
 		Addr:      target.Addr,
@@ -124,7 +161,7 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 	for time.Now().Before(deadline) {
 		nodes := srv.Nodes()
 		tunnels := srv.Tunnels()
-		if len(nodes) == 1 && nodes[0].Online && len(tunnels) == 1 && tunnels[0].Name == "echo-tcp" {
+		if len(nodes) == 1 && nodes[0].Online && len(tunnels) == 1 && tunnels[0].Name == "echo-tcp" && tunnels[0].Online {
 			break
 		}
 		time.Sleep(30 * time.Millisecond)
@@ -133,7 +170,7 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 		t.Fatalf("expected 1 online node nas-box, got %+v", nodes)
 	}
 
-	// Verify real TCP traffic flows end-to-end through the declared proxy.
+	// Verify real TCP traffic flows end-to-end through the panel tunnel.
 	waitListen(t, "127.0.0.1:"+itoa(pubPort))
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+itoa(pubPort), 2*time.Second)
 	if err != nil {
@@ -181,12 +218,7 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 		t.Fatalf("reconnect duplicated or failed to reuse node: %+v (want id %s)", nodes, firstID)
 	}
 
-	// Create a manual tunnel on the same node (ManagedByConfig=false), then
-	// reconnect with an EMPTY proxies list -> config-managed "echo-tcp" must be
-	// pruned while the manual tunnel MUST survive untouched!
-	if _, err := srv.CreateTunnel(apiTunnelReq("manual-web", firstID, echoLn.Addr().String())); err != nil {
-		t.Fatalf("CreateTunnel manual: %v", err)
-	}
+	// Reconnecting with empty proxies list MUST keep all panel-owned tunnels intact.
 	a2Cancel()
 	time.Sleep(150 * time.Millisecond)
 
@@ -196,22 +228,22 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 		Addr:      target.Addr,
 		AuthToken: target.AuthToken,
 		Name:      target.Name,
-		Proxies:   nil, // removed all declarative proxies
+		Proxies:   nil,
 		Logger:    log.New("error", ""),
 	})
 	go ag3.Run(a3Ctx)
 
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		tunnels := srv.Tunnels()
-		if len(tunnels) == 1 && tunnels[0].Name == "manual-web" {
+		nodes := srv.Nodes()
+		if len(nodes) == 1 && nodes[0].Online {
 			break
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
 	tunnels := srv.Tunnels()
-	if len(tunnels) != 1 || tunnels[0].Name != "manual-web" {
-		t.Fatalf("expected only manual-web after pruning config proxies, got %+v", tunnels)
+	if len(tunnels) != 1 || tunnels[0].Name != "echo-tcp" {
+		t.Fatalf("panel tunnel should remain intact across empty-proxy reconnect, got %+v", tunnels)
 	}
 }
 

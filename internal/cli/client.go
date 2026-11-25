@@ -152,7 +152,7 @@ func cmdAgent(args []string) {
 	if cfgLabel == "" || cfgLabel == "." {
 		cfgLabel = *cfgPath
 	}
-	lg.Info(fmt.Sprintf("开始启动 NFR 客户端, 当前正在使用配置文件 [%s]", cfgLabel))
+	lg.Info(fmt.Sprintf("启动 NFR 客户端\n配置: %s", cfgLabel))
 	runAgentsWithReload(*cfgPath, cfg, lg)
 }
 

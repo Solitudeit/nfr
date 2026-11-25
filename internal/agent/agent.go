@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,9 +87,14 @@ func (a *Agent) Local(tunnelID string) (string, bool) {
 	return v.local, true
 }
 
-var errKicked = errors.New("kicked by server")
+var (
+	errKicked   = errors.New("kicked by server")
+	errRejected = errors.New("rejected by server")
+)
 
-// Run dials the server until the context is cancelled or the server sends a kick frame.
+// Run dials the server until the context is cancelled, the server sends a kick
+// frame, or the server permanently rejects the connection (e.g. unregistered or
+// deleted tunnel).
 func (a *Agent) Run(ctx context.Context) {
 	backoff := time.Second
 	for {
@@ -105,16 +111,21 @@ func (a *Agent) Run(ctx context.Context) {
 			nid := a.nodeID
 			a.mu.Unlock()
 			if nid != "" {
-				a.lg.Info(fmt.Sprintf("[%s] 收到服务端强制下线指令, 客户端已停止", nid))
+				a.lg.Info(fmt.Sprintf("收到强制下线指令, 客户端已停止\nRunId: %s", nid))
 			} else {
-				a.lg.Info("收到服务端强制下线指令, 客户端已停止")
+				a.lg.Info("收到强制下线指令, 客户端已停止")
 			}
+			return
+		}
+		if errors.Is(err, errRejected) {
+			reason := strings.TrimPrefix(err.Error(), errRejected.Error()+": ")
+			a.lg.Error(fmt.Sprintf("启动失败, 客户端已停止\n原因: %s", reason))
 			return
 		}
 		if time.Since(start) > 20*time.Second {
 			backoff = time.Second
 		}
-		a.lg.Warn(fmt.Sprintf("连接断开 (%v), %s 后重试...", err, backoff))
+		a.lg.Warn(fmt.Sprintf("连接断开, %s 后重连...\n原因: %v", backoff, err))
 		select {
 		case <-ctx.Done():
 			return
@@ -142,7 +153,7 @@ func (a *Agent) session(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bad server address %q: %w", a.opt.Addr, err)
 	}
-	a.lg.Info(fmt.Sprintf("尝试连接到节点 [%s]...", a.opt.Addr))
+	a.lg.Info(fmt.Sprintf("连接节点\n地址: %s", a.opt.Addr))
 	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 	raw, err := dialer.DialContext(ctx, "tcp", a.opt.Addr)
 	if err != nil {
@@ -163,10 +174,10 @@ func (a *Agent) session(ctx context.Context) error {
 	if !a.opt.CA {
 		pin := transport.PinOf(tc.ConnectionState())
 		if a.opt.Pin == "" {
-			a.lg.Info("trusting server certificate", "server", a.opt.Addr, "pin", transport.FormatPin(pin))
+			a.lg.Debug(fmt.Sprintf("首次信任证书指纹: %s", transport.FormatPin(pin)))
 		} else if transport.FormatPin(pin) != transport.FormatPin(a.opt.Pin) {
 			raw.Close()
-			return errors.New("server certificate fingerprint changed, refusing to connect")
+			return errors.New("服务端证书指纹已变更，拒绝连接")
 		}
 	}
 
@@ -213,7 +224,7 @@ func (a *Agent) session(ctx context.Context) error {
 		return err
 	}
 	if f.Type == proto.TypeError {
-		return fmt.Errorf("server rejected the connection: %s", f.Message)
+		return fmt.Errorf("%w: %s", errRejected, f.Message)
 	}
 	if f.Type != proto.TypeChallenge {
 		return fmt.Errorf("unexpected frame %q during handshake", f.Type)
@@ -227,13 +238,13 @@ func (a *Agent) session(ctx context.Context) error {
 		return err
 	}
 	if f.Type == proto.TypeError {
-		return fmt.Errorf("server rejected the token: %s", f.Message)
+		return fmt.Errorf("%w: %s", errRejected, f.Message)
 	}
 	if f.Type != proto.TypeWelcome {
 		return fmt.Errorf("unexpected frame %q after auth", f.Type)
 	}
 	_ = ctrl.SetReadDeadline(time.Time{})
-	a.lg.Info(fmt.Sprintf("[%s] 登录节点成功, RunId: [%s]", f.NodeID, f.NodeID))
+	a.lg.Info(fmt.Sprintf("登录节点成功\nRunId: %s", f.NodeID))
 
 	a.mu.Lock()
 	a.nodeID = f.NodeID
@@ -335,26 +346,22 @@ func (a *Agent) applyConfig(f *proto.Frame) {
 	}
 	a.mu.Lock()
 	old := a.routes
-	runID := a.nodeID
 	a.routes = next
 	a.mu.Unlock()
-	if runID == "" {
-		runID = f.NodeID
-	}
 	for _, t := range f.Tunnels {
 		if _, existed := old[t.ID]; !existed {
 			tag := t.ID + "." + t.Name
-			a.lg.Info(fmt.Sprintf("[%s] 隧道 [%s] 登记成功", runID, tag))
+			a.lg.Info(fmt.Sprintf("隧道登记成功\n隧道: %s", tag))
 			if t.PublicAddr != "" {
-				a.lg.Info(fmt.Sprintf("[%s] 启动 [%s] 隧道 [%s] 成功, 您可以使用 [%s] 访问您的服务", runID, t.Type, tag, t.PublicAddr))
+				a.lg.Info(fmt.Sprintf("启动 [%s] 隧道成功\n公网: %s\n本地: %s", t.Type, t.PublicAddr, t.Local))
 			} else {
-				a.lg.Info(fmt.Sprintf("[%s] 启动 [%s] 隧道 [%s] 成功, 本地目标 [%s]", runID, t.Type, tag, t.Local))
+				a.lg.Info(fmt.Sprintf("启动 [%s] 隧道成功\n本地: %s", t.Type, t.Local))
 			}
 		}
 	}
 	for id := range old {
 		if _, ok := next[id]; !ok {
-			a.lg.Info(fmt.Sprintf("[%s] 隧道 [%s] 已停止", runID, id))
+			a.lg.Info(fmt.Sprintf("隧道已停止\n隧道: %s", id))
 		}
 	}
 }

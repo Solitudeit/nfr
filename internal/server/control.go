@@ -329,23 +329,54 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		created := false
 		claimedChanged := false
 		if err := s.st.Update(func(st *store.State) error {
-			// Per-tunnel generated configs connect with name "t-<tunnel_id>".
-			// Check existence, upsert node, and claim tunnel atomically inside
-			// one store transaction so a concurrent delete never leaves an
-			// orphan node or resurrects a deleted tunnel.
+			// Panel-only tunnel authority: clients may NEVER create a tunnel
+			// that does not already exist in the server panel. Validate all
+			// requested tunnels BEFORE upserting the node so rejected configs
+			// never leave orphan nodes or ghost tunnels.
+			existingNode, hasNode := st.NodeByName(name)
+			var candidateNodeID string
+			if hasNode {
+				candidateNodeID = existingNode.ID
+			}
+
 			var targetTun *store.Tunnel
+			var matchedProxies []*store.Tunnel
 			if isPerTunnel {
 				t, ok := st.TunnelByID(perTunnelID)
 				if !ok {
-					return errNotFound("tunnel deleted or not found")
+					return errNotFound("隧道不存在或已被删除，请先在服务端面板创建隧道")
 				}
 				targetTun = t
+			} else if len(hello.Proxies) > 0 {
+				for _, p := range hello.Proxies {
+					pname := strings.TrimSpace(p.Name)
+					if pname == "" {
+						return errBad("name", "客户端配置中存在空隧道名称")
+					}
+					var match *store.Tunnel
+					for i := range st.Tunnels {
+						t := &st.Tunnels[i]
+						if !strings.EqualFold(t.Name, pname) {
+							continue
+						}
+						if t.NodeID == "" || (candidateNodeID != "" && t.NodeID == candidateNodeID) {
+							match = t
+							break
+						}
+						return errConflict("name_conflict", fmt.Sprintf("隧道 [%s] 已绑定到其他客户端节点，拒绝抢占", pname))
+					}
+					if match == nil {
+						return errNotFound(fmt.Sprintf("隧道 [%s] 未在服务端面板创建，禁止客户端私自创建隧道，请先在面板创建后再启动", pname))
+					}
+					matchedProxies = append(matchedProxies, match)
+				}
 			}
-			if existing, ok := st.NodeByName(name); ok {
-				existing.OS, existing.Arch, existing.Version = hello.OS, hello.Arch, hello.Version
-				existing.LastSeen = &now
-				existing.LastRemote = ip
-				node = *existing
+
+			if hasNode {
+				existingNode.OS, existingNode.Arch, existingNode.Version = hello.OS, hello.Arch, hello.Version
+				existingNode.LastSeen = &now
+				existingNode.LastRemote = ip
+				node = *existingNode
 			} else {
 				node = store.Node{
 					ID:         store.NewID(),
@@ -366,6 +397,14 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 				targetTun.ManagedByConfig = false
 				targetTun.UpdatedAt = now
 				claimedChanged = true
+			}
+			for _, t := range matchedProxies {
+				if t.NodeID != node.ID || t.ManagedByConfig {
+					t.NodeID = node.ID
+					t.ManagedByConfig = false
+					t.UpdatedAt = now
+					claimedChanged = true
+				}
 			}
 			return nil
 		}); err != nil {
@@ -414,12 +453,13 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		_ = ctrl.SetReadDeadline(time.Time{})
 	}
 
-	// Per-tunnel panel configs ("t-<id>") already claimed their tunnel atomically
-	// above; regular client configs use declarative sync.
-	if !(usingSharedToken && strings.HasPrefix(node.Name, "t-")) && (hello.SyncProxies || len(hello.Proxies) > 0) {
-		if err := s.syncDeclarativeProxies(node.ID, hello.Proxies, hello.SyncProxies); err != nil {
-			s.lg.Warn("sync client proxies failed", "node", node.Name, "err", err)
-			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "proxy config error: " + err.Error()})
+	// Shared-token configs already validated and claimed their panel-owned
+	// tunnels atomically above; legacy per-node configs with declared proxies
+	// still pass through strict panel-only binding below.
+	if !usingSharedToken && len(hello.Proxies) > 0 {
+		if err := s.syncDeclarativeProxies(node.ID, hello.Proxies, false); err != nil {
+			s.lg.Warn("bind client proxies failed", "node", node.Name, "err", err)
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: err.Error()})
 			sess.Close()
 			return
 		}
@@ -683,148 +723,53 @@ func (s *Server) openStream(nodeID string, h *proto.StreamHeader) (net.Conn, err
 	return st, nil
 }
 
-// syncDeclarativeProxies reconciles tunnels declared in a client's TOML/YAML
-// config file onto nodeID. Existing tunnels with the same name are updated in
-// place; missing ones are created and tagged ManagedByConfig=true. When prune
-// is true, previously config-managed tunnels on nodeID that were removed from
-// the client's proxies list are cleaned up without ever touching tunnels
-// created manually through the web console or API.
-func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec, prune bool) error {
-	now := time.Now().UTC()
-	wanted := make(map[string]bool, len(proxies))
-	for _, p := range proxies {
-		wanted[strings.ToLower(strings.TrimSpace(p.Name))] = true
+// syncDeclarativeProxies strictly binds client-declared proxies to EXISTING
+// panel-created tunnels only. Clients are strictly prohibited from creating new
+// tunnels or hijacking tunnels bound to other nodes; panel settings (Local,
+// RemotePort, Hosts, Enabled, QuotaPaused, QuotaMB, BandwidthKB) always remain
+// authoritative.
+func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec, _ bool) error {
+	if len(proxies) == 0 {
+		return nil
 	}
-	var removedIDs []string
+	now := time.Now().UTC()
 	changed, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
 		mutated := false
 		for _, p := range proxies {
 			name := strings.TrimSpace(p.Name)
-			typ := strings.ToLower(strings.TrimSpace(p.Type))
-			if typ == "" {
-				typ = store.TunnelTCP
+			if name == "" {
+				return false, errBad("name", "客户端配置中存在空隧道名称")
 			}
 			var existing *store.Tunnel
 			for i := range st.Tunnels {
-				if (st.Tunnels[i].NodeID == nodeID || st.Tunnels[i].NodeID == "") && strings.EqualFold(st.Tunnels[i].Name, name) {
-					existing = &st.Tunnels[i]
+				t := &st.Tunnels[i]
+				if !strings.EqualFold(t.Name, name) {
+					continue
+				}
+				if t.NodeID == nodeID || t.NodeID == "" {
+					existing = t
 					break
 				}
+				return false, errConflict("name_conflict", fmt.Sprintf("隧道 [%s] 已绑定到其他客户端节点，拒绝抢占", name))
 			}
-			// If an unbound panel-created standalone tunnel matches by name,
-			// claim it in place while keeping panel ownership (ManagedByConfig=false).
-			if existing != nil && existing.NodeID == "" && !existing.ManagedByConfig {
+			if existing == nil {
+				return false, errNotFound(fmt.Sprintf("隧道 [%s] 未在服务端面板创建，禁止客户端私自创建隧道，请先在面板创建后再启动", name))
+			}
+			if existing.NodeID != nodeID || existing.ManagedByConfig {
 				existing.NodeID = nodeID
+				existing.ManagedByConfig = false
 				existing.UpdatedAt = now
 				mutated = true
-				continue
 			}
-			// If an HTTP proxy has no hosts, no remote_port, and server has no
-			// domain configured, auto-assign a free public port so IP-only VPS
-			// deployments work out of the box.
-			port := p.RemotePort
-			if typ == store.TunnelHTTP && port == 0 && len(p.Hosts) == 0 && st.Settings.Domain == "" {
-				if existing != nil && existing.RemotePort > 0 {
-					port = existing.RemotePort
-				} else {
-					picked, perr := pickPort(st, "", "tcp")
-					if perr != nil {
-						return false, perr
-					}
-					port = picked
-				}
-			}
-			en := true
-			clearQuotaPause := false
-			if existing != nil {
-				en = existing.Enabled
-				if existing.QuotaPaused {
-					if p.QuotaMB == 0 || existing.UsedBytes <= p.QuotaMB<<20 {
-						en = true
-						clearQuotaPause = true
-					} else {
-						en = false
-					}
-				}
-			}
-			bw := p.BandwidthKB
-			quota := p.QuotaMB
-			req := api.TunnelRequest{
-				Name:        name,
-				NodeID:      nodeID,
-				Type:        typ,
-				Local:       p.Local,
-				RemotePort:  port,
-				Hosts:       p.Hosts,
-				Enabled:     &en,
-				BandwidthKB: &bw,
-				QuotaMB:     &quota,
-			}
-			built, err := buildTunnel(st, req, existing, st.Settings.Domain, false)
-			if err != nil {
-				return false, fmt.Errorf("proxy %q: %w", name, err)
-			}
-			if existing != nil {
-				if existing.NodeID == built.NodeID &&
-					existing.Type == built.Type &&
-					existing.Local == built.Local &&
-					existing.RemotePort == built.RemotePort &&
-					strings.Join(existing.Hosts, ",") == strings.Join(built.Hosts, ",") &&
-					existing.Enabled == built.Enabled &&
-					existing.BandwidthKB == built.BandwidthKB &&
-					existing.QuotaMB == built.QuotaMB &&
-					!clearQuotaPause &&
-					existing.ManagedByConfig {
-					continue
-				}
-				existing.NodeID = built.NodeID
-				existing.Type = built.Type
-				existing.Local = built.Local
-				existing.RemotePort = built.RemotePort
-				existing.Hosts = built.Hosts
-				existing.Enabled = built.Enabled
-				if clearQuotaPause {
-					existing.QuotaPaused = false
-				}
-				existing.BandwidthKB = built.BandwidthKB
-				existing.QuotaMB = built.QuotaMB
-				existing.ManagedByConfig = true
-				existing.UpdatedAt = now
-				mutated = true
-			} else {
-				built.ID = store.NewID()
-				built.ManagedByConfig = true
-				built.CreatedAt = now
-				built.UpdatedAt = now
-				st.Tunnels = append(st.Tunnels, *built)
-				mutated = true
-			}
-		}
-		if prune {
-			kept := st.Tunnels[:0]
-			for _, t := range st.Tunnels {
-				if t.NodeID == nodeID && t.ManagedByConfig && !wanted[strings.ToLower(t.Name)] {
-					removedIDs = append(removedIDs, t.ID)
-					mutated = true
-					continue
-				}
-				kept = append(kept, t)
-			}
-			st.Tunnels = kept
 		}
 		return mutated, nil
 	})
 	if err != nil {
 		return err
 	}
-	for _, id := range removedIDs {
-		s.clearTargetDown(id)
-		s.met.Drop(id)
-		s.dropLimit(id)
-	}
 	if changed {
 		s.reconcile()
-		s.notify(fmt.Sprintf("synced %d config proxy(ies) for node %s", len(proxies), nodeID))
+		s.notify(fmt.Sprintf("bound %d panel tunnel(s) for node %s", len(proxies), nodeID))
 	}
 	return nil
 }

@@ -364,3 +364,39 @@ func TestStandaloneTunnelClaimedByCustomNodeName(t *testing.T) {
 		t.Fatalf("expected 1 tunnel (claimed in place), got %d", len(srv.Tunnels()))
 	}
 }
+
+func TestClientCannotCreateUnregisteredTunnel(t *testing.T) {
+	srv, ctlAddr, cancel := newStandaloneTestServer(t)
+	defer cancel()
+
+	// Simulate an old client config (name="my-device", proxy="ssh") connecting
+	// to a server that has NO "ssh" tunnel in the panel.
+	aCtx, aCancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer aCancel()
+	ag := agent.New(agent.Options{
+		Addr:      ctlAddr,
+		AuthToken: srv.AuthToken(),
+		Name:      "my-device",
+		Pin:       srv.Pin(),
+		Proxies:   []proto.ProxySpec{{Name: "ssh", Type: "tcp", Local: "127.0.0.1:22", RemotePort: 20022}},
+		Logger:    log.New("error", ""),
+	})
+	done := make(chan struct{})
+	go func() {
+		ag.Run(aCtx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent with unregistered tunnel did not stop cleanly on rejection")
+	}
+
+	if len(srv.Tunnels()) != 0 {
+		t.Fatalf("client created ghost tunnel(s) not present in panel: %+v", srv.Tunnels())
+	}
+	if len(srv.Nodes()) != 0 {
+		t.Fatalf("rejected client left orphan node(s) on server: %+v", srv.Nodes())
+	}
+}

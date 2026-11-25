@@ -43,17 +43,46 @@ func New(level, path string) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: lv}))
 }
 
-// NewClient builds a human-readable logger for nfrc using the format:
+// NewClient builds a human-readable, mobile-friendly logger for nfrc using the
+// compact format:
 //
-//	2026-11-25 14:36:06.821 [I] message
+//	01:12:36 [I] message
+//
+// Terminal output renders in crisp ANSI blue (info), yellow (warn), and red
+// (error), while optional log files always receive clean plain text without
+// escape codes.
 func NewClient(level, path string) *slog.Logger {
-	return NewClientWriter(level, openLogWriter(path))
+	var fileW io.Writer
+	if path != "" {
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+			fileW = f
+		}
+	}
+	return slog.New(&clientHandler{
+		w:     os.Stderr,
+		fileW: fileW,
+		color: initConsoleColor(),
+		level: parseLevel(level),
+		mu:    &sync.Mutex{},
+	})
 }
 
-// NewClientWriter builds a client-formatted logger writing to w.
+// NewClientWriter builds a plain (uncolored) client-formatted logger writing to w.
 func NewClientWriter(level string, w io.Writer) *slog.Logger {
 	return slog.New(&clientHandler{
 		w:     w,
+		color: false,
+		level: parseLevel(level),
+		mu:    &sync.Mutex{},
+	})
+}
+
+// NewClientColorWriter builds a client-formatted logger writing to w with
+// explicit ANSI color control (useful for tests and forced-color terminals).
+func NewClientColorWriter(level string, w io.Writer, color bool) *slog.Logger {
+	return slog.New(&clientHandler{
+		w:     w,
+		color: color,
 		level: parseLevel(level),
 		mu:    &sync.Mutex{},
 	})
@@ -61,6 +90,8 @@ func NewClientWriter(level string, w io.Writer) *slog.Logger {
 
 type clientHandler struct {
 	w     io.Writer
+	fileW io.Writer
+	color bool
 	level slog.Level
 	mu    *sync.Mutex
 	attrs []slog.Attr
@@ -70,32 +101,52 @@ func (h *clientHandler) Enabled(_ context.Context, lv slog.Level) bool {
 	return lv >= h.level
 }
 
+const (
+	ansiReset = "\x1b[0m"
+	ansiBlue  = "\x1b[94m"
+	ansiWarn  = "\x1b[33m"
+	ansiErr   = "\x1b[91m"
+	ansiDebug = "\x1b[90m"
+)
+
 func (h *clientHandler) Handle(_ context.Context, r slog.Record) error {
 	tag := "I"
+	clr := ansiBlue
 	switch {
 	case r.Level >= slog.LevelError:
 		tag = "E"
+		clr = ansiErr
 	case r.Level >= slog.LevelWarn:
 		tag = "W"
+		clr = ansiWarn
 	case r.Level < slog.LevelInfo:
 		tag = "D"
+		clr = ansiDebug
 	}
 
-	var b strings.Builder
-	b.WriteString(r.Time.Format("2006-01-02 15:04:05.000"))
-	b.WriteString(" [")
-	b.WriteString(tag)
-	b.WriteString("] ")
-	b.WriteString(r.Message)
+	prefix := r.Time.Format("15:04:05") + " [" + tag + "] "
+	const indent = "  "
+
+	var plain strings.Builder
+	lines := strings.Split(r.Message, "\n")
+	for i, line := range lines {
+		if i == 0 {
+			plain.WriteString(prefix)
+		} else {
+			plain.WriteString("\n")
+			plain.WriteString(indent)
+		}
+		plain.WriteString(line)
+	}
 
 	writeAttr := func(a slog.Attr) {
 		if a.Equal(slog.Attr{}) {
 			return
 		}
-		b.WriteByte(' ')
-		b.WriteString(a.Key)
-		b.WriteByte('=')
-		b.WriteString(fmt.Sprint(a.Value.Any()))
+		plain.WriteByte(' ')
+		plain.WriteString(a.Key)
+		plain.WriteByte('=')
+		plain.WriteString(fmt.Sprint(a.Value.Any()))
 	}
 	for _, a := range h.attrs {
 		writeAttr(a)
@@ -104,11 +155,29 @@ func (h *clientHandler) Handle(_ context.Context, r slog.Record) error {
 		writeAttr(a)
 		return true
 	})
-	b.WriteByte('\n')
+	plain.WriteByte('\n')
+	plainStr := plain.String()
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	_, err := io.WriteString(h.w, b.String())
+	if h.fileW != nil {
+		_, _ = io.WriteString(h.fileW, plainStr)
+	}
+	if h.color {
+		// Color each line individually so wrapped mobile lines stay cleanly tinted
+		// and terminal state always resets before the newline.
+		var colored strings.Builder
+		rawLines := strings.Split(strings.TrimSuffix(plainStr, "\n"), "\n")
+		for _, ln := range rawLines {
+			colored.WriteString(clr)
+			colored.WriteString(ln)
+			colored.WriteString(ansiReset)
+			colored.WriteByte('\n')
+		}
+		_, err := io.WriteString(h.w, colored.String())
+		return err
+	}
+	_, err := io.WriteString(h.w, plainStr)
 	return err
 }
 
@@ -118,6 +187,8 @@ func (h *clientHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	merged = append(merged, attrs...)
 	return &clientHandler{
 		w:     h.w,
+		fileW: h.fileW,
+		color: h.color,
 		level: h.level,
 		mu:    h.mu,
 		attrs: merged,

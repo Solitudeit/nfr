@@ -31,10 +31,22 @@ jobs:
           cache: true
       - name: Build release archives
         run: python3 scripts/package.py --version "${GITHUB_REF_NAME}" --out dist
+      - name: Check custom release notes
+        id: notes
+        run: |
+          if [ -f ".github/release-notes/${GITHUB_REF_NAME}.md" ]; then
+            echo "path=.github/release-notes/${GITHUB_REF_NAME}.md" >> "$GITHUB_OUTPUT"
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: ${{ steps.notes.outputs.path }}
+          generate_release_notes: ${{ steps.notes.outputs.generate }}
           files: |
             dist/nfr_*.tar.gz
             dist/nfr_*.zip
@@ -44,7 +56,6 @@ jobs:
             scripts/install.sh
             deploy/systemd/nfr-server.service
             deploy/systemd/nfr-agent.service
-          generate_release_notes: true
       - name: Mark previous releases as pre-release
         if: contains(github.ref_name, '-')
         env:

@@ -43,15 +43,30 @@ func TestSyncDeclarativeProxiesDoesNotHijackOtherNode(t *testing.T) {
 			store.Node{ID: "nodeA", Name: "alpha"},
 			store.Node{ID: "nodeB", Name: "beta"},
 		)
+		st.Tunnels = append(st.Tunnels, store.Tunnel{
+			ID: "t-ssh", Name: "ssh", NodeID: "", Type: store.TunnelTCP,
+			Local: "127.0.0.1:22", RemotePort: 25022, Enabled: true,
+		})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 
+	// Unregistered proxy MUST be rejected and NEVER create a tunnel.
+	if err := srv.syncDeclarativeProxies("nodeA", []proto.ProxySpec{
+		{Name: "ghost-tunnel", Type: "tcp", Local: "127.0.0.1:9999"},
+	}, true); err == nil {
+		t.Fatal("expected error when client declares tunnel not present in server panel")
+	}
+	if len(srv.Tunnels()) != 1 {
+		t.Fatalf("ghost tunnel was created: %+v", srv.Tunnels())
+	}
+
+	// Node A binds to existing panel tunnel "ssh".
 	if err := srv.syncDeclarativeProxies("nodeA", []proto.ProxySpec{
 		{Name: "ssh", Type: "tcp", Local: "127.0.0.1:22"},
 	}, true); err != nil {
-		t.Fatalf("nodeA sync failed: %v", err)
+		t.Fatalf("nodeA bind failed: %v", err)
 	}
 
 	// Node B declaring the same proxy name MUST fail with a name conflict
@@ -73,46 +88,25 @@ func TestSyncDeclarativeProxiesPreservesQuotaPausedAndDisabled(t *testing.T) {
 	srv := newInternalTestServer(t, nil)
 	if err := srv.st.Update(func(st *store.State) error {
 		st.Nodes = append(st.Nodes, store.Node{ID: "nodeA", Name: "alpha"})
+		st.Tunnels = append(st.Tunnels, store.Tunnel{
+			ID: "t-media", Name: "media", NodeID: "nodeA", Type: store.TunnelTCP,
+			Local: "127.0.0.1:8096", RemotePort: 25096, Enabled: false, QuotaMB: 1,
+			QuotaPaused: true, UsedBytes: 2 << 20, UsageMonth: time.Now().UTC().Format("2006-01"),
+		})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	spec := []proto.ProxySpec{{Name: "media", Type: "tcp", Local: "127.0.0.1:8096", QuotaMB: 1}}
-	if err := srv.syncDeclarativeProxies("nodeA", spec, true); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
-	id := srv.Tunnels()[0].ID
-
-	// Simulate the quota guard pausing this tunnel after exceeding 1 MB.
-	if err := srv.st.Update(func(st *store.State) error {
-		tun, _ := st.TunnelByID(id)
-		tun.Enabled = false
-		tun.QuotaPaused = true
-		tun.UsedBytes = 2 << 20
-		tun.UsageMonth = time.Now().UTC().Format("2006-01")
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Client reconnects with the same 1 MB quota -> MUST remain paused!
+	// Client reconnects with any QuotaMB value -> panel's QuotaPaused/Enabled
+	// MUST remain strictly authoritative and cannot be bypassed by client config!
+	spec := []proto.ProxySpec{{Name: "media", Type: "tcp", Local: "127.0.0.1:8096", QuotaMB: 999}}
 	if err := srv.syncDeclarativeProxies("nodeA", spec, true); err != nil {
 		t.Fatalf("reconnect sync: %v", err)
 	}
-	got, _ := srv.Tunnel(id)
-	if got.Enabled || !got.QuotaPaused {
-		t.Fatalf("reconnect bypassed quota pause: enabled=%v quota_paused=%v", got.Enabled, got.QuotaPaused)
-	}
-
-	// Operator raises quota in config above UsedBytes (e.g. 10 MB) -> SHOULD resume and clear QuotaPaused!
-	specRaised := []proto.ProxySpec{{Name: "media", Type: "tcp", Local: "127.0.0.1:8096", QuotaMB: 10}}
-	if err := srv.syncDeclarativeProxies("nodeA", specRaised, true); err != nil {
-		t.Fatalf("raised quota sync: %v", err)
-	}
-	got, _ = srv.Tunnel(id)
-	if !got.Enabled || got.QuotaPaused {
-		t.Fatalf("raising quota above usage should resume tunnel: enabled=%v quota_paused=%v", got.Enabled, got.QuotaPaused)
+	got, _ := srv.Tunnel("t-media")
+	if got.Enabled || !got.QuotaPaused || got.QuotaMB != 1 {
+		t.Fatalf("client config bypassed panel quota/pause: enabled=%v quota_paused=%v quota_mb=%d", got.Enabled, got.QuotaPaused, got.QuotaMB)
 	}
 }
 
