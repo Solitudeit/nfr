@@ -915,4 +915,18 @@ func TestPanelEventsEndpointAndStateEvents(t *testing.T) {
 	if stRec.Code != http.StatusOK || !strings.Contains(stRec.Body.String(), "auth token updated") {
 		t.Fatalf("/nfr/api/state did not include recent events: %s", stRec.Body.String())
 	}
+
+	// Verify settings page exports valid live server.toml and server.yaml configs.
+	settingsBody := do(p, http.MethodGet, "/nfr/settings", nil, cookies).Body.String()
+	for _, want := range []string{`id="srv_cfg_toml"`, `id="srv_cfg_yaml"`, "custom-token-999", "control_listen"} {
+		if !strings.Contains(settingsBody, want) {
+			t.Fatalf("settings page missing server config export %q", want)
+		}
+	}
+
+	// Verify nodes page embeds node proxies JSON for full client.toml/client.yaml export.
+	nodesBody := do(p, http.MethodGet, "/nfr/nodes", nil, cookies).Body.String()
+	if !strings.Contains(nodesBody, `id="node-proxies-data"`) || !strings.Contains(nodesBody, `id="cfg_source"`) {
+		t.Fatal("nodes page missing client config generator controls")
+	}
 }

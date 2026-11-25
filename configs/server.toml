@@ -32,8 +32,10 @@ log_level = "info"
 # tls_cert = "/etc/ssl/certs/fullchain.pem"
 # tls_key  = "/etc/ssl/private/privkey.pem"
 
-# 可选：首次启动预设管理员密码（留空则随机生成并打印一次）
+# 可选：Web 面板配置（默认 HTTP 直接访问，免浏览器自签证书警告）
+# 如需给面板强制开启 HTTPS，取消注释并设 https = true
 # [panel]
+# https    = false
 # password = "your-admin-password"
 
 # 可选：自动申请 Let's Encrypt 证书（需填写 domain 且 80 端口可达）

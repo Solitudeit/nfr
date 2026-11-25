@@ -167,6 +167,19 @@ NFR_SERVER='203.0.113.10:8443' NFR_AUTH_TOKEN='my-shared-token' NFR_NAME='homela
 
 ## 5. 域名、证书与 Nginx/Caddy 共存
 
+### 面板协议：默认 HTTP，按需开启 HTTPS
+
+Web 控制台默认在 `control_listen`（`:8443`）上使用 **HTTP** 直接提供访问（`http://<服务器IP>:8443/nfr/`），避免浏览器自签证书拦截；客户端隧道控制通道依然全程使用 TLS 1.3。
+
+如果你希望强制面板走 HTTPS，可以在 `server.toml` / `server.yaml` 中自行开启（也可前置 Nginx / Caddy 反代）：
+
+```toml
+[panel]
+https = true
+```
+
+或设置环境变量 `NFR_PANEL_HTTPS=true`。在面板 **设置** 页可直接导出当前生效的 `server.toml` / `server.yaml`，在 **节点** 页可导出任意节点的完整 `client.toml` / `client.yaml`（含该节点全部隧道）。
+
 ### 证书优先级：`tls_cert/tls_key` > `acme` > 自签（默认）
 
 - **自动 HTTPS（ACME / Let's Encrypt）**：将 `example.com` 与 `*.example.com` 解析到服务端，放行 80 与 443，在配置中开启：

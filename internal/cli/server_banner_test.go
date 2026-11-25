@@ -20,8 +20,16 @@ func TestServerBannerAlwaysShowsConsoleAddress(t *testing.T) {
 	if !strings.Contains(out, "面板") {
 		t.Fatalf("banner lost the console label:\n%s", out)
 	}
-	if !strings.Contains(out, "https://panel.example.com:8443/nfr/") {
-		t.Fatalf("banner does not show the console URL:\n%s", out)
+	// Default panel scheme is plain HTTP (no self-signed browser warning).
+	if !strings.Contains(out, "http://panel.example.com:8443/nfr/") {
+		t.Fatalf("banner does not show the default HTTP console URL:\n%s", out)
+	}
+
+	// Opt-in HTTPS switches the console URL to https://.
+	cfg.Panel.HTTPS = true
+	outHTTPS := serverBanner(cfg, "", "nfr_t_demo", "ab:cd:ef")
+	if !strings.Contains(outHTTPS, "https://panel.example.com:8443/nfr/") {
+		t.Fatalf("banner does not show HTTPS URL when panel.https=true:\n%s", outHTTPS)
 	}
 }
 
@@ -59,7 +67,7 @@ func TestServerStatusPrintsConsoleURL(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() { cmdServerStatus([]string{"-c", cfgPath}) })
-	if !strings.Contains(out, "https://panel.example.com:9443/nfr/") {
+	if !strings.Contains(out, "http://panel.example.com:9443/nfr/") {
 		t.Fatalf("status does not print the console URL:\n%s", out)
 	}
 }

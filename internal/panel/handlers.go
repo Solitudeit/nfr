@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/solitudeit/nfr/internal/api"
+	"github.com/solitudeit/nfr/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 // serverCard is one selectable instance on the tunnel screens.
@@ -600,15 +604,16 @@ func countOnline(nodes []api.Node) int {
 
 type nodesData struct {
 	base
-	Nodes       []api.Node
-	OnlineNodes int
-	ServerAddr  string
-	AuthToken   string
-	Pin         string
-	CAMode      bool
-	Code        string
-	Command     string
-	JoinWarning string
+	Nodes           []api.Node
+	OnlineNodes     int
+	ServerAddr      string
+	AuthToken       string
+	Pin             string
+	CAMode          bool
+	NodeProxiesJSON string
+	Code            string
+	Command         string
+	JoinWarning     string
 }
 
 func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
@@ -622,6 +627,7 @@ func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
 	d.Nodes = p.srv.Nodes()
 	d.OnlineNodes = countOnline(d.Nodes)
 	p.labelNodes(r.Context(), d.Nodes)
+	d.NodeProxiesJSON = p.buildNodeProxiesJSON(d.Nodes)
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		req := api.JoinCodeRequest{Name: strings.TrimSpace(r.FormValue("name"))}
@@ -635,6 +641,43 @@ func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 	}
 	p.render(w, r, "nodes", d)
+}
+
+func (p *Panel) buildNodeProxiesJSON(nodes []api.Node) string {
+	type nodeExport struct {
+		ID      string               `json:"id"`
+		Name    string               `json:"name"`
+		Proxies []config.ProxyConfig `json:"proxies"`
+	}
+	tunnels := p.srv.Tunnels()
+	byNode := make(map[string][]config.ProxyConfig, len(nodes))
+	for _, t := range tunnels {
+		if t.NodeID == "" {
+			continue
+		}
+		byNode[t.NodeID] = append(byNode[t.NodeID], config.ProxyConfig{
+			Name:        t.Name,
+			Type:        t.Type,
+			Local:       t.Local,
+			RemotePort:  t.RemotePort,
+			Hosts:       t.Hosts,
+			BandwidthKB: t.BandwidthKB,
+			QuotaMB:     t.QuotaMB,
+		})
+	}
+	out := make([]nodeExport, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, nodeExport{
+			ID:      n.ID,
+			Name:    n.Name,
+			Proxies: byNode[n.ID],
+		})
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 func (p *Panel) nodeRename(w http.ResponseWriter, r *http.Request, s *session) {
@@ -713,6 +756,9 @@ type settingsData struct {
 	CertSource          string
 	CertMode            string
 	CertExpiry          string
+	PanelHTTPS          bool
+	ServerTOML          string
+	ServerYAML          string
 	Keys                []api.APIKey
 	NewKey              string
 	JoinWarning         string
@@ -842,7 +888,25 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 	if cert.NotAfter != nil {
 		d.CertExpiry = cert.NotAfter.Local().Format("2006-01-02")
 	}
+	eff := p.srv.EffectiveConfig()
+	d.PanelHTTPS = eff.Panel.HTTPS
+	d.ServerTOML, d.ServerYAML = encodeServerConfigs(eff)
 	p.render(w, r, "settings", d)
+}
+
+func encodeServerConfigs(cfg config.Server) (tomlStr, yamlStr string) {
+	var tb bytes.Buffer
+	if err := toml.NewEncoder(&tb).Encode(cfg); err == nil {
+		tomlStr = strings.TrimSpace(tb.String()) + "\n"
+	}
+	var yb bytes.Buffer
+	ye := yaml.NewEncoder(&yb)
+	ye.SetIndent(2)
+	if err := ye.Encode(cfg); err == nil {
+		_ = ye.Close()
+		yamlStr = strings.TrimSpace(yb.String()) + "\n"
+	}
+	return tomlStr, yamlStr
 }
 
 // certSourceLabel turns the internal certificate source key into something a

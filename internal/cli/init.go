@@ -68,8 +68,9 @@ public_host: %q
 port_range: [20000, 29999]
 log_level: "info"
 
-# 可选：首次启动预设面板管理员密码
+# 可选：Web 面板配置（默认 HTTP 直接访问；如需强制 HTTPS 设 https: true）
 # panel:
+#   https: false
 #   password: "change-me-now"
 
 # 可选：自动申请 Let's Encrypt 证书（需要填写 domain 且 80 端口可达）
@@ -91,8 +92,9 @@ public_host    = %q
 port_range     = [20000, 29999]
 log_level      = "info"
 
-# 可选：首次启动预设面板管理员密码
+# 可选：Web 面板配置（默认 HTTP 直接访问；如需强制 HTTPS 设 https = true）
 # [panel]
+# https    = false
 # password = "change-me-now"
 
 # 可选：自动申请 Let's Encrypt 证书（需要填写 domain 且 80 端口可达）

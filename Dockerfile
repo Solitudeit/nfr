@@ -20,7 +20,7 @@ VOLUME /var/lib/nfr
 # 8443 control + console, 80/443 ingress, 20000-29999 public tunnel ports.
 EXPOSE 8443 80 443
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget --no-check-certificate -qO- https://127.0.0.1:8443/.well-known/nfr >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:8443/.well-known/nfr >/dev/null 2>&1 || wget --no-check-certificate -qO- https://127.0.0.1:8443/.well-known/nfr >/dev/null 2>&1 || exit 1
 # nfrs runs in the foreground by default (no daemon). To run the client from the
 # same image, override entrypoint with `--entrypoint nfrc`.
 ENTRYPOINT ["nfrs"]

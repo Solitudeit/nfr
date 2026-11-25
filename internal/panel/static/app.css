@@ -1733,6 +1733,9 @@ details.adv[open] summary::after { transform: rotate(-135deg); }
   gap: 14px;
   align-items: end;
 }
+.cfg-controls-3 {
+  grid-template-columns: minmax(0, 1fr) 210px minmax(0, 1fr);
+}
 .code-panel {
   border-radius: var(--r-sm);
   overflow: hidden;

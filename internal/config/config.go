@@ -43,7 +43,11 @@ type Server struct {
 type Panel struct {
 	// Password is a bcrypt hash (or plaintext on first run, which is hashed
 	// into state.json). Empty generates a random password on first run.
-	Password string `toml:"password" yaml:"password"`
+	Password string `toml:"password,omitempty" yaml:"password,omitempty"`
+	// HTTPS enforces HTTPS for the web console on control_listen. By default
+	// (false) the console is served over plain HTTP so browsers do not hit a
+	// self-signed certificate warning; agents still connect over TLS 1.3.
+	HTTPS bool `toml:"https,omitempty" yaml:"https,omitempty"`
 }
 
 // ACME configures automatic certificate issuance for the HTTPS ingress.
@@ -366,6 +370,14 @@ func (c *Server) ApplyEnv() {
 	}
 	if v := strings.TrimSpace(os.Getenv("NFR_PASSWORD")); v != "" {
 		c.Panel.Password = v
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_PANEL_HTTPS")); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			c.Panel.HTTPS = true
+		case "0", "false", "no", "off":
+			c.Panel.HTTPS = false
+		}
 	}
 	if v := strings.TrimSpace(os.Getenv("NFR_TLS_CERT")); v != "" {
 		c.TLSCert = v

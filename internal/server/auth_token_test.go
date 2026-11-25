@@ -4,8 +4,12 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +17,7 @@ import (
 	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/log"
+	"github.com/solitudeit/nfr/internal/panel"
 	"github.com/solitudeit/nfr/internal/proto"
 	"github.com/solitudeit/nfr/internal/server"
 	"github.com/solitudeit/nfr/internal/store"
@@ -217,6 +222,84 @@ func apiTunnelReq(name, nodeID, local string) api.TunnelRequest {
 		Type:    "tcp",
 		Local:   local,
 		Enabled: &en,
+	}
+}
+
+func TestPanelDefaultPlainHTTPAndOptInHTTPS(t *testing.T) {
+	// 1) Default (panel.https = false): browser talks plain HTTP to control_listen
+	//    with zero TLS cert warning, login cookie works over HTTP, AND TLS 1.3
+	//    agents still connect on the exact same port.
+	dir1 := t.TempDir()
+	p1 := freePort(t)
+	cfg1 := config.DefaultServer()
+	cfg1.ControlListen = "127.0.0.1:" + itoa(p1)
+	cfg1.HTTPListen = "off"
+	cfg1.HTTPSListen = "off"
+	cfg1.DataDir = dir1
+	st1, err := store.Open(dir1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv1, pw1, err := server.New(server.Options{Config: cfg1, Store: st1, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv1.SetPanel(panel.New(srv1, log.New("error", "")))
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	go func() { _ = srv1.Run(ctx1) }()
+	waitListen(t, cfg1.ControlListen)
+
+	jar, _ := cookiejar.New(nil)
+	hc := &http.Client{Jar: jar, Timeout: 5 * time.Second}
+	baseHTTP := "http://" + cfg1.ControlListen
+
+	resp, err := hc.PostForm(baseHTTP+"/nfr/login", url.Values{"password": {pw1}})
+	if err != nil {
+		t.Fatalf("plain HTTP login failed: %v", err)
+	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(bodyBytes), `data-stat="nodes-online"`) {
+		t.Fatalf("plain HTTP login did not land on authenticated tunnels page: status=%d", resp.StatusCode)
+	}
+
+	// 2) Opt-in HTTPS (panel.https = true): plain HTTP redirects 308 -> https://.
+	dir2 := t.TempDir()
+	p2 := freePort(t)
+	cfg2 := config.DefaultServer()
+	cfg2.ControlListen = "127.0.0.1:" + itoa(p2)
+	cfg2.HTTPListen = "off"
+	cfg2.HTTPSListen = "off"
+	cfg2.DataDir = dir2
+	cfg2.Panel.HTTPS = true
+	st2, err := store.Open(dir2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv2, _, err := server.New(server.Options{Config: cfg2, Store: st2, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv2.SetPanel(panel.New(srv2, log.New("error", "")))
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	go func() { _ = srv2.Run(ctx2) }()
+	waitListen(t, cfg2.ControlListen)
+
+	noRedir := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	r2, err := noRedir.Get("http://" + cfg2.ControlListen + "/nfr/login")
+	if err != nil {
+		t.Fatalf("GET on https-only panel failed: %v", err)
+	}
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusPermanentRedirect || !strings.HasPrefix(r2.Header.Get("Location"), "https://") {
+		t.Fatalf("expected 308 redirect to https://, got %d %q", r2.StatusCode, r2.Header.Get("Location"))
 	}
 }
 

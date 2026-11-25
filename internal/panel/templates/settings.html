@@ -94,6 +94,37 @@
     </div>
   </section>
 
+  <section class="set-sec" id="server-config">
+    <div class="set-sec-head">
+      <h2>导出服务端配置（server.toml / server.yaml）</h2>
+      <p>根据当前生效的实例设置自动生成服务端启动配置，支持 TOML 与 YAML 一键复制或下载。</p>
+    </div>
+    <div class="card cfg-gen" id="srv-cfg-gen">
+      <div class="cfg-gen-head">
+        <div class="copyfield" style="flex:1;min-width:220px">
+          <code id="srv_cfg_cmd">nfrs -c server.toml</code>
+          <button type="button" class="btn xs" id="srv_cfg_cmd_copy" data-copy="nfrs -c server.toml">复制</button>
+        </div>
+        <div class="seg-filter" role="tablist" aria-label="服务端配置格式">
+          <button type="button" class="seg-btn active" data-srv-fmt="toml">TOML (.toml)</button>
+          <button type="button" class="seg-btn" data-srv-fmt="yaml">YAML (.yaml)</button>
+        </div>
+      </div>
+      <div class="code-panel">
+        <div class="code-panel-bar">
+          <span class="mono" id="srv_cfg_filename">server.toml</span>
+          <div class="code-panel-acts">
+            <button type="button" class="btn xs" id="srv_cfg_dl">下载文件</button>
+            <button type="button" class="btn xs primary" id="srv_cfg_copy" data-copy="{{.ServerTOML}}">复制配置文件</button>
+          </div>
+        </div>
+        <pre class="code-pre"><code id="srv_cfg_preview">{{.ServerTOML}}</code></pre>
+      </div>
+      <textarea id="srv_cfg_toml" hidden>{{.ServerTOML}}</textarea>
+      <textarea id="srv_cfg_yaml" hidden>{{.ServerYAML}}</textarea>
+    </div>
+  </section>
+
   <section class="set-sec" id="api">
     <div class="set-sec-head">
       <h2>REST API 与密钥</h2>
@@ -209,35 +240,88 @@
 
     <section class="set-sec">
       <div class="set-sec-head">
-        <h2>TLS 证书</h2>
-        <p>控制端口与控制台的传输层身份信息。</p>
+        <h2>面板协议与 TLS 证书</h2>
+        <p>面板默认使用 HTTP，免浏览器证书警告；客户端通道始终走 TLS 1.3。</p>
       </div>
       <div class="card form-card cert-card">
         <div class="cert-row">
           <div class="cert-ico" aria-hidden="true">{{template "i-shield"}}</div>
           <div class="cert-info">
             <div class="cert-title">
-              <b>{{.CertSource}}</b>
+              <b>面板协议：{{if .PanelHTTPS}}HTTPS{{else}}HTTP（默认）{{end}}</b>
+              {{if .PanelHTTPS}}<span class="chip on sm">已强制 HTTPS</span>{{else}}<span class="chip sm">按需开启</span>{{end}}
+            </div>
+            <div class="hint">如需给面板开启 HTTPS，可在 <code>server.toml</code> 中设置 <code>[panel] https = true</code>（或前置 Nginx/Caddy 反代）。</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="cert-row">
+          <div class="cert-info">
+            <div class="cert-title">
+              <b>通道证书：{{.CertSource}}</b>
               {{if eq .CertMode "ca"}}<span class="chip on sm">公共 CA</span>{{else}}<span class="chip sm">自签 · TOFU</span>{{end}}
             </div>
             {{if .CertExpiry}}<div class="hint mono">有效期至 {{.CertExpiry}}</div>{{end}}
           </div>
         </div>
         {{if ne .CertMode "ca"}}
-        <div class="divider"></div>
         <div class="field">
           <label class="field-lbl">SHA-256 指纹</label>
           <div class="copyfield">
             <code>{{.Pin}}</code>
             <button type="button" class="btn xs" data-copy="{{.Pin}}">复制</button>
           </div>
-          <span class="hint">客户端和纳管面板首次连接时可核对此指纹以防中间人攻击。</span>
+          <span class="hint">客户端（<code>pin</code>）与纳管面板可核对此指纹以防中间人攻击。</span>
         </div>
         {{else}}
-        <div class="divider"></div>
-        <p class="hint">当前证书由公共 CA 签发，客户端与纳管面板使用系统根证书校验，无需手动核对指纹。</p>
+        <p class="hint">当前证书由公共 CA 签发，客户端设 <code>ca = true</code> 使用系统根证书校验即可。</p>
         {{end}}
       </div>
     </section>
   </div>
 </div>
+
+<script>
+(function () {
+  var gen = document.getElementById('srv-cfg-gen');
+  if (!gen) return;
+  var tomlText = (document.getElementById('srv_cfg_toml') || {}).value || '';
+  var yamlText = (document.getElementById('srv_cfg_yaml') || {}).value || '';
+  var preview = document.getElementById('srv_cfg_preview');
+  var fname = document.getElementById('srv_cfg_filename');
+  var copyBtn = document.getElementById('srv_cfg_copy');
+  var dlBtn = document.getElementById('srv_cfg_dl');
+  var cmdEl = document.getElementById('srv_cfg_cmd');
+  var cmdCopy = document.getElementById('srv_cfg_cmd_copy');
+  var btns = Array.prototype.slice.call(gen.querySelectorAll('[data-srv-fmt]'));
+
+  function setFmt(f) {
+    var isYaml = f === 'yaml';
+    var txt = isYaml ? yamlText : tomlText;
+    var name = isYaml ? 'server.yaml' : 'server.toml';
+    var cmd = 'nfrs -c ' + name;
+    preview.textContent = txt;
+    fname.textContent = name;
+    copyBtn.setAttribute('data-copy', txt);
+    cmdEl.textContent = cmd;
+    cmdCopy.setAttribute('data-copy', cmd);
+    btns.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-srv-fmt') === f); });
+  }
+
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () { setFmt(b.getAttribute('data-srv-fmt')); });
+  });
+  if (dlBtn) {
+    dlBtn.addEventListener('click', function () {
+      var blob = new Blob([preview.textContent || ''], { type: 'text/plain;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fname.textContent || 'server.toml';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    });
+  }
+  setFmt('toml');
+})();
+</script>

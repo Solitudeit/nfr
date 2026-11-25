@@ -240,6 +240,29 @@ func (s *Server) JoinAddr() string {
 // Pin is the certificate fingerprint peers should trust.
 func (s *Server) Pin() string { return s.pin }
 
+func panelScheme(cfg config.Server) string {
+	if cfg.Panel.HTTPS {
+		return "https"
+	}
+	return "http"
+}
+
+// EffectiveConfig returns the live server bootstrap config merged with runtime
+// settings (domain, public_host, port_range, email, auth_token) for export.
+func (s *Server) EffectiveConfig() config.Server {
+	cfg := s.cfg
+	set := s.Settings()
+	cfg.Domain = set.Domain
+	cfg.PublicHost = set.PublicHost
+	cfg.PortRange = set.PortRange
+	cfg.AuthToken = s.AuthToken()
+	if set.HTTPSEmail != "" {
+		cfg.ACME.Email = set.HTTPSEmail
+	}
+	cfg.Panel.Password = ""
+	return cfg
+}
+
 // SetPanel installs the console handler served on the control port.
 func (s *Server) SetPanel(h http.Handler) { s.panel = h }
 
@@ -392,19 +415,54 @@ func (s *Server) startControl() error {
 	return nil
 }
 
+// serveControlConn peeks the first byte of each connection on control_listen:
+//   - 0x16 (TLS ClientHello): handshakes TLS; ALPN "nfr/1" routes to agents,
+//     everything else routes to the HTTPS console/API server.
+//   - anything else (plain HTTP): when panel.https is false (default), serves
+//     the console/API over plain HTTP directly with zero self-signed browser
+//     warnings; when panel.https is true, redirects HTTP requests to HTTPS.
 func (s *Server) serveControlConn(raw net.Conn) {
-	tc := tls.Server(raw, s.tls)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := tc.HandshakeContext(ctx); err != nil {
+	_ = raw.SetReadDeadline(time.Now().Add(15 * time.Second))
+	var first [1]byte
+	if _, err := raw.Read(first[:]); err != nil {
 		raw.Close()
 		return
 	}
-	if tc.ConnectionState().NegotiatedProtocol == proto.ALPN {
-		s.serveAgentConn(tc)
+	_ = raw.SetReadDeadline(time.Time{})
+	conn := &prefixConn{Conn: raw, first: first[0], unread: true}
+
+	if first[0] == 0x16 {
+		tc := tls.Server(conn, s.tls)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := tc.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return
+		}
+		if tc.ConnectionState().NegotiatedProtocol == proto.ALPN {
+			s.serveAgentConn(tc)
+			return
+		}
+		s.serveConsoleConn(tc)
 		return
 	}
-	s.serveConsoleConn(tc)
+	s.serveConsoleConn(conn)
+}
+
+// prefixConn replays one peeked byte before reading from the underlying Conn.
+type prefixConn struct {
+	net.Conn
+	first  byte
+	unread bool
+}
+
+func (c *prefixConn) Read(p []byte) (int, error) {
+	if c.unread && len(p) > 0 {
+		p[0] = c.first
+		c.unread = false
+		return 1, nil
+	}
+	return c.Conn.Read(p)
 }
 
 // serveConsoleConn hands a non-tunnel TLS connection to the shared console
@@ -491,6 +549,11 @@ func (s *Server) newIngress() *http.Server {
 
 // serveConsole handles everything that lives on the control port.
 func (s *Server) serveConsole(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Panel.HTTPS && r.TLS == nil && !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		target := "https://" + r.Host + r.URL.RequestURI()
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
+		return
+	}
 	switch {
 	case r.URL.Path == "/.well-known/nfr":
 		s.serveWellKnown(w, r)
@@ -589,7 +652,7 @@ func (s *Server) panelURL() string {
 	if host == "" {
 		host = firstSiteHost()
 	}
-	return "https://" + net.JoinHostPort(host, port) + "/nfr/"
+	return panelScheme(s.cfg) + "://" + net.JoinHostPort(host, port) + "/nfr/"
 }
 
 // PanelBaseURL builds the console address for a configuration: the configured
@@ -607,7 +670,7 @@ func PanelBaseURL(cfg config.Server) string {
 	if host == "" {
 		host = firstSiteHost()
 	}
-	return "https://" + net.JoinHostPort(host, port) + "/nfr/"
+	return panelScheme(cfg) + "://" + net.JoinHostPort(host, port) + "/nfr/"
 }
 
 // ConsoleCandidates lists the addresses a user may realistically paste into a
@@ -618,13 +681,14 @@ func ConsoleCandidates(cfg config.Server) []string {
 	if err != nil {
 		port = "8443"
 	}
+	scheme := panelScheme(cfg)
 	var out []string
 	seen := map[string]bool{}
 	add := func(h string) {
 		if h == "" {
 			return
 		}
-		u := "https://" + net.JoinHostPort(h, port) + "/nfr/"
+		u := scheme + "://" + net.JoinHostPort(h, port) + "/nfr/"
 		if !seen[u] {
 			seen[u] = true
 			out = append(out, u)

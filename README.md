@@ -86,7 +86,7 @@ docker run -d --name nfr-server --restart=unless-stopped --network host \
 ./nfrs -c server.yaml
 ```
 
-启动后在浏览器打开 `https://<服务器IP或域名>:8443/nfr/` 登录管理面板。
+启动后在浏览器直接打开 `http://<服务器IP或域名>:8443/nfr/` 登录管理面板（默认 HTTP 免浏览器证书警告；如需给面板强制开启 HTTPS，可在配置里设置 `[panel] https = true` 或前置 Nginx/Caddy 反代）。
 
 > 如果公网服务器的 `80` / `443` 已被 nginx 或 Caddy 占用，可在配置中设置 `http_listen = "off"`、`https_listen = "off"`（或 `http_listen = "127.0.0.1:8080"` 并执行 `nfrs proxy-config app.example.com` 生成反代片段）。详见 [docs/deploy.md](docs/deploy.md)。
 
@@ -234,6 +234,7 @@ email   = "you@example.com"
 | `NFR_PUBLIC_HOST` | 覆盖 `public_host` |
 | `NFR_PORT_RANGE` | 覆盖 `port_range`（格式 `20000-29999`） |
 | `NFR_PASSWORD` | 首次启动初始管理员密码（明文或 bcrypt 哈希，仅写哈希进 `state.json`） |
+| `NFR_PANEL_HTTPS` | 设为 `true` 强制 Web 面板使用 HTTPS（默认 `false`，即 HTTP 直接访问） |
 | `NFR_ACME_ENABLED` / `NFR_ACME_EMAIL` | 启用 ACME 自动证书及邮箱 |
 | `NFR_TLS_CERT` / `NFR_TLS_KEY` | 指定自定义 TLS 证书和私钥路径 |
 | `NFR_LOG_LEVEL` / `NFR_LOG_FILE` | 日志级别（`debug`/`info`/`warn`/`error`）与日志文件 |

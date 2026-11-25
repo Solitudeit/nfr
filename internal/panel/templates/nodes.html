@@ -8,7 +8,7 @@
   </div>
   <div class="page-actions">
     <a class="btn" href="/nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
-    <a class="btn primary" href="#connect-config">{{template "i-plus"}}接入新机器</a>
+    <a class="btn primary" href="#connect-config">{{template "i-plus"}}生成客户端配置</a>
   </div>
 </div>
 
@@ -73,6 +73,7 @@
       <div class="nc-foot">
         <a class="btn sm primary-soft" href="/nfr/tunnels/new?server=local&amp;node={{.ID}}">{{template "i-plus"}}新建隧道</a>
         <div class="nc-foot-right">
+          <button type="button" class="btn ghost sm" data-export-node="{{.ID}}">导出配置</button>
           <button type="button" class="btn ghost sm" data-rename="{{.ID}}" data-name="{{.Name}}">改名</button>
           <form method="post" action="/nfr/nodes/delete" data-confirm="移除节点「{{.Name}}」？它名下的隧道也会被删除。">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -109,8 +110,8 @@
        data-ca="{{if .CAMode}}1{{else}}0{{end}}">
     <div class="cfg-gen-head">
       <div>
-        <h2>通过配置文件接入新机器</h2>
-        <p class="card-desc">无需加入码，配置文件永久有效；同名节点重连自动复用原节点与隧道，同时支持 TOML 与 YAML。</p>
+        <h2>客户端配置生成器（TOML / YAML）</h2>
+        <p class="card-desc">可为新机器生成接入模板，或一键导出已有节点的全部隧道为完整 <code>client.toml</code> / <code>client.yaml</code>。</p>
       </div>
       <div class="seg-filter" role="tablist" aria-label="配置文件格式">
         <button type="button" class="seg-btn active" data-cfg-fmt="toml">TOML (.toml)</button>
@@ -118,7 +119,16 @@
       </div>
     </div>
 
-    <div class="cfg-controls">
+    <div class="cfg-controls cfg-controls-3">
+      <div class="field">
+        <label class="field-lbl" for="cfg_source">配置来源</label>
+        <select id="cfg_source">
+          <option value="">新机器模板（仅连接信息）</option>
+          {{range .Nodes}}
+          <option value="{{.ID}}">导出节点：{{.Name}}（{{.Tunnels}} 条隧道）</option>
+          {{end}}
+        </select>
+      </div>
       <div class="field">
         <label class="field-lbl" for="cfg_name">节点名称</label>
         <input id="cfg_name" value="my-node" placeholder="例如：nas、office-pc、homelab" autocomplete="off">
@@ -143,7 +153,7 @@
       <pre class="code-pre"><code id="cfg_preview"></code></pre>
     </div>
 
-    <p class="hint">连接密钥 <code>auth_token</code> 可在 <a href="/nfr/settings">设置</a> 页面或服务端 <code>server.toml</code> / <code>server.yaml</code> 中修改。客户端配置文件里既可以只填连接信息并在面板里建隧道，也可以直接写 <code>proxies</code> 声明隧道。</p>
+    <p class="hint">连接密钥 <code>auth_token</code> 与服务端配置导出均在 <a href="/nfr/settings">设置</a> 页面。客户端不写 <code>proxies</code> 也能接入后在面板建隧道；写了 <code>proxies</code> 则在启动或 <code>SIGHUP</code> 重载时自动同步。</p>
   </div>
 </section>
 
@@ -165,6 +175,7 @@
   </form>
 </details>
 
+<textarea id="node-proxies-data" hidden>{{.NodeProxiesJSON}}</textarea>
 <script>
 (function () {
   document.querySelectorAll('[data-rename]').forEach(function (btn) {
@@ -183,13 +194,23 @@
     });
   });
 
-  // Live TOML / YAML client config generator
+  // Live TOML / YAML client config generator (supports exporting full node proxies)
   var box = document.querySelector('.cfg-gen');
   if (!box) return;
+  var nodesData = [];
+  try {
+    var rawNodes = (document.getElementById('node-proxies-data') || {}).value || '[]';
+    var parsed = JSON.parse(rawNodes);
+    if (Array.isArray(parsed)) nodesData = parsed;
+  } catch (e) {}
+  var byId = {};
+  nodesData.forEach(function (n) { byId[n.id] = n; });
+
   var srv = box.getAttribute('data-srv') || 'your-server:8443';
   var tok = box.getAttribute('data-tok') || 'your-auth-token';
   var pin = box.getAttribute('data-pin') || '';
   var ca = box.getAttribute('data-ca') === '1';
+  var sourceSel = document.getElementById('cfg_source');
   var nameInput = document.getElementById('cfg_name');
   var preview = document.getElementById('cfg_preview');
   var copyBtn = document.getElementById('cfg_copy');
@@ -200,34 +221,70 @@
   var fmtBtns = Array.prototype.slice.call(box.querySelectorAll('[data-cfg-fmt]'));
   var fmt = 'toml';
 
+  function q(s) { return JSON.stringify(String(s || '')); }
+
   function render() {
-    var name = (nameInput.value || 'my-node').trim().replace(/"/g, '');
+    var src = sourceSel ? byId[sourceSel.value] : null;
+    var name = (nameInput.value || (src ? src.name : 'my-node')).trim();
+    var proxies = (src && Array.isArray(src.proxies)) ? src.proxies : [];
     var txt = '';
+
     if (fmt === 'yaml') {
-      txt = 'server_addr: "' + srv + '"\n' +
-            'auth_token: "' + tok + '"\n' +
-            'name: "' + name + '"\n' +
-            (ca ? 'ca: true\n' : (pin ? 'pin: "' + pin + '"\n' : '')) +
-            '\n# 可选：直接声明隧道（不写也可连上后在面板可视化管理）\n' +
-            '# proxies:\n' +
-            '#   - name: ssh\n' +
-            '#     type: tcp\n' +
-            '#     local: "127.0.0.1:22"\n' +
-            '#     remote_port: 20022\n';
+      txt = 'server_addr: ' + q(srv) + '\n' +
+            'auth_token: ' + q(tok) + '\n' +
+            'name: ' + q(name) + '\n' +
+            (ca ? 'ca: true\n' : (pin ? 'pin: ' + q(pin) + '\n' : ''));
+      if (proxies.length) {
+        txt += '\nproxies:\n';
+        proxies.forEach(function (p) {
+          txt += '  - name: ' + q(p.Name) + '\n';
+          txt += '    type: ' + q(p.Type || 'tcp') + '\n';
+          txt += '    local: ' + q(p.Local) + '\n';
+          if (p.RemotePort) txt += '    remote_port: ' + p.RemotePort + '\n';
+          if (p.Hosts && p.Hosts.length) {
+            txt += '    hosts:\n';
+            p.Hosts.forEach(function (h) { txt += '      - ' + q(h) + '\n'; });
+          }
+          if (p.BandwidthKB) txt += '    bandwidth_kb: ' + p.BandwidthKB + '\n';
+          if (p.QuotaMB) txt += '    quota_mb: ' + p.QuotaMB + '\n';
+        });
+      } else {
+        txt += '\n# 可选：直接声明隧道（不写也可连上后在面板可视化管理）\n' +
+               '# proxies:\n' +
+               '#   - name: "ssh"\n' +
+               '#     type: "tcp"\n' +
+               '#     local: "127.0.0.1:22"\n' +
+               '#     remote_port: 20022\n';
+      }
       fnameEl.textContent = 'client.yaml';
       cmdEl.textContent = 'nfrc -c client.yaml';
       cmdCopy.setAttribute('data-copy', 'nfrc -c client.yaml');
     } else {
-      txt = 'server_addr = "' + srv + '"\n' +
-            'auth_token  = "' + tok + '"\n' +
-            'name        = "' + name + '"\n' +
-            (ca ? 'ca          = true\n' : (pin ? 'pin         = "' + pin + '"\n' : '')) +
-            '\n# 可选：直接声明隧道（不写也可连上后在面板可视化管理）\n' +
-            '# [[proxies]]\n' +
-            '# name        = "ssh"\n' +
-            '# type        = "tcp"\n' +
-            '# local       = "127.0.0.1:22"\n' +
-            '# remote_port = 20022\n';
+      txt = 'server_addr = ' + q(srv) + '\n' +
+            'auth_token  = ' + q(tok) + '\n' +
+            'name        = ' + q(name) + '\n' +
+            (ca ? 'ca          = true\n' : (pin ? 'pin         = ' + q(pin) + '\n' : ''));
+      if (proxies.length) {
+        proxies.forEach(function (p) {
+          txt += '\n[[proxies]]\n';
+          txt += 'name  = ' + q(p.Name) + '\n';
+          txt += 'type  = ' + q(p.Type || 'tcp') + '\n';
+          txt += 'local = ' + q(p.Local) + '\n';
+          if (p.RemotePort) txt += 'remote_port = ' + p.RemotePort + '\n';
+          if (p.Hosts && p.Hosts.length) {
+            txt += 'hosts = [' + p.Hosts.map(q).join(', ') + ']\n';
+          }
+          if (p.BandwidthKB) txt += 'bandwidth_kb = ' + p.BandwidthKB + '\n';
+          if (p.QuotaMB) txt += 'quota_mb = ' + p.QuotaMB + '\n';
+        });
+      } else {
+        txt += '\n# 可选：直接声明隧道（不写也可连上后在面板可视化管理）\n' +
+               '# [[proxies]]\n' +
+               '# name        = "ssh"\n' +
+               '# type        = "tcp"\n' +
+               '# local       = "127.0.0.1:22"\n' +
+               '# remote_port = 20022\n';
+      }
       fnameEl.textContent = 'client.toml';
       cmdEl.textContent = 'nfrc -c client.toml';
       cmdCopy.setAttribute('data-copy', 'nfrc -c client.toml');
@@ -241,6 +298,26 @@
       fmt = b.getAttribute('data-cfg-fmt') || 'toml';
       fmtBtns.forEach(function (x) { x.classList.toggle('active', x === b); });
       render();
+    });
+  });
+  if (sourceSel) {
+    sourceSel.addEventListener('change', function () {
+      var src = byId[sourceSel.value];
+      if (src) nameInput.value = src.name;
+      else if (nameInput.value === '' || Object.keys(byId).some(function (k) { return byId[k].name === nameInput.value; })) {
+        nameInput.value = 'my-node';
+      }
+      render();
+    });
+  }
+  document.querySelectorAll('[data-export-node]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-export-node');
+      if (sourceSel) {
+        sourceSel.value = id;
+        sourceSel.dispatchEvent(new Event('change'));
+      }
+      box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
   nameInput.addEventListener('input', render);

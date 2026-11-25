@@ -388,7 +388,7 @@ func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 		Value:    id,
 		Path:     "/nfr",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 		Expires:  s.exp,
 	})
@@ -401,8 +401,12 @@ func (p *Panel) logout(w http.ResponseWriter, r *http.Request) {
 		delete(p.sessions, c.Value)
 		p.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/nfr", MaxAge: -1, Secure: true, HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/nfr", MaxAge: -1, Secure: isHTTPS(r), HttpOnly: true})
 	http.Redirect(w, r, "/nfr/login", http.StatusSeeOther)
+}
+
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func (p *Panel) allowed(ip string) bool {
