@@ -150,6 +150,7 @@
     {{range .Tunnels}}
     <article class="card tcard{{if not .Enabled}} is-disabled{{end}}{{if .Awaiting}} is-awaiting{{end}}"
              data-tid="{{.ID}}" id="t-{{.ID}}"
+             data-kind="{{kind .StatusKind}}"
              {{if .Awaiting}}data-awaiting="1"{{end}}
              data-proto="{{.Type}}"
              data-search="{{.Name}} {{endpoint .}} {{.Local}} {{.NodeName}} {{.Type}}">

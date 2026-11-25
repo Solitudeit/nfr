@@ -15,8 +15,7 @@
 
   var themeTimer = null;
   function currentTheme() {
-    return root.getAttribute("data-theme") ||
-      (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    return root.getAttribute("data-theme") || "dark";
   }
   function setTheme(next) {
     if (!reduce()) root.classList.add("theme-anim");
@@ -39,7 +38,9 @@
     if (pw) {
       var input = document.getElementById(pw.getAttribute("data-pw-toggle"));
       if (input) {
-        input.type = input.type === "password" ? "text" : "password";
+        var reveal = input.type === "password";
+        input.type = reveal ? "text" : "password";
+        pw.setAttribute("aria-pressed", reveal ? "true" : "false");
         input.focus();
       }
       return;
@@ -230,6 +231,7 @@
 
       var row = document.querySelector('[data-tid="' + t.id + '"]');
       if (row) {
+        row.setAttribute("data-kind", t.status_kind || "off");
         var dot = row.querySelector(".dot");
         if (dot) dot.className = "dot " + (t.status_kind || "off");
         setText(row.querySelector("[data-live-rate]"), fmtRate(t.in_rate || 0) + " / " + fmtRate(t.out_rate || 0));
@@ -375,24 +377,47 @@
     eventsListEl.innerHTML = "";
     eventsListEl.appendChild(frag);
   }
+  var drawerReturnFocus = null;
+  var drawerCloseTimer = null;
   function openEventsDrawer() {
     if (!drawerEl) return;
+    clearTimeout(drawerCloseTimer);
+    drawerReturnFocus = document.activeElement;
     drawerEl.hidden = false;
     if (backdropEl) backdropEl.hidden = false;
+    requestAnimationFrame(function () {
+      drawerEl.classList.add("open");
+      if (backdropEl) backdropEl.classList.add("open");
+    });
     if (eventItems.length) lastSeenEventKey = eventKey(eventItems[eventItems.length - 1]);
     eventDots.forEach(function (d) { d.hidden = true; });
     document.querySelectorAll("[data-events-toggle]").forEach(function (b) { b.setAttribute("aria-expanded", "true"); });
+    var closeBtn = drawerEl.querySelector("[data-events-close]");
+    if (closeBtn) closeBtn.focus();
   }
   function closeEventsDrawer() {
     if (!drawerEl || drawerEl.hidden) return;
-    drawerEl.hidden = true;
-    if (backdropEl) backdropEl.hidden = true;
+    drawerEl.classList.remove("open");
+    if (backdropEl) backdropEl.classList.remove("open");
     document.querySelectorAll("[data-events-toggle]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+    drawerCloseTimer = setTimeout(function () {
+      drawerEl.hidden = true;
+      if (backdropEl) backdropEl.hidden = true;
+      if (drawerReturnFocus && typeof drawerReturnFocus.focus === "function") {
+        drawerReturnFocus.focus();
+      }
+    }, reduce() ? 0 : 155);
   }
   function toggleEventsDrawer() {
     if (!drawerEl) return;
     if (drawerEl.hidden) openEventsDrawer();
     else closeEventsDrawer();
+  }
+
+  // Focusable error alert on failed form submissions (WCAG UX guideline)
+  var focusErr = document.querySelector("[data-focus-err]");
+  if (focusErr) {
+    try { focusErr.focus({ preventScroll: false }); } catch (e) {}
   }
 
   // ── join-code countdown ────────────────────────────────────────────
