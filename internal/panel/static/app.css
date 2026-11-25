@@ -1059,10 +1059,45 @@ code, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   border-color: var(--warn-border);
 }
 .callout.compact { font-size: 12.5px; padding: 9px 12px; }
+.callout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .callout-title {
   font-size: 12.5px;
   font-weight: 700;
   color: var(--ink);
+}
+.callout-more {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+.callout-more summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.callout-more summary::-webkit-details-marker { display: none; }
+.callout-more summary::after {
+  content: "展开";
+  font-size: 11px;
+  color: var(--ink-4);
+}
+.callout-more[open] summary::after { content: "收起"; }
+.callout-more-body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .callout-text {
   font-size: 12.5px;

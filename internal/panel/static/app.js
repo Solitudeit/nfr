@@ -84,8 +84,24 @@
 
   document.addEventListener("submit", function (ev) {
     var msg = ev.target.getAttribute("data-confirm");
-    if (msg && !window.confirm(msg)) ev.preventDefault();
+    if (msg && !window.confirm(msg)) {
+      ev.preventDefault();
+      return;
+    }
+    if (ev.target.hasAttribute("data-keep-scroll")) {
+      try { sessionStorage.setItem("nfr-scroll-y", String(window.scrollY || 0)); } catch (e) {}
+    }
   });
+
+  // Restore scroll position after quick toggle/delete reloads.
+  try {
+    var sy = sessionStorage.getItem("nfr-scroll-y");
+    if (sy !== null) {
+      sessionStorage.removeItem("nfr-scroll-y");
+      var y = parseInt(sy, 10);
+      if (!isNaN(y) && y > 0) window.scrollTo(0, y);
+    }
+  } catch (e) {}
 
   function fallbackCopy(text) {
     var ta = document.createElement("textarea");
@@ -154,9 +170,38 @@
   function fmtRate(n) { return fmtBytes(n) + "/s"; }
   function setText(el, v) { if (el && el.textContent !== v) el.textContent = v; }
 
+  // Track initial awaiting tunnels and rendered nodes so the page refreshes
+  // automatically the moment a newly joined device connects (no manual F5).
+  var awaitingOnPage = {};
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tid][data-awaiting="1"]'), function (el) {
+    awaitingOnPage[el.getAttribute("data-tid")] = true;
+  });
+  var initialNodeCount = document.querySelectorAll("[data-nid]").length;
+  var hasJoinBanner = !!document.querySelector(".join-banner");
+  var reloading = false;
+
   function apply(state) {
     var tunnels = state.tunnels || [];
     var nodes = state.nodes || [];
+
+    if (!reloading) {
+      // If a user is looking at a freshly generated join banner on /nfr/nodes
+      // and a new node registers, reload so the new node card appears immediately.
+      if (hasJoinBanner && nodes.length > initialNodeCount) {
+        reloading = true;
+        window.location.href = "/nfr/nodes";
+        return;
+      }
+      // If an awaiting tunnel on /nfr/tunnels just got claimed by a joining device,
+      // reload so the join box disappears and the live tunnel card takes over.
+      for (var i = 0; i < tunnels.length; i++) {
+        if (awaitingOnPage[tunnels[i].id] && !tunnels[i].awaiting) {
+          reloading = true;
+          window.location.reload();
+          return;
+        }
+      }
+    }
 
     var onlineNodes = nodes.filter(function (n) { return n.online; }).length;
     setText(document.querySelector('[data-stat="nodes-online"]'), onlineNodes + " / " + nodes.length);

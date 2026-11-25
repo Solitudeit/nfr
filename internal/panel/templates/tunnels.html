@@ -150,6 +150,7 @@
     {{range .Tunnels}}
     <article class="card tcard{{if not .Enabled}} is-disabled{{end}}{{if .Awaiting}} is-awaiting{{end}}"
              data-tid="{{.ID}}" id="t-{{.ID}}"
+             {{if .Awaiting}}data-awaiting="1"{{end}}
              data-proto="{{.Type}}"
              data-search="{{.Name}} {{endpoint .}} {{.Local}} {{.NodeName}} {{.Type}}">
       <div class="tcard-head">
@@ -168,6 +169,7 @@
           <div class="route-val-row">
             <span class="route-val mono" title="{{endpoint .}}">{{endpoint .}}</span>
             <button type="button" class="mini-copy" data-copy="{{endpoint .}}" title="复制公网地址" aria-label="复制公网地址">{{template "i-copy"}}</button>
+            {{$url := httpLink .}}{{if $url}}<a class="mini-copy" href="{{$url}}" target="_blank" rel="noopener" title="在新标签页打开 {{$url}}" aria-label="打开链接">{{template "i-ext"}}</a>{{end}}
           </div>
         </div>
         <div class="route-arrow" aria-hidden="true">{{template "i-arrow-right"}}</div>
@@ -210,24 +212,30 @@
       {{if .Awaiting}}{{$jc := index $.Codes .ID}}
       {{if $jc}}
       <div class="callout info">
-        <div class="callout-title">等待设备接入</div>
-        <p class="callout-text">在内网机器上运行下面命令，接入后隧道立即生效：</p>
-        <div class="copyfield"><code>{{$jc.Command}}</code><button type="button" class="btn xs" data-copy="{{$jc.Command}}">复制</button></div>
-        <div class="await-meta">
-          <span class="join-code">{{$jc.Code}}</span>
+        <div class="callout-head">
+          <span class="callout-title">等待设备接入</span>
           <span class="muted mono" data-expires="{{$jc.ExpiresAt.Unix}}">剩余 —</span>
         </div>
+        <p class="callout-text">在内网机器上运行下面命令，设备接入后页面会自动刷新并激活隧道：</p>
+        <div class="copyfield"><code>{{$jc.Command}}</code><button type="button" class="btn xs primary" data-copy="{{$jc.Command}}">复制</button></div>
+        <div class="await-meta">
+          <span class="join-code">{{$jc.Code}}</span>
+          <form method="post" action="/nfr/tunnels/regen-code" data-keep-scroll>
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="server" value="{{$.Current}}">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button class="btn ghost xs" type="submit">重新生成命令</button>
+          </form>
+        </div>
         {{if $jc.Warning}}<div class="flash warn compact" role="alert">{{$jc.Warning}}</div>{{end}}
-        <div class="callout-divider"></div>
-        <p class="callout-sub">重启或中断后用已保存配置拉起（加入码一次性）：</p>
-        <div class="copyfield"><code>nfrc -c /etc/nfr/agent.toml</code><button type="button" class="btn xs" data-copy="nfrc -c /etc/nfr/agent.toml">复制</button></div>
-        <div class="callout-sub">非 root 用户配置路径：<code>~/.config/nfr/agent.toml</code></div>
-        <form method="post" action="/nfr/tunnels/regen-code" class="callout-act">
-          <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          <input type="hidden" name="server" value="{{$.Current}}">
-          <input type="hidden" name="id" value="{{.ID}}">
-          <button class="btn ghost xs" type="submit">重新生成命令</button>
-        </form>
+        <details class="callout-more">
+          <summary>以后重启客户端怎么拉起？</summary>
+          <div class="callout-more-body">
+            <p class="callout-sub">加入码一次性使用；设备重启后用自动保存的配置拉起即可：</p>
+            <div class="copyfield"><code>nfrc -c /etc/nfr/agent.toml</code><button type="button" class="btn xs" data-copy="nfrc -c /etc/nfr/agent.toml">复制</button></div>
+            <div class="callout-sub">非 root 用户配置路径：<code>~/.config/nfr/agent.toml</code></div>
+          </div>
+        </details>
       </div>
       {{end}}
       {{end}}
@@ -235,14 +243,14 @@
       <div class="tcard-foot">
         <a class="btn ghost sm" href="/nfr/tunnels/edit?id={{.ID}}&amp;server={{$.Current}}">{{template "i-edit"}}编辑</a>
         <div class="tcard-foot-right">
-          <form method="post" action="/nfr/tunnels/toggle">
+          <form method="post" action="/nfr/tunnels/toggle" data-keep-scroll>
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <input type="hidden" name="server" value="{{$.Current}}">
             <input type="hidden" name="id" value="{{.ID}}">
             <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
             <button class="btn sm" type="submit">{{if .Enabled}}停用{{else}}启用{{end}}</button>
           </form>
-          <form method="post" action="/nfr/tunnels/delete" data-confirm="删除隧道「{{.Name}}」？该操作不可撤销。">
+          <form method="post" action="/nfr/tunnels/delete" data-keep-scroll data-confirm="删除隧道「{{.Name}}」？该操作不可撤销。">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <input type="hidden" name="server" value="{{$.Current}}">
             <input type="hidden" name="id" value="{{.ID}}">

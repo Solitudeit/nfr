@@ -49,7 +49,7 @@ type tunnelsData struct {
 	Edit      *api.Tunnel
 	LocalHost string // Edit.Local split for the two-field form
 	LocalPort string
-	SelNode   *api.Node // node picked outside the form (entry link / edit); nil → form shows the picker
+	SelNodeID string // pre-selected node id (from ?node= or Edit.NodeID); editable in the picker
 	// Codes carries the live join command of every awaiting tunnel on the
 	// current server, keyed by tunnel id, so the card can show what a new
 	// device must run without a second request.
@@ -257,24 +257,12 @@ func (p *Panel) tunnelForm(w http.ResponseWriter, r *http.Request, s *session, e
 	// enabled awaiting tunnel so the join command works the moment a device
 	// redeems it.
 	d.Draft = existing == nil && !d.IsLocal && d.OnlineNodes == 0
-	// The node is picked outside the form: either it is a property of the
-	// tunnel being edited, or it came in on the entry URL (?node=). When it
-	// resolves, the form shows a locked confirmation instead of the picker.
-	pick := func(id string) {
-		if id == "" {
-			return
-		}
-		for i := range d.Nodes {
-			if d.Nodes[i].ID == id {
-				d.SelNode = &d.Nodes[i]
-				return
-			}
-		}
-	}
+	// Pre-select the node (from Edit or ?node= query param) while still letting
+	// the operator switch nodes freely in the picker without leaving the page.
 	if existing != nil {
-		pick(existing.NodeID)
+		d.SelNodeID = existing.NodeID
 	} else {
-		pick(r.URL.Query().Get("node"))
+		d.SelNodeID = r.URL.Query().Get("node")
 	}
 	p.render(w, r, "tunnel_form", d)
 }
@@ -364,6 +352,20 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 		QuotaMB:     &quota,
 	}
 	id := r.FormValue("id")
+	// Auto-generate a readable tunnel name when left blank on creation so
+	// operators never get blocked by an optional field.
+	if id == "" && req.Name == "" && req.NodeID != "new" {
+		req.Name = p.autoTunnelName(req.Type, local, port)
+	}
+	// On an IP-only server (no domain configured), an HTTP tunnel without
+	// explicit hosts or remote port would otherwise fail validation. Allocate a
+	// free public port automatically so creating an HTTP tunnel works in 1 click.
+	if sel == "local" && req.Type == "http" && req.RemotePort == 0 && len(req.Hosts) == 0 && p.srv.Settings().Domain == "" && req.NodeID != "new" {
+		if alloc, aerr := p.srv.AllocatePort(id, "tcp"); aerr == nil {
+			req.RemotePort = alloc.Port
+			req.LeaseID = alloc.LeaseID
+		}
+	}
 	var err error
 	if sel == "local" {
 		if id == "" && req.NodeID == "new" {
@@ -392,10 +394,128 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 	}
 	if err != nil {
-		p.backErr(w, r, "/nfr/tunnels", err)
+		p.renderTunnelFormError(w, r, s, sel, id, req, err)
 		return
 	}
 	p.ok(w, r, "/nfr/tunnels", "隧道已保存")
+}
+
+// autoTunnelName derives a clean, collision-free name such as "tcp-22" or
+// "http-8080" when the operator leaves the optional name blank.
+func (p *Panel) autoTunnelName(typ, local string, remotePort int) string {
+	prefix := strings.ToLower(strings.TrimSpace(typ))
+	if prefix == "" {
+		prefix = "tcp"
+	}
+	_, lp := splitLocal(local)
+	base := prefix
+	if lp != "" {
+		base = prefix + "-" + lp
+	} else if remotePort > 0 {
+		base = prefix + "-" + strconv.Itoa(remotePort)
+	}
+	used := map[string]bool{}
+	for _, t := range p.srv.Tunnels() {
+		used[strings.ToLower(t.Name)] = true
+	}
+	if !used[strings.ToLower(base)] {
+		return base
+	}
+	for i := 2; i < 1000; i++ {
+		cand := base + "-" + strconv.Itoa(i)
+		if !used[strings.ToLower(cand)] {
+			return cand
+		}
+	}
+	return base + "-" + strconv.FormatInt(time.Now().Unix()%10000, 10)
+}
+
+// renderTunnelFormError re-renders the tunnel form in place with every field
+// the operator already filled in, avoiding frustrating full-form resets.
+func (p *Panel) renderTunnelFormError(w http.ResponseWriter, r *http.Request, s *session, sel, id string, req api.TunnelRequest, err error) {
+	title := "新建隧道"
+	if id != "" {
+		title = "编辑隧道"
+	}
+	lh, lp := splitLocal(req.Local)
+	if lh == "" {
+		lh = strings.TrimSpace(r.FormValue("local_host"))
+	}
+	if lp == "" {
+		lp = strings.TrimSpace(r.FormValue("local_port"))
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	bw := 0
+	if req.BandwidthKB != nil {
+		bw = *req.BandwidthKB
+	}
+	var quota int64
+	if req.QuotaMB != nil {
+		quota = *req.QuotaMB
+	}
+	draft := &api.Tunnel{
+		ID:          id,
+		Name:        req.Name,
+		NodeID:      req.NodeID,
+		Type:        req.Type,
+		Local:       req.Local,
+		RemotePort:  req.RemotePort,
+		Hosts:       req.Hosts,
+		Enabled:     enabled,
+		BandwidthKB: bw,
+		QuotaMB:     quota,
+	}
+	d := tunnelsData{
+		base:      p.newBase(r, s, "tunnels", title, "tunnel_form"),
+		Current:   sel,
+		IsLocal:   sel == "local",
+		PortRange: p.srv.Settings().PortRange,
+		Edit:      draft,
+		LocalHost: lh,
+		LocalPort: lp,
+		SelNodeID: req.NodeID,
+	}
+	d.Error = friendlyErr(err)
+	if d.IsLocal {
+		d.CurName = p.srv.Info().Name
+		d.Nodes = p.srv.Nodes()
+		d.OnlineNodes = countOnline(d.Nodes)
+		p.labelNodes(r.Context(), d.Nodes)
+	} else if c, rec, cerr := p.srv.RemoteClient(sel); cerr == nil {
+		d.CurName = rec.Name
+		if nodes, nerr := c.Nodes(r.Context()); nerr == nil {
+			d.Nodes = nodes
+			d.OnlineNodes = countOnline(d.Nodes)
+			p.labelNodes(r.Context(), d.Nodes)
+		}
+	}
+	p.render(w, r, "tunnel_form", d)
+}
+
+func friendlyErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "choose a node that has joined"):
+		return "请先选择一个已接入的内网节点（若尚未部署客户端，请选择「＋ 新设备」）"
+	case strings.Contains(msg, "another tunnel already uses that name"):
+		return "已有同名隧道，请换一个隧道名称（或留空自动生成）"
+	case strings.Contains(msg, "tunnel name is required"):
+		return "请填写隧道名称"
+	case strings.Contains(msg, "tunnel name may only contain"):
+		return "隧道名称只能包含字母、数字、点、短横线和下划线"
+	case strings.Contains(msg, "already in use"):
+		return "所选公网端口已被占用，请更换端口或留空由系统自动分配"
+	case strings.Contains(msg, "set a domain in settings"):
+		return "请填写绑定域名，或在高级选项中指定一个公网端口"
+	default:
+		return msg
+	}
 }
 
 func (p *Panel) tunnelDelete(w http.ResponseWriter, r *http.Request, s *session) {

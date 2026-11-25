@@ -8,6 +8,10 @@
   </div>
   <div class="page-actions">
     <a class="btn" href="/nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
+    <form method="post" action="/nfr/nodes" style="margin:0">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button class="btn primary" type="submit">{{template "i-plus"}}生成加入码</button>
+    </form>
   </div>
 </div>
 
@@ -18,14 +22,25 @@
       <span class="chip on">已生成加入码</span>
       <span class="join-code">{{.Code}}</span>
     </div>
-    <span class="muted">5 分钟内有效 · 仅可使用一次</span>
+    <span class="muted">5 分钟内有效 · 接入后本页自动刷新</span>
   </div>
-  <div class="copyfield">
-    <code>{{.Command}}</code>
-    <button type="button" class="btn sm primary" data-copy="{{.Command}}">复制命令</button>
+  <div class="field">
+    <span class="callout-sub">方式一：已安装 <code>nfrc</code>，直接运行接入</span>
+    <div class="copyfield">
+      <code>{{.Command}}</code>
+      <button type="button" class="btn sm primary" data-copy="{{.Command}}">复制命令</button>
+    </div>
   </div>
+  {{$oneLine := installJoinCmd .Command}}{{if $oneLine}}
+  <div class="field">
+    <span class="callout-sub">方式二：Linux 一键安装 <code>nfrc</code> + 接入 + 配置 systemd 开机自启</span>
+    <div class="copyfield">
+      <code>{{$oneLine}}</code>
+      <button type="button" class="btn sm" data-copy="{{$oneLine}}">复制一键脚本</button>
+    </div>
+  </div>
+  {{end}}
   {{if .JoinWarning}}<div class="flash warn compact" role="alert"><span class="flash-body">{{.JoinWarning}}</span></div>{{end}}
-  <p class="hint">在目标内网机器上执行上述命令。加入码只用于签发一次长期节点凭证，泄露后移除节点即可吊销。</p>
 </section>
 {{end}}
 

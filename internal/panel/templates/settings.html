@@ -84,11 +84,11 @@
           <p class="hint">关闭时所有 <code>/api/v1/*</code> 接口均返回拒绝，不影响本地 Web 控制台。</p>
         </div>
         <div class="api-toggle-ctrl">
-          <label class="switch">
-            <input type="checkbox" name="api_enabled" value="1" {{if .APIEnabled}}checked{{end}}>
+          <label class="switch" title="切换后立即生效">
+            <input type="checkbox" name="api_enabled" value="1" {{if .APIEnabled}}checked{{end}} onchange="this.form.submit()">
             <span class="track" aria-hidden="true"></span>
           </label>
-          <button class="btn sm" type="submit">应用</button>
+          <button class="btn ghost sm" type="submit">应用</button>
         </div>
       </form>
 

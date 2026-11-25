@@ -1,7 +1,8 @@
+{{$isEdit := and .Edit .Edit.ID}}
 <div class="page-head">
   <div>
-    <h1>{{if .Edit}}编辑隧道{{else}}新建隧道{{end}}</h1>
-    <p class="lead">{{if .Edit}}编辑「{{.Edit.Name}}」· 实例 {{.CurName}}{{else}}在 {{.CurName}} 上为内网服务创建公网入口。{{end}}</p>
+    <h1>{{if $isEdit}}编辑隧道{{else}}新建隧道{{end}}</h1>
+    <p class="lead">{{if $isEdit}}编辑「{{.Edit.Name}}」· 实例 {{.CurName}}{{else}}在 {{.CurName}} 上为内网服务创建公网入口，填端口即可一键创建。{{end}}</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="/nfr/tunnels?server={{.Current}}">{{template "i-arrow-left"}}返回列表</a>
@@ -11,69 +12,44 @@
 <form id="tform" method="post" action="/nfr/tunnels/save" class="tf-wrap">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="server" value="{{.Current}}">
-  {{if .Edit}}<input type="hidden" name="id" value="{{.Edit.ID}}">{{end}}
+  {{if $isEdit}}<input type="hidden" name="id" value="{{.Edit.ID}}">{{end}}
   <input type="hidden" name="lease_id" id="lease" value="">
   <input type="hidden" name="local" id="local" value="">
 
   <section class="card form-section">
     <div class="form-sec-head">
       <h2>基础配置</h2>
-      <p>选择目标内网节点、转发协议与本地监听地址。</p>
+      <p>默认已选中本机地址 <code>127.0.0.1</code> 与在线节点，输入本地端口即可直接创建。</p>
     </div>
 
     <div class="form-body">
       <div class="field">
         <label class="field-lbl">接入节点 <i class="req">*</i></label>
-        {{if .SelNode}}
-        <input type="hidden" name="node_id" value="{{.SelNode.ID}}">
-        <div class="np-locked">
-          <span class="dot {{if .SelNode.Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
-          <span class="np-name">{{.SelNode.Name}}</span>
-          {{if .SelNode.Region}}<span class="chip loc sm">{{.SelNode.Region}}</span>{{end}}
-          <span class="np-meta">{{if .SelNode.OS}}{{.SelNode.OS}} / {{.SelNode.Arch}} · {{end}}{{if .SelNode.Online}}在线{{else}}离线{{end}}</span>
-        </div>
-        <span class="hint">{{if .Edit}}隧道绑定到创建时的节点，暂不支持直接迁移；如需更换请删除后重建。{{else}}已从节点页带入；如需更换可返回 <a href="/nfr/nodes">节点页</a> 重新选择。{{end}}</span>
-        {{else if .IsLocal}}
+        {{if or .IsLocal .Nodes}}
         <div class="node-pick" id="nodepick" role="radiogroup" aria-label="选择接入节点">
           {{range .Nodes}}
-          <button type="button" class="np-card{{if not .Online}} np-off{{end}}"
-                  role="radio" aria-checked="false"
+          <button type="button" class="np-card{{if not .Online}} np-off{{end}}{{if eq $.SelNodeID .ID}} sel{{end}}"
+                  role="radio" aria-checked="{{if eq $.SelNodeID .ID}}true{{else}}false{{end}}"
                   data-id="{{.ID}}" data-online="{{if .Online}}1{{else}}0{{end}}">
             <span class="np-top">
               <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
               <span class="np-name">{{.Name}}</span>
               {{if .Region}}<span class="chip loc sm">{{.Region}}</span>{{end}}
             </span>
-            <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道</span>
+            <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道{{if not .Online}} · 离线{{end}}</span>
           </button>
           {{end}}
-          <button type="button" class="np-card np-add" data-id="new" data-new-device
-                  role="radio" aria-checked="false">
+          {{if and .IsLocal (not $isEdit)}}
+          <button type="button" class="np-card np-add{{if eq $.SelNodeID "new"}} sel{{end}}" data-id="new" data-new-device
+                  role="radio" aria-checked="{{if eq $.SelNodeID "new"}}true{{else}}false{{end}}">
             <span class="np-top"><span class="np-name">＋ 新设备</span></span>
-            <span class="np-meta">先建隧道，保存后生成加入命令</span>
-          </button>
-          <input type="hidden" name="node_id" id="node_id" value="">
-        </div>
-        <div class="flash warn" id="nodewarn" role="alert" hidden></div>
-        <span class="hint">选择内网出口机器；尚未部署客户端可选「＋ 新设备」，保存后会给出一次性 <code>nfrc join</code> 命令。</span>
-        {{else if .Nodes}}
-        <div class="node-pick" id="nodepick" role="radiogroup" aria-label="选择接入节点">
-          {{range .Nodes}}
-          <button type="button" class="np-card{{if not .Online}} np-off{{end}}"
-                  role="radio" aria-checked="false"
-                  data-id="{{.ID}}" data-online="{{if .Online}}1{{else}}0{{end}}">
-            <span class="np-top">
-              <span class="dot {{if .Online}}on{{else}}off{{end}}" aria-hidden="true"></span>
-              <span class="np-name">{{.Name}}</span>
-              {{if .Region}}<span class="chip loc sm">{{.Region}}</span>{{end}}
-            </span>
-            <span class="np-meta">{{if .OS}}{{.OS}} / {{.Arch}} · {{end}}{{.Tunnels}} 条隧道</span>
+            <span class="np-meta">先建隧道，保存后直接生成加入命令</span>
           </button>
           {{end}}
-          <input type="hidden" name="node_id" id="node_id" value="">
+          <input type="hidden" name="node_id" id="node_id" value="{{.SelNodeID}}">
         </div>
-        <div class="flash warn" id="nodewarn" role="alert" hidden></div>
-        <span class="hint">选择远程实例上的内网节点；离线节点也可预先创建，上线后自动生效。</span>
+        <div class="flash warn compact" id="nodewarn" role="alert" hidden></div>
+        <span class="hint">{{if $isEdit}}可直接点击其他节点卡片，一键将此隧道迁移到目标机器。{{else}}选择目标内网机器；若机器尚未部署客户端，选「＋ 新设备」即可先建隧道再拿加入命令。{{end}}</span>
         {{else}}
         <div class="flash warn" role="alert"><span class="flash-body">这台服务器当前没有可选的内网设备。请先在内网机器运行 <code>nfrc join</code>，设备上线后再创建隧道。</span></div>
         {{end}}
@@ -92,7 +68,7 @@
           </button>
           <button type="button" class="proto-card{{if .Edit}}{{if eq .Edit.Type "http"}} sel{{end}}{{end}}" data-proto-val="http" role="radio" aria-checked="{{if .Edit}}{{if eq .Edit.Type "http"}}true{{else}}false{{end}}{{else}}false{{end}}">
             <span class="proto-top"><span class="pill pill-http">HTTP</span><span class="proto-check"></span></span>
-            <span class="proto-desc">按域名分流并透传 WebSocket / X-Forwarded-*</span>
+            <span class="proto-desc">支持域名分流或端口直连，原生支持 WebSocket</span>
           </button>
         </div>
         <select id="type" class="sr-only" aria-hidden="true" tabindex="-1">
@@ -100,21 +76,21 @@
           <option value="udp" {{if .Edit}}{{if eq .Edit.Type "udp"}}selected{{end}}{{end}}>UDP</option>
           <option value="http" {{if .Edit}}{{if eq .Edit.Type "http"}}selected{{end}}{{end}}>HTTP</option>
         </select>
-        <input type="hidden" name="type" id="type_field" value="{{if .Edit}}{{.Edit.Type}}{{else}}tcp{{end}}">
+        <input type="hidden" name="type" id="type_field" value="{{if .Edit}}{{if .Edit.Type}}{{.Edit.Type}}{{else}}tcp{{end}}{{else}}tcp{{end}}">
         <span class="hint" id="typehint">公网端口原样转发任意 TCP 协议，适合 SSH、数据库、远程桌面。</span>
       </div>
 
       <div class="field">
-        <label class="field-lbl">本地目标 <i class="req">*</i></label>
+        <label class="field-lbl">内网目标地址与端口 <i class="req">*</i></label>
         <div class="target-pair">
           <div class="target-host">
             <label class="sr-only" for="local_host">本地地址</label>
-            <input id="local_host" name="local_host" value="{{if .Edit}}{{.LocalHost}}{{end}}" placeholder="127.0.0.1" autocomplete="off" spellcheck="false" required>
+            <input id="local_host" name="local_host" value="{{if .LocalHost}}{{.LocalHost}}{{else}}127.0.0.1{{end}}" placeholder="127.0.0.1" autocomplete="off" spellcheck="false" required>
           </div>
           <span class="target-colon" aria-hidden="true">:</span>
           <div class="target-port">
             <label class="sr-only" for="local_port">本地端口</label>
-            <input id="local_port" name="local_port" value="{{if .Edit}}{{.LocalPort}}{{end}}" placeholder="8080" inputmode="numeric" autocomplete="off" required>
+            <input id="local_port" name="local_port" value="{{.LocalPort}}" placeholder="8080" inputmode="numeric" autocomplete="off" autofocus required>
           </div>
         </div>
         <div class="quick-ports">
@@ -124,21 +100,27 @@
           <button type="button" class="qchip" data-fill-port="3389">3389 · RDP</button>
           <button type="button" class="qchip" data-fill-port="8080">8080 · Web</button>
         </div>
-        <span class="hint">相对接入节点而言，常用 <code>127.0.0.1</code>（本机）或同局域网内其他服务 IP。</span>
+        <span class="hint">相对接入节点而言，本机服务保持 <code>127.0.0.1</code> 即可；也可填写同局域网其他机器 IP。</span>
+      </div>
+
+      <div class="field" id="hostrow" hidden>
+        <label class="field-lbl" for="hosts">绑定域名 <span class="muted">可选</span></label>
+        <textarea id="hosts" name="hosts" rows="2" placeholder="多个域名用逗号分隔，如 blog.example.com（留空则自动使用默认子域或分配公网端口）">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
+        <span class="hint">填写域名时按 Host / SNI 走 80 / 443 分流；没有域名直接留空，系统会自动分配可访问的公网端口。</span>
       </div>
     </div>
 
-    <details class="adv" {{if .Edit}}open{{end}}>
+    <details class="adv" {{if $isEdit}}open{{end}}>
       <summary>
         <span class="adv-title">高级选项</span>
-        <span class="adv-sub">隧道名称、公网端口、绑定域名、带宽限速与月配额</span>
+        <span class="adv-sub">自定义名称、指定公网端口、带宽限速与月配额（全部可选）</span>
       </summary>
       <div class="adv-body">
         <div class="form-grid2">
           <div class="field">
             <label class="field-lbl" for="name">隧道名称</label>
             <input id="name" name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" placeholder="留空自动生成" autocomplete="off">
-            <span class="hint">用于面板标识和默认子域名。</span>
+            <span class="hint">可留空自动生成（如 <code>tcp-22</code>）；仅允许字母、数字、点、短横线、下划线。</span>
           </div>
 
           <div class="field">
@@ -151,12 +133,6 @@
             <button type="button" class="btn grab-btn" onclick="grab()" hidden>获取空闲端口</button>
             <span class="hint" id="leasehint">可分配范围 {{index .PortRange 0}}–{{index .PortRange 1}}；留空则在保存时自动分配。</span>
           </div>
-        </div>
-
-        <div class="field" id="hostrow" hidden>
-          <label class="field-lbl" for="hosts">绑定域名</label>
-          <textarea id="hosts" name="hosts" rows="2" placeholder="多个域名用逗号或换行分隔，如 app.example.com">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
-          <span class="hint">填写后按 Host / SNI 走 80 / 443 分流；留空则通过上面的远程端口直接访问。</span>
         </div>
 
         <div class="form-grid2">
@@ -190,11 +166,11 @@
     <label class="switch">
       <input type="checkbox" id="enabled" name="enabled" value="1" {{if .Edit}}{{if .Edit.Enabled}}checked{{end}}{{else if .Draft}}{{else}}checked{{end}}{{if .Draft}} disabled{{end}}>
       <span class="track" aria-hidden="true"></span>
-      <span class="txt">创建后立即启用</span>
+      <span class="txt">{{if $isEdit}}启用这条隧道{{else}}创建后立即启用{{end}}</span>
     </label>
     <div class="submit-actions">
       <a class="btn ghost" href="/nfr/tunnels?server={{.Current}}">取消</a>
-      <button type="submit" class="btn primary" id="tsubmit"{{if and (not .IsLocal) (eq (len .Nodes) 0)}} disabled{{end}}>{{if .Edit}}保存修改{{else if .Draft}}存为停用草稿{{else}}创建隧道{{end}}</button>
+      <button type="submit" class="btn primary" id="tsubmit"{{if and (not .IsLocal) (eq (len .Nodes) 0)}} disabled{{end}}>{{if $isEdit}}保存修改{{else if .Draft}}存为停用草稿{{else}}创建隧道{{end}}</button>
     </div>
   </section>
 </form>
@@ -209,7 +185,7 @@
   var hints = {
     tcp: '公网端口原样转发任意 TCP 协议，适合 SSH、数据库、远程桌面。',
     udp: '公网端口转发 UDP 数据报，适合 DNS、WireGuard、游戏联机。',
-    http: '按 HTTP 转发并自动补 X-Forwarded-*，支持 WebSocket；可绑定域名分流。'
+    http: '支持绑定域名走 80 / 443 分流，或留空域名直接分配公网端口访问，自动支持 WebSocket。'
   };
 
   function kind() { return typeField.value || typeSel.value || 'tcp'; }
@@ -241,10 +217,10 @@
     });
   });
 
-  // Node card picker
+  // Node card picker — always auto-picks a sensible default so submit never
+  // fails with an empty node_id (including auto-picking "new" when 0 nodes exist).
   var pick = document.getElementById('nodepick');
   var nodeInput = document.getElementById('node_id');
-  var nameInput = document.getElementById('name');
   if (pick && nodeInput) {
     var cards = Array.prototype.slice.call(pick.querySelectorAll('.np-card'));
     var nodeWarn = document.getElementById('nodewarn');
@@ -256,13 +232,12 @@
         c.setAttribute('aria-checked', on ? 'true' : 'false');
       });
       nodeInput.value = card ? card.dataset.id : '';
-      if (nameInput) nameInput.required = !!card && card.dataset.id !== 'new';
       if (nodeWarn) {
         var offline = card && card.dataset.online === '0';
         nodeWarn.hidden = !offline;
         if (offline) {
           nodeWarn.textContent = '「' + card.querySelector('.np-name').textContent +
-            '」当前离线，隧道会在它上线后生效。';
+            '」当前离线，隧道会在它上线后自动生效。';
         }
       }
     }
@@ -281,9 +256,16 @@
       });
     });
 
+    if (nodeInput.value) {
+      var pre = cards.find(function (c) { return c.dataset.id === nodeInput.value; });
+      if (pre) selectNode(pre);
+    }
     if (!nodeInput.value && cards.length) {
-      var plain = cards.filter(function (c) { return c.dataset.id !== 'new' && !c.classList.contains('np-off'); });
-      if (plain.length) selectNode(plain[0]);
+      var online = cards.filter(function (c) { return c.dataset.id !== 'new' && !c.classList.contains('np-off'); });
+      var existing = cards.filter(function (c) { return c.dataset.id !== 'new'; });
+      if (online.length) selectNode(online[0]);
+      else if (existing.length) selectNode(existing[0]);
+      else selectNode(cards[0]);
     }
   }
 

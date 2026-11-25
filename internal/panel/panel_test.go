@@ -791,3 +791,102 @@ func TestGeoResolverNeverBlocksRender(t *testing.T) {
 	}
 	t.Fatal("background geo refresh never populated cache")
 }
+
+func TestTunnelSaveAutoNameAndDomainlessHTTPAndNodeSwitch(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultServer()
+	cfg.DataDir = dir
+	cfg.ControlListen = "off"
+	cfg.HTTPListen = "off"
+	cfg.HTTPSListen = "off"
+	cfg.Domain = "" // bare-IP server with no domain configured
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if err := st.Update(func(s *store.State) error {
+		s.Nodes = append(s.Nodes,
+			store.Node{ID: "n1", Name: "edge-1"},
+			store.Node{ID: "n2", Name: "edge-2"},
+		)
+		return nil
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	srv, password, err := server.New(server.Options{Config: cfg, Store: st, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatalf("server: %v", err)
+	}
+	p := New(srv, log.New("error", ""))
+	p.geo = stubLocator{}
+	cookies := login(t, p, password)
+
+	page := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
+	body := page.Body.String()
+	if !strings.Contains(body, `value="127.0.0.1"`) {
+		t.Fatal("new tunnel form should prefill local_host with 127.0.0.1")
+	}
+	csrf := extractCSRF(t, body)
+
+	// 1) Creating an HTTP tunnel with blank name, blank hosts, blank port on a
+	// domainless server must succeed by auto-naming and auto-allocating a port.
+	rec := do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
+		"csrf":       {csrf},
+		"server":     {"local"},
+		"node_id":    {"n1"},
+		"type":       {"http"},
+		"local_host": {"127.0.0.1"},
+		"local_port": {"8080"},
+		"enabled":    {"1"},
+	}, cookies)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("domainless http auto-save = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	tunnels := srv.Tunnels()
+	if len(tunnels) != 1 || tunnels[0].Name != "http-8080" || tunnels[0].RemotePort == 0 {
+		t.Fatalf("unexpected auto-created tunnel: %+v", tunnels)
+	}
+
+	// 2) Validation error re-renders the form in place preserving typed values.
+	rec = do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
+		"csrf":       {csrf},
+		"server":     {"local"},
+		"node_id":    {"n1"},
+		"name":       {"http-8080"}, // duplicate name
+		"type":       {"tcp"},
+		"local_host": {"10.0.0.5"},
+		"local_port": {"9999"},
+		"enabled":    {"1"},
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected in-place re-render on error, got %d", rec.Code)
+	}
+	errBody := rec.Body.String()
+	if !strings.Contains(errBody, "已有同名隧道") || !strings.Contains(errBody, "10.0.0.5") || !strings.Contains(errBody, "9999") {
+		t.Fatalf("error form did not preserve user input or friendly message")
+	}
+
+	// 3) Edit form allows migrating the tunnel to another node (n1 -> n2).
+	editRec := do(p, http.MethodGet, "/nfr/tunnels/edit?id="+tunnels[0].ID+"&server=local", nil, cookies)
+	if !strings.Contains(editRec.Body.String(), `data-id="n2"`) {
+		t.Fatal("edit form must offer other nodes for migration")
+	}
+	rec = do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
+		"csrf":       {csrf},
+		"server":     {"local"},
+		"id":         {tunnels[0].ID},
+		"node_id":    {"n2"},
+		"name":       {tunnels[0].Name},
+		"type":       {"http"},
+		"local_host": {"127.0.0.1"},
+		"local_port": {"8080"},
+		"enabled":    {"1"},
+	}, cookies)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("migrate node save = %d", rec.Code)
+	}
+	updated, ok := srv.Tunnel(tunnels[0].ID)
+	if !ok || updated.NodeID != "n2" {
+		t.Fatalf("tunnel did not migrate to n2: %+v", updated)
+	}
+}

@@ -139,6 +139,28 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 			}
 			return ":" + strconv.Itoa(t.RemotePort)
 		},
+		// httpLink returns a clickable URL for an HTTP tunnel, or "" otherwise.
+		"httpLink": func(t api.Tunnel) string {
+			if t.Type != store.TunnelHTTP {
+				return ""
+			}
+			if len(t.Hosts) > 0 {
+				return "http://" + t.Hosts[0]
+			}
+			if t.PublicHost != "" && t.RemotePort > 0 {
+				return fmt.Sprintf("http://%s:%d", t.PublicHost, t.RemotePort)
+			}
+			return ""
+		},
+		// installJoinCmd builds a Linux one-line install + join + systemd command
+		// from a standard "nfrc join <addr> <code>" string.
+		"installJoinCmd": func(joinCmd string) string {
+			args := strings.TrimSpace(strings.TrimPrefix(joinCmd, "nfrc join"))
+			if args == "" {
+				return ""
+			}
+			return fmt.Sprintf("curl -fsSL https://raw.githubusercontent.com/Solitudeit/nfr/main/scripts/install.sh | sudo sh -s -- --client --join %q --systemd", args)
+		},
 		// stale tells the operator which machines are merely offline and which
 		// are gone for good: a week without a heartbeat and nothing running on
 		// it means the card is just clutter.
