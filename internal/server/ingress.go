@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -48,10 +49,12 @@ func (s *Server) reconcile() {
 		desired[t.RemotePort] = t
 	}
 
+	var closePLs []*portListener
 	s.mu.Lock()
-	for port, ln := range s.listeners {
-		if _, ok := desired[port]; !ok {
-			ln.Close()
+	for port, pl := range s.listeners {
+		t, ok := desired[port]
+		if !ok || pl.typ != t.Type {
+			closePLs = append(closePLs, pl)
 			delete(s.listeners, port)
 		}
 	}
@@ -75,24 +78,33 @@ func (s *Server) reconcile() {
 	}
 	s.mu.Unlock()
 
+	for _, pl := range closePLs {
+		pl.close()
+	}
+
 	for _, port := range open {
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err != nil {
 			s.lg.Warn("cannot open public port", "port", port, "err", err)
 			continue
 		}
+		typ := desired[port].Type
+		pl := &portListener{ln: ln, typ: typ}
+		if typ == store.TunnelHTTP {
+			pl.httpSrv = s.newHTTPPortServer(port)
+		}
 		s.mu.Lock()
-		s.listeners[port] = ln
+		s.listeners[port] = pl
 		s.mu.Unlock()
 		s.wg.Add(1)
-		go func(port int, ln net.Listener, typ string) {
+		go func(port int, pl *portListener) {
 			defer s.wg.Done()
-			if typ == store.TunnelHTTP {
-				s.serveHTTPPort(port, ln)
+			if pl.httpSrv != nil {
+				_ = pl.httpSrv.Serve(pl.ln)
 				return
 			}
-			s.servePort(port, ln)
-		}(port, ln, desired[port].Type)
+			s.servePort(port, pl.ln)
+		}(port, pl)
 		s.lg.Info("public port open", "port", port, "tunnel", desired[port].Name)
 	}
 	for _, port := range openUDP {
@@ -118,6 +130,9 @@ func (s *Server) servePort(port int, ln net.Listener) {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			if delay == 0 {
 				delay = 5 * time.Millisecond
 			} else {
@@ -142,11 +157,12 @@ func (s *Server) servePort(port int, ln net.Listener) {
 	}
 }
 
-// serveHTTPPort answers plain HTTP on a dedicated public port. The tunnel is
-// looked up per request so toggling it off takes effect immediately.
-func (s *Server) serveHTTPPort(port int, ln net.Listener) {
-	srv := &http.Server{
+// newHTTPPortServer builds an HTTP server for a dedicated public port. The
+// tunnel is looked up per request so toggling it off takes effect immediately.
+func (s *Server) newHTTPPortServer(port int) *http.Server {
+	return &http.Server{
 		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       90 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t, ok, _ := s.tunnelByPort(port)
 			if !ok || !t.Enabled {
@@ -156,7 +172,6 @@ func (s *Server) serveHTTPPort(port int, ln net.Listener) {
 			s.proxyHTTP(w, r, t)
 		}),
 	}
-	_ = srv.Serve(ln)
 }
 
 func (s *Server) done() <-chan struct{} {

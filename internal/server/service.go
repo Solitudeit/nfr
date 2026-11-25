@@ -706,7 +706,7 @@ func (s *Server) CreateAPIKey(req api.APIKeyRequest) (api.APIKeyResponse, error)
 
 // DeleteAPIKey revokes a credential.
 func (s *Server) DeleteAPIKey(id string) error {
-	return s.st.Update(func(st *store.State) error {
+	err := s.st.Update(func(st *store.State) error {
 		for i := range st.APIKeys {
 			if st.APIKeys[i].ID == id {
 				st.APIKeys = append(st.APIKeys[:i], st.APIKeys[i+1:]...)
@@ -715,6 +715,12 @@ func (s *Server) DeleteAPIKey(id string) error {
 		}
 		return errNotFound("api key not found")
 	})
+	if err == nil {
+		s.mu.Lock()
+		delete(s.lastUsed, id)
+		s.mu.Unlock()
+	}
+	return err
 }
 
 // UpdateSettings changes instance wide behaviour.

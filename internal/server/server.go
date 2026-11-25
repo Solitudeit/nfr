@@ -53,7 +53,7 @@ type Server struct {
 
 	mu           sync.Mutex
 	agents       map[string]*agentSession
-	listeners    map[int]net.Listener
+	listeners    map[int]*portListener
 	udpListeners map[int]*net.UDPConn
 	udpSess      map[string]*udpSession
 	attempts     map[string]*attempt
@@ -62,13 +62,30 @@ type Server struct {
 	flushed      map[string]int64         // quota accounting: metrics total already folded into the store
 	targetDown   map[string]targetFailure // tunnel id -> last "cannot reach the inner address" report
 
-	httpSrv  *http.Server
-	httpsSrv *http.Server
-	httpLn   net.Listener
-	httpsLn  net.Listener
-	ctlLn    net.Listener
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	httpSrv    *http.Server
+	httpsSrv   *http.Server
+	consoleSrv *http.Server
+	consoleLn  *chanListener
+	httpLn     net.Listener
+	httpsLn    net.Listener
+	ctlLn      net.Listener
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+}
+
+type portListener struct {
+	ln      net.Listener
+	typ     string
+	httpSrv *http.Server
+}
+
+func (pl *portListener) close() {
+	if pl.httpSrv != nil {
+		_ = pl.httpSrv.Close()
+	}
+	if pl.ln != nil {
+		_ = pl.ln.Close()
+	}
 }
 
 type attempt struct {
@@ -98,7 +115,7 @@ func New(opts Options) (*Server, string, error) {
 		certMode:     mode,
 		certSource:   source,
 		agents:       make(map[string]*agentSession),
-		listeners:    make(map[int]net.Listener),
+		listeners:    make(map[int]*portListener),
 		udpListeners: make(map[int]*net.UDPConn),
 		udpSess:      make(map[string]*udpSession),
 		attempts:     make(map[string]*attempt),
@@ -209,14 +226,18 @@ func (s *Server) shutdown() error {
 	if s.ctlLn != nil {
 		s.ctlLn.Close()
 	}
+	if s.consoleLn != nil {
+		s.consoleLn.Close()
+	}
 	if s.httpLn != nil {
 		s.httpLn.Close()
 	}
 	if s.httpsLn != nil {
 		s.httpsLn.Close()
 	}
-	for port, ln := range s.listeners {
-		ln.Close()
+	pls := make([]*portListener, 0, len(s.listeners))
+	for port, pl := range s.listeners {
+		pls = append(pls, pl)
 		delete(s.listeners, port)
 	}
 	for port, conn := range s.udpListeners {
@@ -228,17 +249,24 @@ func (s *Server) shutdown() error {
 		agents = append(agents, a)
 	}
 	s.agents = make(map[string]*agentSession)
+	consoleSrv := s.consoleSrv
 	s.mu.Unlock()
 
+	for _, pl := range pls {
+		pl.close()
+	}
 	for _, a := range agents {
 		a.close()
 	}
 	s.closeUDPSessions()
+	if consoleSrv != nil {
+		_ = consoleSrv.Close()
+	}
 	if s.httpSrv != nil {
-		s.httpSrv.Close()
+		_ = s.httpSrv.Close()
 	}
 	if s.httpsSrv != nil {
-		s.httpsSrv.Close()
+		_ = s.httpsSrv.Close()
 	}
 	s.wg.Wait()
 	return nil
@@ -252,7 +280,24 @@ func (s *Server) startControl() error {
 	if err != nil {
 		return fmt.Errorf("listen control %s: %w", s.cfg.ControlListen, err)
 	}
+	cln := newChanListener(ln.Addr())
+	csrv := &http.Server{
+		Handler:           http.HandlerFunc(s.serveConsole),
+		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       90 * time.Second,
+	}
+	s.mu.Lock()
 	s.ctlLn = ln
+	s.consoleLn = cln
+	s.consoleSrv = csrv
+	s.mu.Unlock()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		_ = csrv.Serve(cln)
+	}()
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -287,9 +332,19 @@ func (s *Server) serveControlConn(raw net.Conn) {
 	s.serveConsoleConn(tc)
 }
 
-// serveConsoleConn hands a single TLS connection to the HTTP server, which is
-// how the console shares the control port without a second listener.
+// serveConsoleConn hands a non-tunnel TLS connection to the shared console
+// HTTP server, so shutdown immediately closes active keep-alive and SSE streams.
 func (s *Server) serveConsoleConn(c net.Conn) {
+	s.mu.Lock()
+	cln := s.consoleLn
+	s.mu.Unlock()
+	if cln != nil {
+		if !cln.push(c) {
+			c.Close()
+		}
+		return
+	}
+	// Fallback for direct unit-test invocations that bypass startControl().
 	srv := &http.Server{
 		Handler:           http.HandlerFunc(s.serveConsole),
 		ReadHeaderTimeout: 15 * time.Second,
@@ -808,6 +863,68 @@ func seedSettings(st *store.Store, cfg config.Server) error {
 		return changed, nil
 	})
 	return err
+}
+
+// chanListener feeds already-handshaked TLS connections to a single shared
+// http.Server so Close() tears down every active keep-alive and SSE stream.
+type chanListener struct {
+	addr   net.Addr
+	ch     chan net.Conn
+	done   chan struct{}
+	once   sync.Once
+}
+
+func newChanListener(addr net.Addr) *chanListener {
+	return &chanListener{
+		addr: addr,
+		ch:   make(chan net.Conn, 64),
+		done: make(chan struct{}),
+	}
+}
+
+func (l *chanListener) push(c net.Conn) bool {
+	select {
+	case <-l.done:
+		return false
+	default:
+	}
+	select {
+	case l.ch <- c:
+		return true
+	case <-l.done:
+		return false
+	}
+}
+
+func (l *chanListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.ch:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *chanListener) Close() error {
+	l.once.Do(func() {
+		close(l.done)
+		for {
+			select {
+			case c := <-l.ch:
+				_ = c.Close()
+			default:
+				return
+			}
+		}
+	})
+	return nil
+}
+
+func (l *chanListener) Addr() net.Addr {
+	if l.addr != nil {
+		return l.addr
+	}
+	return &net.TCPAddr{}
 }
 
 // oneConnListener yields a single accepted connection.

@@ -1007,3 +1007,83 @@ func TestTunnelJoinCodeAccessor(t *testing.T) {
 		t.Fatal("unknown tunnel reported a join code")
 	}
 }
+
+func TestStalledAgentDoesNotBlockPushAll(t *testing.T) {
+	s, st := newTestServer(t, nil)
+	addNode(t, st, "stalled")
+	a := &agentSession{
+		nodeID: "stalled",
+		send:   make(chan *proto.Frame, 2),
+		done:   make(chan struct{}),
+	}
+	// Fill the send queue to simulate an unresponsive peer.
+	a.send <- &proto.Frame{Type: proto.TypePing}
+	a.send <- &proto.Frame{Type: proto.TypePing}
+	s.setSession("stalled", a)
+
+	finished := make(chan struct{})
+	go func() {
+		s.pushAll()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("pushAll blocked on a stalled agent session")
+	}
+	select {
+	case <-a.done:
+	default:
+		t.Fatal("stalled agent session was not closed on queue overflow")
+	}
+}
+
+func TestRemoveNodeDisconnectsSession(t *testing.T) {
+	s, st := newTestServer(t, nil)
+	addNode(t, st, "n1")
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "svc", NodeID: "n1", Type: "tcp", Local: "8080"})
+	if err != nil {
+		t.Fatalf("create tunnel: %v", err)
+	}
+	a := &agentSession{
+		nodeID: "n1",
+		send:   make(chan *proto.Frame, 4),
+		done:   make(chan struct{}),
+	}
+	s.setSession("n1", a)
+	s.met.For(tun.ID).In.Add(1024)
+
+	if err := s.RemoveNode("n1"); err != nil {
+		t.Fatalf("remove node: %v", err)
+	}
+	select {
+	case <-a.done:
+	default:
+		t.Fatal("removing node did not close its active agent session")
+	}
+	if s.sessionFor("n1") != nil {
+		t.Fatal("removed node session still registered")
+	}
+	if _, ok := s.Tunnel(tun.ID); ok {
+		t.Fatal("tunnel of removed node still exists")
+	}
+}
+
+func TestServePortExitsOnClose(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	exited := make(chan struct{})
+	go func() {
+		s.servePort(ln.Addr().(*net.TCPAddr).Port, ln)
+		close(exited)
+	}()
+	_ = ln.Close()
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("servePort leaked goroutine after listener close")
+	}
+}

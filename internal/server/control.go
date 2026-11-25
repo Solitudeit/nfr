@@ -76,6 +76,11 @@ func (a *agentSession) sendFrame(f *proto.Frame) error {
 		return nil
 	case <-a.done:
 		return errors.New("session closed")
+	default:
+		// Control stream is backed up and unresponsive; tear down this session
+		// so the agent reconnects cleanly instead of stalling global pushes.
+		a.close()
+		return errors.New("control send queue full")
 	}
 }
 
@@ -307,15 +312,18 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		s.lg.Info("node offline", "node", node.Name, "id", node.ID)
 	}()
 
-	// Serialised writer.
+	// Serialised writer with bounded write deadlines so a stalled peer cannot
+	// hang the writer goroutine indefinitely.
 	go func() {
 		for {
 			select {
 			case f := <-a.send:
+				_ = ctrl.SetWriteDeadline(time.Now().Add(15 * time.Second))
 				if err := proto.WriteFrame(ctrl, f); err != nil {
 					a.close()
 					return
 				}
+				_ = ctrl.SetWriteDeadline(time.Time{})
 			case <-a.done:
 				return
 			}
@@ -473,9 +481,11 @@ func (s *Server) openStream(nodeID string, h *proto.StreamHeader) (net.Conn, err
 	if err != nil {
 		return nil, err
 	}
+	_ = st.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if err := proto.WriteStreamHeader(st, h); err != nil {
 		st.Close()
 		return nil, err
 	}
+	_ = st.SetWriteDeadline(time.Time{})
 	return st, nil
 }

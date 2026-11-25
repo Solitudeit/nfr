@@ -131,11 +131,14 @@ func (a *Agent) session(ctx context.Context) error {
 		raw.Close()
 		return err
 	}
-	if pin := transport.PinOf(tc.ConnectionState()); a.opt.Pin == "" && !a.opt.CA {
-		a.lg.Info("trusting server certificate", "server", a.opt.Addr, "pin", transport.FormatPin(pin))
-	} else if transport.FormatPin(pin) != transport.FormatPin(a.opt.Pin) {
-		raw.Close()
-		return errors.New("server certificate fingerprint changed, refusing to connect")
+	if !a.opt.CA {
+		pin := transport.PinOf(tc.ConnectionState())
+		if a.opt.Pin == "" {
+			a.lg.Info("trusting server certificate", "server", a.opt.Addr, "pin", transport.FormatPin(pin))
+		} else if transport.FormatPin(pin) != transport.FormatPin(a.opt.Pin) {
+			raw.Close()
+			return errors.New("server certificate fingerprint changed, refusing to connect")
+		}
 	}
 
 	sess, err := yamux.Client(tc, yamuxConfig())
@@ -224,7 +227,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case proto.TypeConfig:
 			a.applyConfig(f)
 		case proto.TypePing:
-			if err := proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypePong, TS: time.Now().Unix()}); err != nil {
+			if err := a.sendFrame(&proto.Frame{Type: proto.TypePong, TS: time.Now().Unix()}); err != nil {
 				return err
 			}
 		case proto.TypePong:
@@ -245,7 +248,10 @@ func (a *Agent) sendFrame(f *proto.Frame) error {
 	}
 	a.wmu.Lock()
 	defer a.wmu.Unlock()
-	return proto.WriteFrame(ctrl, f)
+	_ = ctrl.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	err := proto.WriteFrame(ctrl, f)
+	_ = ctrl.SetWriteDeadline(time.Time{})
+	return err
 }
 
 // reportDialFailed tells the server that this tunnel's inner address refused
