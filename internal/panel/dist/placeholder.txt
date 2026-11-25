@@ -1,0 +1,1 @@
+Run `pnpm --dir web build` to generate the embedded NFR web console assets.

@@ -33,6 +33,21 @@ const (
 	// address of a tunnel. Without it the server only sees a closed stream and
 	// cannot tell a dead local service from a quiet connection.
 	TypeDialFailed = "dial_failed"
+	// TypeProbe asks an agent to actively test reachability of a tunnel's local
+	// address without carrying user traffic.
+	TypeProbe = "probe"
+	// TypeProbeResult carries the outcome of one TypeProbe request back to the
+	// control node.
+	TypeProbeResult = "probe_result"
+	// TypeKick instructs an agent to disconnect cleanly and stop reconnecting.
+	TypeKick = "kick"
+)
+
+// Probe result statuses carried in Frame.Status for TypeProbeResult.
+const (
+	ProbeOK     = "ok"
+	ProbeFailed = "failed"
+	ProbeBusy   = "busy"
 )
 
 // MaxFrameSize bounds a single control frame.
@@ -62,9 +77,11 @@ type Frame struct {
 	Proxies     []ProxySpec `json:"proxies,omitempty"`
 	SyncProxies bool        `json:"sync_proxies,omitempty"`
 
-	Code    string `json:"code,omitempty"`
-	Message string `json:"msg,omitempty"`
-	TS      int64  `json:"ts,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"msg,omitempty"`
+	TS       int64  `json:"ts,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 // ProxySpec is a tunnel declared in a client config file and synced to the
@@ -81,10 +98,11 @@ type ProxySpec struct {
 
 // TunnelSpec is the agent's view of one tunnel: where to dial locally.
 type TunnelSpec struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Type  string `json:"type"` // tcp | http | udp
-	Local string `json:"local"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Type       string `json:"type"` // tcp | http | udp
+	Local      string `json:"local"`
+	PublicAddr string `json:"public_addr,omitempty"`
 }
 
 // StreamHeader prefixes every proxied connection so the agent knows which

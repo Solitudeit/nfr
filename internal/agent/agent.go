@@ -56,8 +56,9 @@ type Agent struct {
 
 	// ctrl is the control stream of the current session, guarded by wmu
 	// because streams report dial failures from their own goroutines.
-	ctrl net.Conn
-	wmu  sync.Mutex
+	ctrl     net.Conn
+	wmu      sync.Mutex
+	probeSem chan struct{}
 }
 
 // New builds an agent.
@@ -66,7 +67,12 @@ func New(opt Options) *Agent {
 	if lg == nil {
 		lg = slog.Default()
 	}
-	return &Agent{opt: opt, lg: lg, routes: map[string]tunnelRoute{}}
+	return &Agent{
+		opt:      opt,
+		lg:       lg,
+		routes:   map[string]tunnelRoute{},
+		probeSem: make(chan struct{}, maxConcurrentProbes),
+	}
 }
 
 // Local returns the address currently bound to a tunnel.
@@ -80,7 +86,9 @@ func (a *Agent) Local(tunnelID string) (string, bool) {
 	return v.local, true
 }
 
-// Run dials the server until the context is cancelled.
+var errKicked = errors.New("kicked by server")
+
+// Run dials the server until the context is cancelled or the server sends a kick frame.
 func (a *Agent) Run(ctx context.Context) {
 	backoff := time.Second
 	for {
@@ -92,10 +100,21 @@ func (a *Agent) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errKicked) {
+			a.mu.Lock()
+			nid := a.nodeID
+			a.mu.Unlock()
+			if nid != "" {
+				a.lg.Info(fmt.Sprintf("[%s] 收到服务端强制下线指令, 客户端已停止", nid))
+			} else {
+				a.lg.Info("收到服务端强制下线指令, 客户端已停止")
+			}
+			return
+		}
 		if time.Since(start) > 20*time.Second {
 			backoff = time.Second
 		}
-		a.lg.Warn("connection lost", "server", a.opt.Addr, "err", err, "retry_in", backoff)
+		a.lg.Warn(fmt.Sprintf("连接断开 (%v), %s 后重试...", err, backoff))
 		select {
 		case <-ctx.Done():
 			return
@@ -123,6 +142,7 @@ func (a *Agent) session(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bad server address %q: %w", a.opt.Addr, err)
 	}
+	a.lg.Info(fmt.Sprintf("尝试连接到节点 [%s]...", a.opt.Addr))
 	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 	raw, err := dialer.DialContext(ctx, "tcp", a.opt.Addr)
 	if err != nil {
@@ -213,7 +233,7 @@ func (a *Agent) session(ctx context.Context) error {
 		return fmt.Errorf("unexpected frame %q after auth", f.Type)
 	}
 	_ = ctrl.SetReadDeadline(time.Time{})
-	a.lg.Info("connected", "server", a.opt.Addr, "node", f.NodeID, "revision", f.Revision)
+	a.lg.Info(fmt.Sprintf("[%s] 登录节点成功, RunId: [%s]", f.NodeID, f.NodeID))
 
 	a.mu.Lock()
 	a.nodeID = f.NodeID
@@ -262,6 +282,10 @@ func (a *Agent) session(ctx context.Context) error {
 				return err
 			}
 		case proto.TypePong:
+		case proto.TypeProbe:
+			a.handleProbe(ctx, f)
+		case proto.TypeKick:
+			return errKicked
 		case proto.TypeError:
 			return fmt.Errorf("server error: %s", f.Message)
 		}
@@ -311,20 +335,28 @@ func (a *Agent) applyConfig(f *proto.Frame) {
 	}
 	a.mu.Lock()
 	old := a.routes
+	runID := a.nodeID
 	a.routes = next
 	a.mu.Unlock()
-	added, removed := 0, 0
-	for id := range next {
-		if _, ok := old[id]; !ok {
-			added++
+	if runID == "" {
+		runID = f.NodeID
+	}
+	for _, t := range f.Tunnels {
+		if _, existed := old[t.ID]; !existed {
+			tag := t.ID + "." + t.Name
+			a.lg.Info(fmt.Sprintf("[%s] 隧道 [%s] 登记成功", runID, tag))
+			if t.PublicAddr != "" {
+				a.lg.Info(fmt.Sprintf("[%s] 启动 [%s] 隧道 [%s] 成功, 您可以使用 [%s] 访问您的服务", runID, t.Type, tag, t.PublicAddr))
+			} else {
+				a.lg.Info(fmt.Sprintf("[%s] 启动 [%s] 隧道 [%s] 成功, 本地目标 [%s]", runID, t.Type, tag, t.Local))
+			}
 		}
 	}
 	for id := range old {
 		if _, ok := next[id]; !ok {
-			removed++
+			a.lg.Info(fmt.Sprintf("[%s] 隧道 [%s] 已停止", runID, id))
 		}
 	}
-	a.lg.Info("configuration applied", "revision", f.Revision, "tunnels", len(next), "added", added, "removed", removed)
 }
 
 func (a *Agent) acceptLoop(ctx context.Context, sess *yamux.Session) {

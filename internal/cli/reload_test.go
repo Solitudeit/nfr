@@ -97,3 +97,26 @@ func TestRunAgentsWithReloadDoesNotDuplicateOnBadConfig(t *testing.T) {
 		t.Fatal("reload loop did not exit on ctx cancel")
 	}
 }
+
+func TestReloadLoopExitsWhenAgentStops(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reloadCh := make(chan os.Signal, 1)
+
+	runner := func(_ context.Context, _ config.Agent, _ *slog.Logger) {
+		// Simulates Agent.Run exiting cleanly after receiving TypeKick.
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runAgentsReloadLoop(ctx, reloadCh, "", config.Agent{}, log.New("error", ""), runner)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		cancel()
+		t.Fatal("reload loop hung after agent runner exited cleanly")
+	}
+}

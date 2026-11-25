@@ -13,7 +13,17 @@ const (
 	secWindow = 300
 	// minWindow is the number of one minute samples kept per tunnel (24h).
 	minWindow = 1440
+	// rateWindow is the number of global one second rate points kept for the
+	// live dashboard throughput chart.
+	rateWindow = 60
 )
+
+// RatePoint is one global per-second throughput sample for the dashboard chart.
+type RatePoint struct {
+	TS      int64   `json:"ts"`
+	InRate  float64 `json:"in_rate"`
+	OutRate float64 `json:"out_rate"`
+}
 
 // Counter is one tunnel's live totals.
 type Counter struct {
@@ -58,11 +68,16 @@ type hist struct {
 
 // Registry owns every counter.
 type Registry struct {
-	mu    sync.Mutex
-	m     map[string]*Counter
-	hist  map[string]*hist
-	total Counter
-	start time.Time
+	mu           sync.Mutex
+	m            map[string]*Counter
+	hist         map[string]*hist
+	total        Counter
+	start        time.Time
+	rateRing     [rateWindow]RatePoint
+	rateIdx      int
+	rateCount    int
+	lastTotalIn  int64
+	lastTotalOut int64
 }
 
 // New returns an empty registry.
@@ -112,6 +127,27 @@ func (r *Registry) AddBytes(tunnelID string, in, out int64) {
 func (r *Registry) Sample() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	nowTS := time.Now().Unix()
+	totIn := r.total.In.Load()
+	totOut := r.total.Out.Load()
+	din := totIn - r.lastTotalIn
+	dout := totOut - r.lastTotalOut
+	r.lastTotalIn, r.lastTotalOut = totIn, totOut
+	if din < 0 {
+		din = 0
+	}
+	if dout < 0 {
+		dout = 0
+	}
+	r.rateRing[r.rateIdx] = RatePoint{
+		TS:      nowTS,
+		InRate:  float64(din),
+		OutRate: float64(dout),
+	}
+	r.rateIdx = (r.rateIdx + 1) % rateWindow
+	if r.rateCount < rateWindow {
+		r.rateCount++
+	}
 	for id, c := range r.m {
 		h := r.hist[id]
 		if h == nil {
@@ -201,6 +237,26 @@ func (r *Registry) Totals() Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return Snapshot{In: r.total.In.Load(), Out: r.total.Out.Load()}
+}
+
+// RecentRates returns the collected global per-second rate points (at most 60)
+// in chronological order. During cold start (<60s), only actually sampled
+// points are returned without synthetic leading zero padding.
+func (r *Registry) RecentRates() []RatePoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.rateCount == 0 {
+		return []RatePoint{}
+	}
+	out := make([]RatePoint, 0, r.rateCount)
+	start := 0
+	if r.rateCount == rateWindow {
+		start = r.rateIdx
+	}
+	for i := 0; i < r.rateCount; i++ {
+		out = append(out, r.rateRing[(start+i)%rateWindow])
+	}
+	return out
 }
 
 func (h *hist) secondsOrdered() []Point {

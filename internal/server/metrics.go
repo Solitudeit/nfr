@@ -7,8 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/solitudeit/nfr/internal/metrics"
 	"github.com/solitudeit/nfr/internal/version"
 )
+
+// RecentRates returns up to 60 one-second global throughput points for the
+// web console live chart.
+func (s *Server) RecentRates() []metrics.RatePoint {
+	if s.met == nil {
+		return []metrics.RatePoint{}
+	}
+	return s.met.RecentRates()
+}
 
 // buildMetrics serves a small Prometheus text exposition. It reuses the API
 // authentication so tunnel names are not public: enable the API and mint a

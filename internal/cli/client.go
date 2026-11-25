@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -146,7 +147,13 @@ func cmdAgent(args []string) {
 	if err := cfg.Validate(); err != nil {
 		fatal("invalid config: %v", err)
 	}
-	runAgentsWithReload(*cfgPath, cfg, log.New(cfg.LogLevel, cfg.LogFile))
+	lg := log.NewClient(cfg.LogLevel, cfg.LogFile)
+	cfgLabel := filepath.Base(*cfgPath)
+	if cfgLabel == "" || cfgLabel == "." {
+		cfgLabel = *cfgPath
+	}
+	lg.Info(fmt.Sprintf("开始启动 NFR 客户端, 当前正在使用配置文件 [%s]", cfgLabel))
+	runAgentsWithReload(*cfgPath, cfg, lg)
 }
 
 type wellKnown struct {
@@ -314,6 +321,9 @@ func runAgentsReloadLoop(
 				runCancel()
 				<-done
 				return
+			case <-done:
+				runCancel()
+				return
 			case <-reloadCh:
 				next, _, err := config.LoadAgent(cfgPath)
 				if err != nil {
@@ -376,7 +386,7 @@ func runAgentsContext(ctx context.Context, cfg config.Agent, lg *slog.Logger) {
 			NodeID:    s.NodeID,
 			Pin:       s.Pin,
 			CA:        s.CA,
-			Logger:    lg.With("server", s.Addr),
+			Logger:    lg,
 		})
 		wg.Add(1)
 		go func() {
@@ -384,7 +394,6 @@ func runAgentsContext(ctx context.Context, cfg config.Agent, lg *slog.Logger) {
 			a.Run(ctx)
 		}()
 	}
-	lg.Info("client started", "servers", len(servers))
 	wg.Wait()
 }
 

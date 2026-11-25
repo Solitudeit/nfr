@@ -46,6 +46,7 @@ type State struct {
 	Revision      uint64    `json:"revision"`
 
 	PanelPassword string          `json:"panel_password"`
+	PanelSessions []PanelSession  `json:"panel_sessions,omitempty"`
 	Settings      Settings        `json:"settings"`
 	Tunnels       []Tunnel        `json:"tunnels"`
 	Nodes         []Node          `json:"nodes"`
@@ -53,6 +54,15 @@ type State struct {
 	Leases        []Lease         `json:"leases"`
 	Remotes       []Remote        `json:"remotes"`
 	APIKeys       []auth.APIKey   `json:"api_keys"`
+}
+
+// PanelSession stores a persisted "remember me" console session keyed by the
+// SHA-256 hash of its HttpOnly cookie token so sessions survive nfrs restarts
+// without ever saving plaintext passwords in the browser.
+type PanelSession struct {
+	TokenHash string    `json:"token_hash"`
+	CSRF      string    `json:"csrf"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // Settings are operator tunables exposed in the console.

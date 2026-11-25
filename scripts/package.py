@@ -170,6 +170,27 @@ def main():
             else:
                 pack_tar_gz(stage, top_name, archive_path)
             archives.append(archive_name)
+
+            # Also emit a version-free lightweight client-only archive
+            # (nfrc_<os>_<arch>.<ext>) containing strictly nfrc / nfrc.exe at
+            # the archive root for fixed /releases/latest/download/ links.
+            client_archive_name = f"nfrc_{label_os}_{label_arch}.{ext}"
+            client_archive_path = os.path.join(out_dir, client_archive_name)
+            client_bin_name = "nfrc" + bin_ext
+            if ext == "zip":
+                with zipfile.ZipFile(client_archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    zf.write(nfrc_bin, arcname=client_bin_name)
+            else:
+                with tarfile.open(client_archive_path, "w:gz") as tf:
+                    ti = tf.gettarinfo(nfrc_bin, arcname=client_bin_name)
+                    ti.uid = 0
+                    ti.gid = 0
+                    ti.uname = ""
+                    ti.gname = ""
+                    ti.mode = 0o755
+                    with open(nfrc_bin, "rb") as f:
+                        tf.addfile(ti, f)
+            archives.append(client_archive_name)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
 

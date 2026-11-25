@@ -1,12 +1,13 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -254,14 +255,24 @@ func TestPanelDefaultPlainHTTPAndOptInHTTPS(t *testing.T) {
 	hc := &http.Client{Jar: jar, Timeout: 5 * time.Second}
 	baseHTTP := "http://" + cfg1.ControlListen
 
-	resp, err := hc.PostForm(baseHTTP+"/nfr/login", url.Values{"password": {pw1}})
+	payload, _ := json.Marshal(map[string]string{"password": pw1})
+	resp, err := hc.Post(baseHTTP+"/nfr/api/auth/login", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("plain HTTP login failed: %v", err)
 	}
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(bodyBytes), `data-stat="nodes-online"`) {
-		t.Fatalf("plain HTTP login did not land on authenticated tunnels page: status=%d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(bodyBytes), `"authenticated":true`) {
+		t.Fatalf("plain HTTP login failed: status=%d body=%s", resp.StatusCode, string(bodyBytes))
+	}
+	dashResp, err := hc.Get(baseHTTP + "/nfr/api/dashboard")
+	if err != nil {
+		t.Fatalf("plain HTTP dashboard fetch failed: %v", err)
+	}
+	dashBody, _ := io.ReadAll(dashResp.Body)
+	dashResp.Body.Close()
+	if dashResp.StatusCode != http.StatusOK || !strings.Contains(string(dashBody), `"nodes"`) {
+		t.Fatalf("plain HTTP session cookie did not authenticate dashboard: status=%d", dashResp.StatusCode)
 	}
 
 	// 2) Opt-in HTTPS (panel.https = true): plain HTTP redirects 308 -> https://.

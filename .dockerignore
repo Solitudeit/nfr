@@ -1,0 +1,13 @@
+.git
+.gitignore
+.worktrees
+bin
+dist
+docs
+web/node_modules
+internal/panel/dist
+*.log
+*.test
+__pycache__
+*.pyc
+.DS_Store

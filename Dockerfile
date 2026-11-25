@@ -1,8 +1,17 @@
+FROM node:22-alpine AS web
+WORKDIR /src
+RUN npm install -g pnpm@12
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./web/
+RUN pnpm --dir web install --frozen-lockfile
+COPY web ./web
+RUN pnpm --dir web build
+
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=web /src/internal/panel/dist ./internal/panel/dist
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X github.com/solitudeit/nfr/internal/version.Version=${VERSION}" \

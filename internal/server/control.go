@@ -89,6 +89,11 @@ type agentSession struct {
 	remote    string
 	connected time.Time
 	closeOnce sync.Once
+
+	probeMu       sync.Mutex
+	probeSem      chan struct{}
+	probes        map[string]chan probeReply
+	probeInflight map[string]*inflightProbe
 }
 
 func (a *agentSession) close() {
@@ -111,6 +116,15 @@ func (a *agentSession) sendFrame(f *proto.Frame) error {
 		// so the agent reconnects cleanly instead of stalling global pushes.
 		a.close()
 		return errors.New("control send queue full")
+	}
+}
+
+func (a *agentSession) kick(msg string) {
+	select {
+	case a.send <- &proto.Frame{Type: proto.TypeKick, Message: msg}:
+	case <-a.done:
+	default:
+		a.close()
 	}
 }
 
@@ -309,29 +323,50 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		if name == "" {
 			name = "node-" + store.NewID()[:4]
 		}
+		isPerTunnel := strings.HasPrefix(name, "t-")
+		perTunnelID := strings.TrimPrefix(name, "t-")
 		now := time.Now().UTC()
 		created := false
+		claimedChanged := false
 		if err := s.st.Update(func(st *store.State) error {
+			// Per-tunnel generated configs connect with name "t-<tunnel_id>".
+			// Check existence, upsert node, and claim tunnel atomically inside
+			// one store transaction so a concurrent delete never leaves an
+			// orphan node or resurrects a deleted tunnel.
+			var targetTun *store.Tunnel
+			if isPerTunnel {
+				t, ok := st.TunnelByID(perTunnelID)
+				if !ok {
+					return errNotFound("tunnel deleted or not found")
+				}
+				targetTun = t
+			}
 			if existing, ok := st.NodeByName(name); ok {
 				existing.OS, existing.Arch, existing.Version = hello.OS, hello.Arch, hello.Version
 				existing.LastSeen = &now
 				existing.LastRemote = ip
 				node = *existing
-				return nil
+			} else {
+				node = store.Node{
+					ID:         store.NewID(),
+					Name:       name,
+					TokenHash:  auth.Hash(shared),
+					OS:         hello.OS,
+					Arch:       hello.Arch,
+					Version:    hello.Version,
+					CreatedAt:  now,
+					LastSeen:   &now,
+					LastRemote: ip,
+				}
+				st.Nodes = append(st.Nodes, node)
+				created = true
 			}
-			node = store.Node{
-				ID:         store.NewID(),
-				Name:       name,
-				TokenHash:  auth.Hash(shared),
-				OS:         hello.OS,
-				Arch:       hello.Arch,
-				Version:    hello.Version,
-				CreatedAt:  now,
-				LastSeen:   &now,
-				LastRemote: ip,
+			if targetTun != nil && (targetTun.NodeID != node.ID || targetTun.ManagedByConfig) {
+				targetTun.NodeID = node.ID
+				targetTun.ManagedByConfig = false
+				targetTun.UpdatedAt = now
+				claimedChanged = true
 			}
-			st.Nodes = append(st.Nodes, node)
-			created = true
 			return nil
 		}); err != nil {
 			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: err.Error()})
@@ -341,6 +376,10 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		if created {
 			s.lg.Info("node registered via config", "node", node.Name, "id", node.ID, "remote", ip)
 			s.hub.publish(api.Event{Type: "node-joined", At: now, Message: node.Name})
+		}
+		if claimedChanged {
+			s.reconcile()
+			s.notify("tunnel claimed: " + perTunnelID)
 		}
 	} else {
 		if !s.joinAllowed(ip) {
@@ -375,8 +414,9 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		_ = ctrl.SetReadDeadline(time.Time{})
 	}
 
-	// Sync any tunnels declared directly in the client's TOML/YAML config file.
-	if hello.SyncProxies || len(hello.Proxies) > 0 {
+	// Per-tunnel panel configs ("t-<id>") already claimed their tunnel atomically
+	// above; regular client configs use declarative sync.
+	if !(usingSharedToken && strings.HasPrefix(node.Name, "t-")) && (hello.SyncProxies || len(hello.Proxies) > 0) {
 		if err := s.syncDeclarativeProxies(node.ID, hello.Proxies, hello.SyncProxies); err != nil {
 			s.lg.Warn("sync client proxies failed", "node", node.Name, "err", err)
 			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "proxy config error: " + err.Error()})
@@ -392,12 +432,15 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 	}
 
 	a := &agentSession{
-		nodeID:    node.ID,
-		sess:      sess,
-		send:      make(chan *proto.Frame, 64),
-		done:      make(chan struct{}),
-		remote:    ip,
-		connected: time.Now().UTC(),
+		nodeID:        node.ID,
+		sess:          sess,
+		send:          make(chan *proto.Frame, 64),
+		done:          make(chan struct{}),
+		remote:        ip,
+		connected:     time.Now().UTC(),
+		probeSem:      make(chan struct{}, probeMaxPerNode),
+		probes:        make(map[string]chan probeReply),
+		probeInflight: make(map[string]*inflightProbe),
 	}
 	s.setSession(node.ID, a)
 	defer func() {
@@ -433,6 +476,13 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 					return
 				}
 				_ = ctrl.SetWriteDeadline(time.Time{})
+				if f.Type == proto.TypeKick {
+					// Give the TCP stack a brief moment to flush the kick frame
+					// before tearing down the yamux session.
+					time.Sleep(30 * time.Millisecond)
+					a.close()
+					return
+				}
 			case <-a.done:
 				return
 			}
@@ -469,6 +519,8 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 			// The agent is connected but its inner address refused. Record it
 			// so the tunnel reports 目标不可达 rather than 就绪.
 			s.markTargetDown(node.ID, f.Code, f.Message, f.TS)
+		case proto.TypeProbeResult:
+			a.deliverProbeResult(f)
 		}
 	}
 }
@@ -525,8 +577,34 @@ func remoteIP(addr net.Addr) string {
 // configFrame renders the desired tunnel set of a node.
 func (s *Server) configFrame(nodeID string, rev uint64, tunnels []store.Tunnel) *proto.Frame {
 	specs := make([]proto.TunnelSpec, 0, len(tunnels))
+	host := s.publicHost()
+	if host == "" {
+		if h, _, err := net.SplitHostPort(s.cfg.ControlListen); err == nil {
+			host = transport.BestHost("", h)
+		}
+	}
 	for _, t := range tunnels {
-		specs = append(specs, proto.TunnelSpec{ID: t.ID, Name: t.Name, Type: t.Type, Local: t.Local})
+		pub := ""
+		if t.Type == store.TunnelHTTP && len(t.Hosts) > 0 {
+			pub = "http://" + t.Hosts[0]
+		} else if t.RemotePort > 0 {
+			addr := fmt.Sprintf(":%d", t.RemotePort)
+			if host != "" {
+				addr = net.JoinHostPort(host, fmt.Sprintf("%d", t.RemotePort))
+			}
+			if t.Type == store.TunnelHTTP {
+				pub = "http://" + addr
+			} else {
+				pub = addr
+			}
+		}
+		specs = append(specs, proto.TunnelSpec{
+			ID:         t.ID,
+			Name:       t.Name,
+			Type:       t.Type,
+			Local:      t.Local,
+			PublicAddr: pub,
+		})
 	}
 	return &proto.Frame{Type: proto.TypeConfig, NodeID: nodeID, Revision: rev, Tunnels: specs, TS: time.Now().Unix()}
 }
@@ -628,10 +706,18 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 			}
 			var existing *store.Tunnel
 			for i := range st.Tunnels {
-				if st.Tunnels[i].NodeID == nodeID && strings.EqualFold(st.Tunnels[i].Name, name) {
+				if (st.Tunnels[i].NodeID == nodeID || st.Tunnels[i].NodeID == "") && strings.EqualFold(st.Tunnels[i].Name, name) {
 					existing = &st.Tunnels[i]
 					break
 				}
+			}
+			// If an unbound panel-created standalone tunnel matches by name,
+			// claim it in place while keeping panel ownership (ManagedByConfig=false).
+			if existing != nil && existing.NodeID == "" && !existing.ManagedByConfig {
+				existing.NodeID = nodeID
+				existing.UpdatedAt = now
+				mutated = true
+				continue
 			}
 			// If an HTTP proxy has no hosts, no remote_port, and server has no
 			// domain configured, auto-assign a free public port so IP-only VPS

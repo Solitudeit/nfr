@@ -114,6 +114,15 @@ type AllocateResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// ProbeResult reports the outcome of one active tunnel reachability check.
+type ProbeResult struct {
+	TunnelID string `json:"tunnel_id"`
+	Status   string `json:"status"` // ok | failed | offline | disabled | awaiting | unsupported | busy | timeout
+	RTTMs    int64  `json:"rtt_ms,omitempty"`
+	LocalMs  int64  `json:"local_ms,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
 // JoinCodeRequest mints a one-time invitation.
 type JoinCodeRequest struct {
 	Name       string `json:"name"`

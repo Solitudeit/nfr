@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>NFR 控制台</title>
+    <link rel="icon" type="image/png" href="/nfr/favicon.png" />
+    <link rel="apple-touch-icon" href="/nfr/logo.png" />
+    <script>
+      (function () {
+        try {
+          if (window.localStorage.getItem('nfr_theme_dark') === '1') {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      #nfr-boot-shell {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 16px;
+        background: #fafafa;
+        color: #18181b;
+        font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+        box-sizing: border-box;
+      }
+      html.dark #nfr-boot-shell {
+        background: #09090b;
+        color: #fafafa;
+      }
+      #nfr-boot-card {
+        width: 100%;
+        max-width: 340px;
+        background: #ffffff;
+        border: 1px solid #e4e4e7;
+        border-radius: 12px;
+        padding: 22px 20px;
+        text-align: center;
+      }
+      html.dark #nfr-boot-card {
+        background: #18181b;
+        border-color: rgba(255, 255, 255, 0.09);
+      }
+      #nfr-boot-mark {
+        width: 44px;
+        height: 44px;
+        margin: 0 auto 12px;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid #e4e4e7;
+        padding: 4px;
+        display: block;
+        object-fit: contain;
+        box-sizing: border-box;
+      }
+      html.dark #nfr-boot-mark {
+        background: #ffffff;
+        border-color: rgba(255, 255, 255, 0.14);
+      }
+      #nfr-boot-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      #nfr-boot-sub {
+        font-size: 13px;
+        color: #71717a;
+        word-break: break-word;
+      }
+      html.dark #nfr-boot-sub {
+        color: #a1a1aa;
+      }
+      #nfr-boot-err {
+        display: none;
+        margin-top: 12px;
+        padding: 10px;
+        border-radius: 6px;
+        background: rgba(220, 38, 38, 0.1);
+        color: #dc2626;
+        font-size: 12px;
+        text-align: left;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      #nfr-boot-retry {
+        display: none;
+        margin-top: 14px;
+        padding: 9px 18px;
+        border: none;
+        border-radius: 6px;
+        background: #18181b;
+        color: #ffffff;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      html.dark #nfr-boot-retry {
+        background: #f4f4f5;
+        color: #09090b;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="nfr-boot-shell">
+        <div id="nfr-boot-card">
+          <img id="nfr-boot-mark" src="/nfr/logo.png" alt="NFR" />
+          <div id="nfr-boot-title">正在加载 NFR 控制台…</div>
+          <div id="nfr-boot-sub">正在准备页面资源，请稍候</div>
+          <pre id="nfr-boot-err"></pre>
+          <button id="nfr-boot-retry" type="button" onclick="location.reload()">重新加载</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        window.__NFR_MOUNTED__ = false;
+        function showBootError(title, detail) {
+          if (window.__NFR_MOUNTED__) return;
+          var t = document.getElementById('nfr-boot-title');
+          var s = document.getElementById('nfr-boot-sub');
+          var e = document.getElementById('nfr-boot-err');
+          var b = document.getElementById('nfr-boot-retry');
+          if (t) t.textContent = title;
+          if (s) s.textContent = '页面启动遇到异常，可重试或反馈下方信息：';
+          if (e) {
+            e.style.display = 'block';
+            e.textContent = detail + '\nUA: ' + navigator.userAgent;
+          }
+          if (b) b.style.display = 'inline-block';
+        }
+        window.addEventListener(
+          'error',
+          function (ev) {
+            if (window.__NFR_MOUNTED__) return;
+            var target = ev && ev.target;
+            if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+              var src = target.src || target.href || '';
+              showBootError('静态资源加载失败', '无法加载：' + src);
+              return;
+            }
+            if (target && target !== window) {
+              return;
+            }
+            var msg = (ev && ev.message) || '未知脚本错误';
+            var loc = ev && ev.filename ? ' (' + ev.filename + ':' + ev.lineno + ')' : '';
+            showBootError('页面脚本运行异常', msg + loc);
+          },
+          true
+        );
+        window.addEventListener('unhandledrejection', function (ev) {
+          if (window.__NFR_MOUNTED__) return;
+          var reason = ev && ev.reason;
+          var msg = (reason && (reason.stack || reason.message)) || String(reason || 'Promise rejection');
+          showBootError('页面初始化失败', msg);
+        });
+        setTimeout(function () {
+          if (!window.__NFR_MOUNTED__) {
+            showBootError('加载超时', '等待前端脚本初始化超过 15 秒，请检查网络或刷新重试。');
+          }
+        }, 15000);
+      })();
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

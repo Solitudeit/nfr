@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Federation end-to-end test: one console manages a second, independent node.
+"""Federation REST API end-to-end test.
 
-Starts two NFR servers (A and B), enables the API on B, adds B to A with a
-key, then creates a tunnel on B *from A's console* and drives traffic through
-B. Also checks TOFU pinning and reachability reporting.
+Verifies that backend federation (/api/v1/servers and ?server=<id> proxy)
+remains fully functional via Bearer API keys after the Web Console focused
+on single-host management.
+
+Starts two NFR servers (A and B), enables the REST API and mints admin keys
+on both via their single-host panel JSON API, registers B on A via
+POST /api/v1/servers (with TOFU), joins an agent on B, creates a tunnel on B
+through A's /api/v1/tunnels?server=<b_id>, drives real traffic through B,
+checks wrong-pin rejection, reachability reporting, and server removal.
 
     python3 scripts/e2e_federation.py
 """
@@ -22,7 +28,6 @@ import tempfile
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -69,28 +74,67 @@ class Panel:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+        self.ctx = ctx
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPSHandler(context=ctx),
             urllib.request.HTTPCookieProcessor(self.jar),
         )
         self.csrf = ""
 
-    def request(self, path, form=None, headers=None):
-        data = urllib.parse.urlencode(form).encode() if form is not None else None
-        req = urllib.request.Request(self.base + path, data=data, headers=headers or {})
+    def json(self, path, method="GET", payload=None, headers=None):
+        hdrs = dict(headers or {})
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json")
+        if method in ("POST", "PATCH", "PUT", "DELETE") and self.csrf:
+            hdrs.setdefault("X-CSRF", self.csrf)
+        req = urllib.request.Request(self.base + path, data=data, headers=hdrs, method=method)
         try:
             with self.opener.open(req, timeout=15) as resp:
-                return resp.status, resp.read().decode("utf-8", "replace")
+                text = resp.read().decode("utf-8", "replace")
+                return resp.status, json.loads(text) if text.strip() else {}
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode("utf-8", "replace")
+            text = e.read().decode("utf-8", "replace")
+            try:
+                parsed = json.loads(text) if text.strip() else {}
+            except ValueError:
+                parsed = {"_raw": text}
+            return e.code, parsed
 
     def login(self, password):
-        self.request("/nfr/login")
-        status, html = self.request("/nfr/login", {"password": password})
-        _, page = self.request("/nfr/nodes")
-        m = re.search(r'name="csrf" value="([^"]+)"', page)
-        self.csrf = m.group(1) if m else ""
-        return status, html
+        st, data = self.json("/nfr/api/auth/login", method="POST", payload={"password": password})
+        if st == 200 and data.get("csrf"):
+            self.csrf = data["csrf"]
+        return st, data
+
+
+class RestClient:
+    def __init__(self, port, token):
+        self.base = "https://127.0.0.1:%d" % port
+        self.token = token
+        self.ctx = ssl.create_default_context()
+        self.ctx.check_hostname = False
+        self.ctx.verify_mode = ssl.CERT_NONE
+
+    def json(self, path, method="GET", payload=None):
+        hdrs = {"Authorization": "Bearer " + self.token}
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            hdrs["Content-Type"] = "application/json"
+        req = urllib.request.Request(self.base + path, data=data, headers=hdrs, method=method)
+        try:
+            with urllib.request.urlopen(req, context=self.ctx, timeout=15) as resp:
+                text = resp.read().decode("utf-8", "replace")
+                return resp.status, json.loads(text) if text.strip() else {}
+        except urllib.error.HTTPError as e:
+            text = e.read().decode("utf-8", "replace")
+            try:
+                parsed = json.loads(text) if text.strip() else {}
+            except ValueError:
+                parsed = {"_raw": text}
+            return e.code, parsed
 
 
 class LocalService(BaseHTTPRequestHandler):
@@ -145,8 +189,11 @@ def main():
     nfrc = os.path.abspath(NFRC_BIN)
     missing = [p for p in (nfrs, nfrc) if not os.path.exists(p)]
     if missing:
-        print("missing binary: " + ", ".join(missing) +
-              " (run: make build, or: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)")
+        print(
+            "missing binary: "
+            + ", ".join(missing)
+            + " (run: make build, or: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)"
+        )
         return 2
 
     tmp = tempfile.mkdtemp(prefix="nfr-fed-")
@@ -167,6 +214,8 @@ def main():
             httpd.server_close()
         if failures:
             print("logs kept in " + tmp)
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     try:
         a_proc, a_ctl, a_ing, a_pw = start_server(nfrs, tmp, "a")
@@ -179,53 +228,53 @@ def main():
         check("login A", A.login(a_pw)[0] == 200)
         check("login B", B.login(b_pw)[0] == 200)
 
-        # B: enable the API, then mint an admin key.
-        status, html = B.request(
-            "/nfr/settings",
-            {
-                "csrf": B.csrf, "name": "node-b", "domain": "",
-                "api_enabled": "1", "port_low": "20000", "port_high": "29999", "email": "",
+        # Enable REST API and mint admin keys on both A and B.
+        check("A API enabled", A.json("/nfr/api/settings/api-toggle", method="POST", payload={"enabled": True})[0] == 200)
+        check("B API enabled", B.json("/nfr/api/settings/api-toggle", method="POST", payload={"enabled": True})[0] == 200)
+
+        st_ka, ka_resp = A.json("/nfr/api/api-keys", method="POST", payload={"label": "fed-a", "scope": "admin"})
+        st_kb, kb_resp = B.json("/nfr/api/api-keys", method="POST", payload={"label": "fed-b", "scope": "admin"})
+        key_a = ka_resp.get("key", "")
+        key_b = kb_resp.get("key", "")
+        check("A admin key created", st_ka == 201 and bool(key_a), "status %d" % st_ka)
+        check("B admin key created", st_kb == 201 and bool(key_b), "status %d" % st_kb)
+        if not key_a or not key_b:
+            return 1
+
+        apiA = RestClient(a_ctl, key_a)
+
+        # Register B on A via /api/v1/servers with TOFU (empty pin).
+        st, added = apiA.json(
+            "/api/v1/servers",
+            method="POST",
+            payload={
+                "url": "https://127.0.0.1:%d" % b_ctl,
+                "api_key": key_b,
+                "name": "Node B",
+                "pin": "",
             },
         )
-        check("B API enabled", status == 200 and "设置已保存" in html, "status %d" % status)
-
-        status, html = B.request("/nfr/settings",
-                                 {"csrf": B.csrf, "action": "key", "label": "console-a", "scope": "admin"})
-        m = re.search(r'data-newkey="([^"]+)"', html)
-        check("B admin key created", m is not None, "status %d" % status)
-        if not m:
+        b_id = added.get("id", "") if isinstance(added, dict) else ""
+        check("A registered B via /api/v1/servers", st == 201 and bool(b_id), "status %d body=%s" % (st, added))
+        if not b_id:
             return 1
-        key = m.group(1)
 
-        # A: add B with TOFU (no pin supplied).
-        status, html = A.request(
-            "/nfr/servers",
-            {"csrf": A.csrf, "url": "https://127.0.0.1:%d" % b_ctl, "api_key": key, "name": "Node B", "pin": ""},
-        )
-        err = re.search(r'class="flash err"[^>]*>\s*([^<]+)', html)
-        check("A added B", "已添加 Node B" in html,
-              "status %d err=%s" % (status, err.group(1).strip() if err else "?"))
-        check("A card shows B online", "在线" in html and "Node B" in html)
+        st, servers = apiA.json("/api/v1/servers")
+        b_rec = next((s for s in (servers if isinstance(servers, list) else []) if s.get("id") == b_id), None)
+        check("A lists B reachable", st == 200 and b_rec is not None and b_rec.get("reachable") is True, str(b_rec))
 
-        m = re.search(r'href="/nfr/tunnels\?server=([0-9a-z]+)"', html)
-        check("B appears as a server card", m is not None)
-        if not m:
+        # Join an agent to B.
+        st, jc = B.json("/nfr/api/nodes/join-codes", method="POST", payload={"name": "node-b-agent"})
+        code = jc.get("code", "")
+        check("B join code issued", st == 201 and bool(code), "status %d" % st)
+        if not code:
             return 1
-        b_id = m.group(1)
-
-        # B: join an agent so B can actually forward traffic.
-        status, html = B.request("/nfr/nodes", {"csrf": B.csrf, "name": "node-b-agent"})
-        m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
-        check("B join code issued", m is not None)
-        if not m:
-            return 1
-        code = m.group(1)
 
         agent_cfg = os.path.join(tmp, "b-agent.toml")
         p = subprocess.run(
-            [nfrc, "join", "--no-start", "-c", agent_cfg, "--name", "node-b-agent",
-             "127.0.0.1:%d" % b_ctl, code],
-            capture_output=True, text=True,
+            [nfrc, "join", "--no-start", "-c", agent_cfg, "--name", "node-b-agent", "127.0.0.1:%d" % b_ctl, code],
+            capture_output=True,
+            text=True,
         )
         check("B agent joined", p.returncode == 0, (p.stderr or p.stdout).strip()[-200:])
         agent_log = open(os.path.join(tmp, "b-agent.log"), "wb")
@@ -235,13 +284,14 @@ def main():
         b_node = None
         end = time.time() + 20
         while time.time() < end:
-            _, body = B.request("/nfr/api/state")
-            online = [n for n in json.loads(body)["nodes"] if n.get("online")]
-            if online:
-                b_node = online[0]
-                break
+            st_n, nodes = apiA.json("/api/v1/nodes?server=%s" % b_id)
+            if st_n == 200 and isinstance(nodes, list):
+                online = [n for n in nodes if n.get("online")]
+                if online:
+                    b_node = online[0]
+                    break
             time.sleep(0.3)
-        check("B agent online", b_node is not None)
+        check("B agent visible online via A federation API", b_node is not None)
         if not b_node:
             return 1
 
@@ -249,47 +299,63 @@ def main():
         httpd = ThreadingHTTPServer(("127.0.0.1", local), LocalService)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
-        # Create a tunnel on B through A's console.
-        status, html = A.request(
-            "/nfr/tunnels/save",
-            {
-                "csrf": A.csrf, "server": b_id, "name": "on-b", "node_id": b_node["id"],
-                "type": "http", "local": "127.0.0.1:%d" % local,
-                "hosts": "b.test", "enabled": "1",
+        # Create a tunnel on B through A's federation REST API.
+        st, created = apiA.json(
+            "/api/v1/tunnels?server=%s" % b_id,
+            method="POST",
+            payload={
+                "name": "on-b",
+                "node_id": b_node["id"],
+                "type": "http",
+                "local": "127.0.0.1:%d" % local,
+                "hosts": ["b.test"],
+                "enabled": True,
             },
         )
-        check("A created a tunnel on B", "隧道已保存" in html, "status %d" % status)
+        check("A created tunnel on B via REST", st == 201 and bool(created.get("id")), "status %d %s" % (st, created))
 
         ok = False
+        last_st = 0
         for _ in range(40):
-            st, body = http_get(b_ing, "b.test")
-            if st == 200 and PAYLOAD in body:
-                ok = True
-                break
+            try:
+                last_st, body = http_get(b_ing, "b.test")
+                if last_st == 200 and PAYLOAD in body:
+                    ok = True
+                    break
+            except OSError:
+                pass
             time.sleep(0.2)
-        check("tunnel on B forwards traffic", ok, "status %d" % st)
+        check("tunnel on B forwards traffic", ok, "status %d" % last_st)
 
         # Wrong pin must be rejected.
-        status, html = A.request(
-            "/nfr/servers",
-            {
-                "csrf": A.csrf, "url": "https://127.0.0.1:%d" % b_ctl, "api_key": key,
+        st, err_body = apiA.json(
+            "/api/v1/servers",
+            method="POST",
+            payload={
+                "url": "https://127.0.0.1:%d" % b_ctl,
+                "api_key": key_b,
                 "name": "B wrong pin",
                 "pin": "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00",
             },
         )
-        check("wrong pin rejected", re.search(r"fingerprint|mismatch|refused|certificate", html, re.I) is not None, "status %d" % status)
-
-        # Turning the API off on B must surface as unreachable on A.
-        B.request(
-            "/nfr/settings",
-            {
-                "csrf": B.csrf, "name": "node-b", "domain": "",
-                "port_low": "20000", "port_high": "29999", "email": "",
-            },
+        err_str = json.dumps(err_body)
+        check(
+            "wrong pin rejected",
+            st >= 400 and re.search(r"fingerprint|mismatch|refused|certificate|pin", err_str, re.I) is not None,
+            "status %d body=%s" % (st, err_str[:200]),
         )
-        status, html = A.request("/nfr/servers")
-        check("A reports B unreachable after API off", "不可达" in html, "status %d" % status)
+
+        # Turning the API off on B must cause proxied calls from A to fail (502 remote_error).
+        B.json("/nfr/api/settings/api-toggle", method="POST", payload={"enabled": False})
+        st_off, body_off = apiA.json("/api/v1/info?server=%s" % b_id)
+        check(
+            "A reports B unreachable after API disabled",
+            st_off == 502 and body_off.get("code") == "remote_error",
+            "status %d body=%s" % (st_off, body_off),
+        )
+
+        st, _ = apiA.json("/api/v1/servers/%s" % b_id, method="DELETE")
+        check("A deletes remote server B", st == 204, "status %d" % st)
 
     finally:
         cleanup()

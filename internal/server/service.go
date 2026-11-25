@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,6 +40,70 @@ func (s *Server) CreateTunnel(req api.TunnelRequest) (api.Tunnel, error) {
 		return v, nil
 	}
 	return api.Tunnel{}, nil
+}
+
+// CreateStandaloneTunnel creates a panel-owned tunnel directly on this control
+// node without requiring a pre-registered edge node. The tunnel stays offline
+// until a client connects using its generated per-tunnel config (name "t-<id>").
+func (s *Server) CreateStandaloneTunnel(req api.TunnelRequest) (api.Tunnel, error) {
+	req.NodeID = ""
+	var created store.Tunnel
+	err := s.st.Update(func(st *store.State) error {
+		t, err := buildTunnel(st, req, nil, st.Settings.Domain, true)
+		if err != nil {
+			return err
+		}
+		t.ID = store.NewID()
+		t.ManagedByConfig = false
+		t.CreatedAt = time.Now().UTC()
+		t.UpdatedAt = t.CreatedAt
+		st.Tunnels = append(st.Tunnels, *t)
+		created = *t
+		return nil
+	})
+	if err != nil {
+		return api.Tunnel{}, err
+	}
+	s.reconcile()
+	s.notify("tunnel created: " + created.Name)
+	if v, ok := s.Tunnel(created.ID); ok {
+		return v, nil
+	}
+	return api.Tunnel{}, nil
+}
+
+// KickTunnel sends a kick control frame to the active client carrying tunnel id
+// so nfrc exits cleanly and stays offline until manually restarted.
+func (s *Server) KickTunnel(id string) (bool, error) {
+	st := s.st.Snapshot()
+	t, ok := st.TunnelByID(id)
+	if !ok {
+		return false, errNotFound("tunnel not found")
+	}
+	if t.NodeID == "" {
+		return false, nil
+	}
+	a := s.sessionFor(t.NodeID)
+	if a == nil {
+		return false, nil
+	}
+	a.kick("强制下线")
+	s.notify("tunnel kicked: " + t.Name)
+	return true, nil
+}
+
+// ClientsDir returns the directory scanned for downloadable nfrc binaries.
+func (s *Server) ClientsDir() string {
+	if v := strings.TrimSpace(os.Getenv("NFR_CLIENTS_DIR")); v != "" {
+		return v
+	}
+	if s.cfg.DataDir != "" {
+		return filepath.Join(s.cfg.DataDir, "clients")
+	}
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Join(filepath.Dir(exe), "clients")
+	}
+	return "clients"
 }
 
 // CreateTunnelAwaiting creates a tunnel that has no node yet and mints a join
@@ -137,7 +203,8 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 		if !ok {
 			return errNotFound("tunnel not found")
 		}
-		next, err := buildTunnel(st, req, cur, st.Settings.Domain, false)
+		allowNoNode := cur.NodeID == "" && strings.TrimSpace(req.NodeID) == ""
+		next, err := buildTunnel(st, req, cur, st.Settings.Domain, allowNoNode)
 		if err != nil {
 			return err
 		}
@@ -165,14 +232,17 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 	return api.Tunnel{}, nil
 }
 
-// DeleteTunnel removes a tunnel and closes its public port.
+// DeleteTunnel removes a tunnel, closes its public port, and cleans up any
+// synthetic per-tunnel client node ("t-<id>") bound exclusively to it.
 func (s *Server) DeleteTunnel(id string) error {
 	s.clearTargetDown(id)
 	var name string
+	var kickNodeID string
 	err := s.st.Update(func(st *store.State) error {
 		for i := range st.Tunnels {
 			if st.Tunnels[i].ID == id {
 				name = st.Tunnels[i].Name
+				boundNodeID := st.Tunnels[i].NodeID
 				st.Tunnels = append(st.Tunnels[:i], st.Tunnels[i+1:]...)
 				leases := st.Leases[:0]
 				for _, l := range st.Leases {
@@ -184,6 +254,17 @@ func (s *Server) DeleteTunnel(id string) error {
 				// Revocation: a deleted awaiting tunnel's command must never
 				// work again, so its bound codes die with it.
 				store.DeleteJoinsByTunnel(st, id)
+				// Clean up the synthetic per-tunnel node ("t-<id>") so deleted
+				// tunnels never leave orphan nodes or resurrect on reconnect.
+				if boundNodeID != "" {
+					for ni := range st.Nodes {
+						if st.Nodes[ni].ID == boundNodeID && st.Nodes[ni].Name == "t-"+id {
+							kickNodeID = boundNodeID
+							st.Nodes = append(st.Nodes[:ni], st.Nodes[ni+1:]...)
+							break
+						}
+					}
+				}
 				return nil
 			}
 		}
@@ -191,6 +272,11 @@ func (s *Server) DeleteTunnel(id string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if kickNodeID != "" {
+		if a := s.sessionFor(kickNodeID); a != nil {
+			a.kick("隧道已删除")
+		}
 	}
 	s.met.Drop(id)
 	s.dropLimit(id)

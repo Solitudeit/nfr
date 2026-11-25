@@ -47,6 +47,90 @@ func (s *Server) SetPanelPasswordHash(hash string) error {
 	})
 }
 
+const maxPersistedPanelSessions = 32
+
+// PanelSessions returns all non-expired persisted console sessions.
+func (s *Server) PanelSessions() []store.PanelSession {
+	now := time.Now().UTC()
+	var out []store.PanelSession
+	_ = s.st.View(func(st *store.State) error {
+		for _, ps := range st.PanelSessions {
+			if ps.TokenHash != "" && now.Before(ps.ExpiresAt) {
+				out = append(out, ps)
+			}
+		}
+		return nil
+	})
+	return out
+}
+
+// SavePanelSession persists a hashed "remember me" console session so it
+// survives control node restarts while keeping state bounded.
+func (s *Server) SavePanelSession(sess store.PanelSession) error {
+	if sess.TokenHash == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	return s.st.Update(func(st *store.State) error {
+		kept := make([]store.PanelSession, 0, len(st.PanelSessions)+1)
+		for _, ps := range st.PanelSessions {
+			if ps.TokenHash == "" || ps.TokenHash == sess.TokenHash || !now.Before(ps.ExpiresAt) {
+				continue
+			}
+			kept = append(kept, ps)
+		}
+		kept = append(kept, sess)
+		if len(kept) > maxPersistedPanelSessions {
+			kept = kept[len(kept)-maxPersistedPanelSessions:]
+		}
+		st.PanelSessions = kept
+		return nil
+	})
+}
+
+// DeletePanelSession removes a single persisted console session on logout.
+func (s *Server) DeletePanelSession(tokenHash string) error {
+	if tokenHash == "" {
+		return nil
+	}
+	_, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
+		kept := make([]store.PanelSession, 0, len(st.PanelSessions))
+		changed := false
+		for _, ps := range st.PanelSessions {
+			if ps.TokenHash == tokenHash {
+				changed = true
+				continue
+			}
+			kept = append(kept, ps)
+		}
+		if changed {
+			st.PanelSessions = kept
+		}
+		return changed, nil
+	})
+	return err
+}
+
+// RevokeOtherPanelSessions removes all persisted console sessions except keepHash.
+func (s *Server) RevokeOtherPanelSessions(keepHash string) error {
+	_, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
+		kept := make([]store.PanelSession, 0, 1)
+		changed := false
+		for _, ps := range st.PanelSessions {
+			if keepHash != "" && ps.TokenHash == keepHash {
+				kept = append(kept, ps)
+				continue
+			}
+			changed = true
+		}
+		if changed {
+			st.PanelSessions = kept
+		}
+		return changed, nil
+	})
+	return err
+}
+
 // RefreshRemote probes a managed instance and records reachability.
 func (s *Server) RefreshRemote(ctx context.Context, id string) (api.Info, error) {
 	c, _, err := s.RemoteClient(id)

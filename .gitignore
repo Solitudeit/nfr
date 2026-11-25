@@ -5,3 +5,8 @@
 /nfr
 .DS_Store
 .worktrees/
+/web/node_modules/
+/internal/panel/dist/*
+!/internal/panel/dist/placeholder.txt
+__pycache__/
+*.pyc

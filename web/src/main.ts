@@ -1,0 +1,11 @@
+import { createApp } from 'vue'
+import { createPinia } from 'pinia'
+import App from './App.vue'
+import router from './router'
+import './styles/tokens.css'
+
+const app = createApp(App)
+app.use(createPinia())
+app.use(router)
+app.mount('#app')
+;(window as unknown as { __NFR_MOUNTED__?: boolean }).__NFR_MOUNTED__ = true
