@@ -53,6 +53,17 @@ NFR 是一款自托管的内网穿透 / 反向隧道工具：把内网的服务�
 
 </details>
 
+## 下载发行版
+
+在 [GitHub Releases](https://github.com/Solitudeit/nfr/releases/latest) 页面按平台直接下载压缩包（每个压缩包内含 `nfrs`、`nfrc`、`README.md`、`LICENSE`，Linux 包附带 `systemd/` 服务模板），并附带 `SHA256SUMS` 校验文件：
+
+| 平台 | 架构 | 发行压缩包 |
+|---|---|---|
+| **Windows** | x86_64 / ARM64 | `nfr_<ver>_windows_amd64.zip` / `nfr_<ver>_windows_arm64.zip` |
+| **Linux** | x86_64 / ARM64 / ARMv7 | `nfr_<ver>_linux_amd64.tar.gz` / `nfr_<ver>_linux_arm64.tar.gz` / `nfr_<ver>_linux_armv7.tar.gz` |
+| **macOS** | Apple Silicon / Intel | `nfr_<ver>_macos_arm64.tar.gz` / `nfr_<ver>_macos_amd64.tar.gz` |
+| **Android** | ARM64（Termux / ADB） | `nfr_<ver>_android_arm64.tar.gz` |
+
 ## 快速开始
 
 不用先写配置文件。

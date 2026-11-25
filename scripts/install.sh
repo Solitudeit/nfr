@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install or manage NFR (nfrs / nfrc) on Linux or macOS.
+# Install or manage NFR (nfrs / nfrc) on Linux, macOS, or Android (Termux).
 #
 # Public server (binaries + systemd service):
 #   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
@@ -12,22 +12,26 @@
 #   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
 #     | sudo sh -s -- --client --join example.com:8443 ABC123 --systemd
 #
-# Binaries only (no systemd):
-#   curl -fsSL .../install.sh | sudo sh
+# Binaries only (Linux / macOS / Android Termux):
+#   curl -fsSL .../install.sh | sh
 #
 # Uninstall binaries and systemd units (keeps /etc/nfr and /var/lib/nfr):
 #   curl -fsSL .../install.sh | sudo sh -s -- --uninstall
 #
 # Environment:
 #   NFR_VERSION   pin a release (e.g. v0.11.0), default: latest
-#   NFR_PREFIX    install directory, default: /usr/local/bin
+#   NFR_PREFIX    install directory (default: /usr/local/bin, or $PREFIX/bin on Termux)
 #   NFR_ONLY      "server" or "client" to install just one binary
 #   NFR_SYSTEMD   set to 1 to install and start the corresponding systemd unit
 #   NFR_PASSWORD  initial admin password on a fresh server install (>= 8 chars)
 set -eu
 
 repo="Solitudeit/nfr"
-prefix="${NFR_PREFIX:-/usr/local/bin}"
+default_prefix="/usr/local/bin"
+if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX}/bin" ] && [ -d /system/bin ]; then
+  default_prefix="${PREFIX}/bin"
+fi
+prefix="${NFR_PREFIX:-$default_prefix}"
 version="${NFR_VERSION:-latest}"
 only="${NFR_ONLY:-}"
 systemd="${NFR_SYSTEMD:-}"
@@ -94,11 +98,17 @@ if [ "$uninstall" = 1 ]; then
   do_uninstall
 fi
 
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
-case "$os" in
-  linux) ;;
-  darwin) ;;
-  *) echo "unsupported system: $os" >&2; exit 1 ;;
+raw_os=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$raw_os" in
+  linux)
+    if [ "$(uname -o 2>/dev/null || true)" = "Android" ] || [ -d /system/bin ]; then
+      platform=android
+    else
+      platform=linux
+    fi
+    ;;
+  darwin) platform=macos ;;
+  *) echo "unsupported system: $raw_os" >&2; exit 1 ;;
 esac
 
 arch=$(uname -m)
@@ -108,12 +118,6 @@ case "$arch" in
   armv7l|armv7) arch=armv7 ;;
   *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
 esac
-
-if [ "$version" = latest ]; then
-  base="https://github.com/$repo/releases/latest/download"
-else
-  base="https://github.com/$repo/releases/download/$version"
-fi
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -128,28 +132,46 @@ fetch() {
   fi
 }
 
-sums_file=""
-fetch_sums() {
-  if [ -n "$sums_file" ]; then return 0; fi
-  sums_file=$(mktemp)
-  if ! fetch "$base/SHA256SUMS" "$sums_file" 2>/dev/null; then
-    rm -f "$sums_file"
-    sums_file=""
+resolve_latest_tag() {
+  url="https://github.com/$repo/releases/latest"
+  tag=""
+  if command -v curl >/dev/null 2>&1; then
+    final=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null || true)
+    tag=$(printf '%s' "$final" | sed -n 's#.*/tag/\([^/?]*\).*#\1#p')
   fi
+  if [ -z "$tag" ] && command -v python3 >/dev/null 2>&1; then
+    tag=$(python3 -c 'import json, urllib.request; print(json.load(urllib.request.urlopen("https://api.github.com/repos/'"$repo"'/releases/latest"))["tag_name"])' 2>/dev/null || true)
+  fi
+  if [ -z "$tag" ]; then
+    echo "could not resolve latest release tag; set NFR_VERSION=vX.Y.Z explicitly" >&2
+    exit 1
+  fi
+  printf '%s' "$tag"
 }
 
-cleanup_sums() {
-  if [ -n "$sums_file" ] && [ -f "$sums_file" ]; then
-    rm -f "$sums_file"
-  fi
+if [ "$version" = latest ]; then
+  tag=$(resolve_latest_tag)
+else
+  tag="$version"
+fi
+base="https://github.com/$repo/releases/download/$tag"
+
+workdir=$(mktemp -d)
+cleanup() {
+  rm -rf "$workdir"
 }
-trap cleanup_sums EXIT
+trap cleanup EXIT
+
+sums_file="$workdir/SHA256SUMS"
+has_sums=0
+if fetch "$base/SHA256SUMS" "$sums_file" 2>/dev/null; then
+  has_sums=1
+fi
 
 verify_checksum() {
   asset="$1"
   file="$2"
-  fetch_sums
-  if [ -z "$sums_file" ]; then
+  if [ "$has_sums" != 1 ]; then
     return 0
   fi
   expected=$(awk -v f="$asset" '$2 == f || $2 == ("*" f) { print $1; exit }' "$sums_file")
@@ -170,29 +192,38 @@ verify_checksum() {
   fi
 }
 
-install_one() {
-  name="$1"
-  asset="$name-$os-$arch"
-  if [ "$os" = windows ]; then asset="$asset.exe"; fi
-  url="$base/$asset"
-  tmp=$(mktemp)
-  echo "downloading $url"
-  fetch "$url" "$tmp"
-  verify_checksum "$asset" "$tmp"
-  chmod +x "$tmp"
-  mkdir -p "$prefix"
-  mv "$tmp" "$prefix/$name"
-  echo "installed $prefix/$name"
+install_from_archive() {
+  archive="nfr_${tag}_${platform}_${arch}.tar.gz"
+  archive_path="$workdir/$archive"
+  echo "downloading $base/$archive"
+  fetch "$base/$archive" "$archive_path"
+  verify_checksum "$archive" "$archive_path"
+  extract_dir="$workdir/extract"
+  mkdir -p "$extract_dir" "$prefix"
+  tar -xzf "$archive_path" -C "$extract_dir"
+  top_dir="$extract_dir/nfr_${tag}_${platform}_${arch}"
+  case "$only" in
+    server)
+      cp "$top_dir/nfrs" "$prefix/nfrs"
+      chmod +x "$prefix/nfrs"
+      echo "installed $prefix/nfrs"
+      ;;
+    client)
+      cp "$top_dir/nfrc" "$prefix/nfrc"
+      chmod +x "$prefix/nfrc"
+      echo "installed $prefix/nfrc"
+      ;;
+    *)
+      cp "$top_dir/nfrs" "$prefix/nfrs"
+      cp "$top_dir/nfrc" "$prefix/nfrc"
+      chmod +x "$prefix/nfrs" "$prefix/nfrc"
+      echo "installed $prefix/nfrs"
+      echo "installed $prefix/nfrc"
+      ;;
+  esac
 }
 
-case "$only" in
-  server) install_one nfrs ;;
-  client) install_one nfrc ;;
-  *)
-    install_one nfrs
-    install_one nfrc
-    ;;
-esac
+install_from_archive
 
 install_server_systemd() {
   if [ "$(id -u)" != 0 ]; then
@@ -203,7 +234,6 @@ install_server_systemd() {
     echo "systemd not detected; binaries are installed, start them yourself: $prefix/nfrs -c /etc/nfr/server.toml" >&2
     return 0
   fi
-  # Stop any legacy -d/--daemon process before systemd binds control_listen.
   if out=$("$prefix/nfrs" stop -c /etc/nfr/server.toml 2>&1); then
     case "$out" in
       *没有正在运行*) ;;
@@ -213,9 +243,8 @@ install_server_systemd() {
   data_dir=/var/lib/nfr
   mkdir -p /etc/nfr "$data_dir"
   unit=/etc/systemd/system/nfr-server.service
-  tmp=$(mktemp)
-  fetch "$base/nfr-server.service" "$tmp"
-  mv "$tmp" "$unit"
+  fetch "$base/nfr-server.service" "$workdir/nfr-server.service"
+  mv "$workdir/nfr-server.service" "$unit"
   echo "installed $unit"
 
   fresh=0
@@ -274,9 +303,8 @@ install_client_systemd() {
   fi
   mkdir -p /etc/nfr
   unit=/etc/systemd/system/nfr-agent.service
-  tmp=$(mktemp)
-  fetch "$base/nfr-agent.service" "$tmp"
-  mv "$tmp" "$unit"
+  fetch "$base/nfr-agent.service" "$workdir/nfr-agent.service"
+  mv "$workdir/nfr-agent.service" "$unit"
   echo "installed $unit"
   was_active=$(systemctl is-active nfr-agent 2>/dev/null || true)
   systemctl daemon-reload

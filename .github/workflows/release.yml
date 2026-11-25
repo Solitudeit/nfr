@@ -19,19 +19,14 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
-      - name: Build binaries
-        run: make cross
-      - name: Checksums
-        run: |
-          cd dist
-          sha256sum * > SHA256SUMS
-          cat SHA256SUMS
+      - name: Build release archives
+        run: python3 scripts/package.py --version "${GITHUB_REF_NAME}" --out dist
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/nfrs-*
-            dist/nfrc-*
+            dist/nfr_*.tar.gz
+            dist/nfr_*.zip
             dist/SHA256SUMS
             scripts/install.sh
             deploy/systemd/nfr-server.service

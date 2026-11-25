@@ -40,6 +40,9 @@ func defaultAgentConfig() string {
 	if os.Geteuid() == 0 {
 		return "/etc/nfr/agent.toml"
 	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".config", "nfr", "agent.toml")
+	}
 	if u, err := user.Current(); err == nil && u.HomeDir != "" {
 		return filepath.Join(u.HomeDir, ".config", "nfr", "agent.toml")
 	}
