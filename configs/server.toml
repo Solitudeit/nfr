@@ -1,0 +1,42 @@
+# NFR 服务端配置示例（TOML 格式，同样支持 server.yaml）
+# 启动命令：nfrs -c server.toml
+# 校验配置：nfrs verify -c server.toml
+
+# 控制端口（Web 控制台 /nfr/、REST API、客户端连接），必开
+control_listen = ":8443"
+
+# HTTP / HTTPS 域名分流入口；若不需要域名分流或与 Nginx/Caddy 冲突，设为 "off"
+http_listen  = ":80"
+https_listen = ":443"
+
+# 持久化数据目录（state.json、密钥与自签证书）
+data_dir = "/var/lib/nfr"
+
+# 客户端连接共享密钥（与客户端 client.toml / client.yaml 的 auth_token 一致）
+# 留空则在首次启动时自动生成并可在面板中查看
+auth_token = "change-me-to-a-strong-token"
+
+# 可选：公网主域名（用于 HTTP 隧道默认子域及 ACME 自动证书）
+domain = ""
+
+# 可选：对外公网 IP 或域名（无域名时建议填 VPS 公网 IP，留空自动探测）
+public_host = ""
+
+# TCP / UDP 隧道自动分配的公网端口范围
+port_range = [20000, 29999]
+
+# 日志级别：debug / info / warn / error
+log_level = "info"
+
+# 可选：自定义 TLS 证书文件（与 ACME 二选一，都不填则自动自签）
+# tls_cert = "/etc/ssl/certs/fullchain.pem"
+# tls_key  = "/etc/ssl/private/privkey.pem"
+
+# 可选：首次启动预设管理员密码（留空则随机生成并打印一次）
+# [panel]
+# password = "your-admin-password"
+
+# 可选：自动申请 Let's Encrypt 证书（需填写 domain 且 80 端口可达）
+# [acme]
+# enabled = true
+# email   = "ops@example.com"

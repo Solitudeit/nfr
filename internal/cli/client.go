@@ -32,28 +32,29 @@ import (
 // clientUsage is the help text of nfrc.
 const clientUsage = `%[1]s — NFR client (the side that lives inside your network)
 
-  %[1]s join <server> <code>   join this machine and keep it connected
-  %[1]s                        connect with the saved agent.toml (foreground)
-  %[1]s verify                 validate agent.toml syntax
-  %[1]s status                 show the local configuration
+  %[1]s -c <config>            connect with client.toml or client.yaml (foreground)
+  %[1]s verify -c <config>     validate TOML / YAML config syntax
+  %[1]s status -c <config>     show the local configuration
+  %[1]s join <server> <code>   (optional) one-time join code onboarding
   %[1]s version                print the build version
 
-Join flags:
+Config formats supported:
 
-  -c <path>    configuration file (default /etc/nfr/agent.toml, or
-               ~/.config/nfr/agent.toml when not running as root)
-  --name <n>   name shown in the console (default: this machine's hostname)
-  --no-start   save the configuration but do not start the agent
+  .toml   e.g. client.toml (default: /etc/nfr/client.toml or ~/.config/nfr/client.toml)
+  .yaml / .yml   e.g. client.yaml
 
-Environment variables (container / automated first-run):
+Environment variables (Docker / zero-file startup):
 
-  NFR_SERVER / NFR_CODE / NFR_NAME
-      When agent.toml has no server yet, %[1]s automatically joins once on
-      startup and persists the token to agent.toml for subsequent restarts.
+  NFR_SERVER      server control address, e.g. 203.0.113.10:8443
+  NFR_AUTH_TOKEN  shared auth_token matching server config
+  NFR_NAME        node display name (default: hostname)
+  NFR_PIN         optional server certificate SHA-256 fingerprint
+  NFR_CA          set "true" if server uses ACME / public CA cert
 
-Typical use, on the machine that runs the service you want to publish:
+Typical use:
 
-  nfrc join tunnel.example.com ABC123
+  %[1]s -c client.toml
+  %[1]s -c client.yaml
 
 Documentation: https://github.com/Solitudeit/nfr
 `
@@ -109,12 +110,12 @@ func cmdClientVerify(args []string) {
 	if err := cfg.Validate(); err != nil {
 		fatal("invalid config: %v", err)
 	}
-	fmt.Printf("%s: configuration %s syntax is ok (%d server(s))\n", Program, *cfgPath, len(cfg.Servers))
+	fmt.Printf("%s: configuration %s syntax is ok (%d server(s))\n", Program, *cfgPath, len(cfg.EffectiveServers()))
 }
 
 func cmdAgent(args []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
-	cfgPath := fs.String("c", defaultAgentConfig(), "configuration file")
+	cfgPath := fs.String("c", defaultAgentConfig(), "configuration file (.toml or .yaml)")
 	_ = fs.Parse(args)
 
 	cfg, existed, err := config.LoadAgent(*cfgPath)
@@ -122,7 +123,7 @@ func cmdAgent(args []string) {
 		fatal("read config: %v", err)
 	}
 	cfg.ApplyEnv()
-	if !existed || len(cfg.Servers) == 0 {
+	if len(cfg.EffectiveServers()) == 0 {
 		envSrv := strings.TrimSpace(os.Getenv("NFR_SERVER"))
 		envCode := strings.TrimSpace(os.Getenv("NFR_CODE"))
 		if envSrv != "" && envCode != "" {
@@ -132,8 +133,10 @@ func cmdAgent(args []string) {
 			}
 			cfg = performJoin(*cfgPath, envSrv, envCode, envName)
 			cfg.ApplyEnv()
+		} else if !existed {
+			fatal("config file %s not found\n\n  Create client.toml or client.yaml with server_addr and auth_token, then run:\n    %s -c client.toml\n    %s -c client.yaml", *cfgPath, Program, Program)
 		} else {
-			fatal("no server configured\n\n  run: %s join <server> <code>", Program)
+			fatal("no server configured in %s; set server_addr and auth_token", *cfgPath)
 		}
 	}
 	if err := cfg.Validate(); err != nil {
@@ -271,15 +274,39 @@ func runAgents(cfg config.Agent, lg *slog.Logger) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	servers := cfg.EffectiveServers()
 	var wg sync.WaitGroup
-	for _, s := range cfg.Servers {
+	for _, s := range servers {
+		name := s.Name
+		if name == "" {
+			name = defaultNodeName()
+		}
+		var proxies []proto.ProxySpec
+		for _, p := range s.Proxies {
+			typ := strings.ToLower(strings.TrimSpace(p.Type))
+			if typ == "" {
+				typ = "tcp"
+			}
+			proxies = append(proxies, proto.ProxySpec{
+				Name:        strings.TrimSpace(p.Name),
+				Type:        typ,
+				Local:       p.EffectiveLocal(),
+				RemotePort:  p.RemotePort,
+				Hosts:       p.Hosts,
+				BandwidthKB: p.BandwidthKB,
+				QuotaMB:     p.QuotaMB,
+			})
+		}
 		a := agent.New(agent.Options{
-			Addr:   s.Addr,
-			Token:  s.Token,
-			NodeID: s.NodeID,
-			Pin:    s.Pin,
-			CA:     s.CA,
-			Logger: lg.With("server", s.Addr),
+			Addr:      s.Addr,
+			AuthToken: s.AuthToken,
+			Name:      name,
+			Proxies:   proxies,
+			Token:     s.Token,
+			NodeID:    s.NodeID,
+			Pin:       s.Pin,
+			CA:        s.CA,
+			Logger:    lg.With("server", s.Addr),
 		})
 		wg.Add(1)
 		go func() {
@@ -287,7 +314,7 @@ func runAgents(cfg config.Agent, lg *slog.Logger) {
 			a.Run(ctx)
 		}()
 	}
-	lg.Info("client started", "servers", len(cfg.Servers))
+	lg.Info("client started", "servers", len(servers))
 	wg.Wait()
 }
 
@@ -431,15 +458,21 @@ func cmdClientStatus(args []string) {
 	fmt.Println()
 	if cfg, ok, err := config.LoadAgent(*cfgPath); err == nil && ok {
 		fmt.Printf("config      %s\n", *cfgPath)
-		if len(cfg.Servers) == 0 {
-			fmt.Printf("  no servers yet, run: %s join <server> <code>\n", Program)
+		servers := cfg.EffectiveServers()
+		if len(servers) == 0 {
+			fmt.Printf("  no servers configured in %s\n", *cfgPath)
 		}
-		for _, s := range cfg.Servers {
-			state := "no token"
-			if s.Token != "" {
-				state = "token ok"
+		for _, s := range servers {
+			mode := "auth_token"
+			id := s.Name
+			if s.NodeID != "" {
+				mode = "node token"
+				id = s.NodeID
 			}
-			fmt.Printf("  %-28s node %-10s %s\n", s.Addr, s.NodeID, state)
+			if id == "" {
+				id = defaultNodeName()
+			}
+			fmt.Printf("  %-28s node %-12s (%s, %d proxies)\n", s.Addr, id, mode, len(s.Proxies))
 		}
 	} else {
 		fmt.Printf("config      %s (missing)\n", *cfgPath)

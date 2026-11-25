@@ -66,6 +66,34 @@
     </form>
   </section>
 
+  <section class="set-sec" id="auth-token">
+    <div class="set-sec-head">
+      <h2>客户端连接密钥（auth_token）</h2>
+      <p>客户端在 <code>client.toml</code> 或 <code>client.yaml</code> 中填写此密钥即可直接连接本服务端。</p>
+    </div>
+    <div class="card form-card">
+      <div class="copyfield">
+        <code>{{.AuthToken}}</code>
+        <button type="button" class="btn xs primary" data-copy="{{.AuthToken}}">复制密钥</button>
+      </div>
+      {{if .AuthTokenFromConfig}}
+      <p class="hint">当前密钥由服务端配置文件（<code>auth_token</code>）或环境变量（<code>NFR_AUTH_TOKEN</code>）锁定，如需更改请修改配置后重启 <code>nfrs</code>。</p>
+      {{else}}
+      <form class="key-create" method="post" action="/nfr/settings">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="action" value="auth_token">
+        <div class="field">
+          <label class="field-lbl" for="auth_token_in">自定义连接密钥</label>
+          <input id="auth_token_in" name="auth_token" value="{{.AuthToken}}" minlength="6" required autocomplete="off" spellcheck="false">
+        </div>
+        <div></div>
+        <button class="btn" type="submit">更新密钥</button>
+      </form>
+      <p class="hint">更新后，新连接的客户端需使用新密钥；已连接的节点重连时同样需要更新配置。</p>
+      {{end}}
+    </div>
+  </section>
+
   <section class="set-sec" id="api">
     <div class="set-sec-head">
       <h2>REST API 与密钥</h2>

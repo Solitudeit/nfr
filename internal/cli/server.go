@@ -37,7 +37,7 @@ const serverUsage = `%[1]s — NFR control node
 
 Flags of the bare command:
 
-  -c <path>            configuration file (default /etc/nfr/server.toml)
+  -c <path>            configuration file (.toml or .yaml, default /etc/nfr/server.toml)
   -d, --daemon         detach into the background (for manual runs without systemd/Docker)
   --foreground         keep in the foreground (default; kept for compatibility)
   --control <addr>     override control_listen (env: NFR_CONTROL_LISTEN)
@@ -46,11 +46,13 @@ Flags of the bare command:
   --data-dir <dir>     override data_dir (env: NFR_DATA_DIR)
   --domain <dom>       override domain (env: NFR_DOMAIN)
   --public-host <host> override public_host (env: NFR_PUBLIC_HOST)
+  --token <tok>        override client auth_token (env: NFR_AUTH_TOKEN)
   --password <pw>      initial console password on first run (env: NFR_PASSWORD)
 
 Typical use (foreground — managed by systemd or Docker):
 
   %[1]s -c /etc/nfr/server.toml
+  %[1]s -c /etc/nfr/server.yaml
 
 Documentation: https://github.com/Solitudeit/nfr
 `
@@ -105,6 +107,7 @@ type serverFlags struct {
 	dataDir    string
 	domain     string
 	publicHost string
+	token      string
 	password   string
 }
 
@@ -127,6 +130,9 @@ func (f serverFlags) apply(cfg *config.Server) {
 	if f.publicHost != "" {
 		cfg.PublicHost = f.publicHost
 	}
+	if f.token != "" {
+		cfg.AuthToken = f.token
+	}
 	if f.password != "" {
 		cfg.Panel.Password = f.password
 	}
@@ -146,6 +152,7 @@ func cmdServer(args []string) {
 	fs.StringVar(&sf.dataDir, "data-dir", "", "override data_dir")
 	fs.StringVar(&sf.domain, "domain", "", "override domain")
 	fs.StringVar(&sf.publicHost, "public-host", "", "override public_host")
+	fs.StringVar(&sf.token, "token", "", "override client auth_token")
 	fs.StringVar(&sf.password, "password", "", "initial console password on first run")
 	_ = fs.Parse(args)
 
@@ -285,6 +292,9 @@ func daemonize(cfgPath string, cfg config.Server, sf serverFlags) {
 	if sf.publicHost != "" {
 		childArgs = append(childArgs, "--public-host", sf.publicHost)
 	}
+	if sf.token != "" {
+		childArgs = append(childArgs, "--token", sf.token)
+	}
 	if sf.password != "" {
 		childArgs = append(childArgs, "--password", sf.password)
 	}
@@ -405,7 +415,7 @@ func runServer(cfgPath string, cfg config.Server, existed bool, child bool) {
 	// Print the console address on every start, not just the first one: under
 	// systemd or Docker the banner is the quickest way to find the URL. Only
 	// the auto-generated one-time password stays first-run-only.
-	banner := serverBanner(cfg, generated, srv.Info().Pinned)
+	banner := serverBanner(cfg, generated, srv.AuthToken(), srv.Info().Pinned)
 	if generated != "" {
 		if werr := keepInitialPassword(cfg.DataDir, banner); werr != nil {
 			lg.Warn("could not park the first-run password", "err", werr)
@@ -441,7 +451,7 @@ func keepInitialPassword(dataDir, banner string) error {
 // start because that is the thing an operator comes back for; the password is
 // not, because a secret echoed on every restart becomes a permanent journal
 // entry.
-func serverBanner(cfg config.Server, generated, pin string) string {
+func serverBanner(cfg config.Server, generated, authToken, pin string) string {
 	cands := server.ConsoleCandidates(cfg)
 	var b strings.Builder
 	b.WriteString("\n  NFR 控制节点已就绪\n")
@@ -455,13 +465,16 @@ func serverBanner(cfg config.Server, generated, pin string) string {
 	if generated != "" {
 		b.WriteString("  密码      " + generated + "\n")
 	}
+	if authToken != "" {
+		b.WriteString("  连接密钥  " + authToken + "\n")
+	}
 	b.WriteString("  证书指纹  " + pin + "\n")
 	if generated != "" {
 		b.WriteString("\n  密码只显示这一次，登录后请在「设置」里修改。\n")
 	}
 	b.WriteString(`  打不开时，把地址里的 IP 换成服务商控制台分配的公网 IP。
-  下一步：登录面板 → 「隧道」→「新建隧道」；机器还没接入就点「＋ 新设备」，
-  卡上直接给出加入命令，在那台机器上跑一次就通了。
+  客户端接入：在 client.toml 或 client.yaml 中填入 server_addr 与 auth_token，
+  运行 nfrc -c client.toml（或 client.yaml）即可直接连接。
 `)
 	return b.String()
 }

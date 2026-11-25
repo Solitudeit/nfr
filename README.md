@@ -20,7 +20,8 @@
 ## 核心特性
 
 - **双二进制开箱即用**：纯 Go 编译（无 CGO、无外部数据库、无前端构建依赖），所有状态持久化在单个原子写入的 `state.json` 中。
-- **隧道优先的接入体验**：在面板中先建隧道即可生成绑定该隧道的一次性 6 位加入码；内网设备执行 `nfrc join` 后自动注册节点并激活隧道，之后凭持久化令牌自动重连。
+- **双格式配置文件驱动（TOML & YAML）**：服务端与客户端原生同时支持 `.toml` 与 `.yaml` / `.yml` 启动配置；通过共享 `auth_token` 直接接入，同名节点重连自动复用原节点，不依赖会过期的一次性加入码。
+- **配置声明 + 面板管理双模式**：客户端既可以在 `client.toml` / `client.yaml` 中仅填 `server_addr` 与 `auth_token` 接入后在 Web 面板里可视化管理隧道，也可以在配置文件里直接声明 `proxies` 启动即生效。
 - **多协议与连接复用**：
   - **TCP / UDP**：公网端口池自动分配（TCP 与 UDP 端口空间独立，如 `tcp:53` 与 `udp:53` 可共存），UDP 按访客会话转发并自动回收空闲会话。
   - **HTTP / HTTPS**：支持独立公网端口直连，或通过 `:80` / `:443` 按 `Host` / SNI 分流；基于标准 `httputil.ReverseProxy` 与按隧道复用的连接池，支持流式响应、Chunked 传输与 WebSocket (`101 Switching Protocols`)。
@@ -67,77 +68,99 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
 ```bash
 docker run -d --name nfr-server --restart=unless-stopped --network host \
   -e NFR_PASSWORD='change-me-now' \
+  -e NFR_AUTH_TOKEN='my-shared-token' \
   -e NFR_PUBLIC_HOST='203.0.113.10' \
   -v nfr-data:/var/lib/nfr \
   ghcr.io/solitudeit/nfr:latest
 ```
 
-#### 方式 C：手动运行（Windows / macOS / Linux）
+#### 方式 C：通过 TOML 或 YAML 配置文件手动运行（Windows / macOS / Linux / Android）
 
-解压对应平台的压缩包后直接前台运行（默认监听 `:8443` 面板与控制口、`:80` / `:443` 域名入口）：
+解压对应平台的压缩包，自带 `configs/` 示例模板，按需修改 `server.toml` 或 `server.yaml` 后启动：
 
 ```bash
+# TOML 格式
 ./nfrs -c server.toml
+
+# YAML 格式（与 TOML 完全等价）
+./nfrs -c server.yaml
 ```
 
 启动后在浏览器打开 `https://<服务器IP或域名>:8443/nfr/` 登录管理面板。
 
-> 如果公网服务器的 `80` / `443` 已被 nginx 或 Caddy 占用，可在 `server.toml` 中设置 `http_listen = "127.0.0.1:8080"`、`https_listen = "off"`，并执行 `nfrs proxy-config app.example.com` 生成反向代理配置片段。详见 [docs/deploy.md](docs/deploy.md)。
+> 如果公网服务器的 `80` / `443` 已被 nginx 或 Caddy 占用，可在配置中设置 `http_listen = "off"`、`https_listen = "off"`（或 `http_listen = "127.0.0.1:8080"` 并执行 `nfrs proxy-config app.example.com` 生成反代片段）。详见 [docs/deploy.md](docs/deploy.md)。
 
 ---
 
-### 2. 接入内网客户端 (`nfrc`)
+### 2. 配置并启动内网客户端 (`nfrc`)
 
-在服务端面板的 **隧道 → 新建隧道**（选择「＋ 新设备」）或 **节点 → 生成加入码** 中获取一次性加入命令。
+在服务端配置（或面板 **节点 / 设置** 页）获取 `server_addr` 与 `auth_token`，编写 `client.toml` 或 `client.yaml`：
 
-- **Linux 一键安装并注册 `systemd` 开机自启**：
+- **TOML 格式（`client.toml`）**：
 
-  ```bash
-  curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
-    | sudo sh -s -- --client --join example.com:8443 ABC123 --systemd
+  ```toml
+  server_addr = "203.0.113.10:8443"
+  auth_token  = "my-shared-token"
+  name        = "nas-home"
+
+  # 可选：直接声明隧道（不写也能连上后直接在 Web 面板里建隧道）
+  [[proxies]]
+  name        = "ssh"
+  type        = "tcp"
+  local       = "127.0.0.1:22"
+  remote_port = 20022
   ```
 
-- **Windows / macOS / Android (Termux) / 手动运行**：
+- **YAML 格式（`client.yaml`）**：
 
-  ```bash
-  # 首次接入：兑换长期令牌写入 agent.toml 并保持连接
-  ./nfrc join example.com:8443 ABC123
+  ```yaml
+  server_addr: "203.0.113.10:8443"
+  auth_token: "my-shared-token"
+  name: "nas-home"
 
-  # 后续重启直接加载已保存的配置（不要重复 join，加入码为一次性）
-  ./nfrc -c ~/.config/nfr/agent.toml
+  proxies:
+    - name: ssh
+      type: tcp
+      local: "127.0.0.1:22"
+      remote_port: 20022
   ```
 
-- **Docker 运行客户端**：
+- **启动客户端**：
+
+  ```bash
+  ./nfrc -c client.toml    # 或 ./nfrc -c client.yaml
+  ```
+
+- **Docker 运行客户端（也可直接挂载配置文件）**：
 
   ```bash
   docker run -d --name nfr-client --restart=unless-stopped --network host \
     --entrypoint nfrc \
     -e NFR_SERVER='203.0.113.10:8443' \
-    -e NFR_CODE='ABC123' \
-    -v nfr-client-data:/var/lib/nfr \
-    ghcr.io/solitudeit/nfr:latest -c /var/lib/nfr/agent.toml
+    -e NFR_AUTH_TOKEN='my-shared-token' \
+    -e NFR_NAME='homelab' \
+    ghcr.io/solitudeit/nfr:latest
   ```
-
-  首次启动时自动使用 `NFR_SERVER` + `NFR_CODE` 完成接入并保存 `agent.toml`，后续重启自动复用已保存令牌重连。
 
 ---
 
 ## 常用 CLI 命令
 
 ```bash
-# 服务端
+# 服务端（支持 .toml 与 .yaml / .yml）
 nfrs -c /etc/nfr/server.toml                    # 前台启动（推荐由 systemd / Docker 托管）
+nfrs -c /etc/nfr/server.yaml                    # 使用 YAML 配置启动
 nfrs -d -c /etc/nfr/server.toml                 # 显式转后台运行（停止用 nfrs stop）
 nfrs verify -c /etc/nfr/server.toml             # 校验配置语法、端口范围与证书路径
 nfrs reset-password -c /etc/nfr/server.toml     # 重置面板管理员密码（可传入新密码或随机生成）
 nfrs status -c /etc/nfr/server.toml             # 查看当前配置与面板地址
 nfrs proxy-config app.example.com               # 输出 nginx 反向代理配置模板
 
-# 客户端
-nfrc join <server:port> <code>                  # 首次接入并保持连接（加 --no-start 仅写入配置）
-nfrc -c /etc/nfr/agent.toml                     # 使用已保存的配置启动
-nfrc verify -c /etc/nfr/agent.toml              # 校验客户端配置
-nfrc status -c /etc/nfr/agent.toml              # 查看已接入的服务端列表
+# 客户端（支持 .toml 与 .yaml / .yml）
+nfrc -c /etc/nfr/client.toml                    # 使用 TOML 配置启动
+nfrc -c /etc/nfr/client.yaml                    # 使用 YAML 配置启动
+nfrc verify -c /etc/nfr/client.toml             # 校验客户端配置
+nfrc status -c /etc/nfr/client.toml             # 查看已配置的服务端与隧道数
 
 # 卸载（仅移除二进制与 systemd unit，保留 /etc/nfr 与 /var/lib/nfr）
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
@@ -175,17 +198,16 @@ curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh
 
 ## 配置与环境变量
 
-配置优先级：**默认值 < TOML 配置文件 < `NFR_*` 环境变量 < CLI 参数**。
+配置优先级：**默认值 < TOML / YAML 配置文件 < `NFR_*` 环境变量 < CLI 参数**。完整示例见仓库 [configs/](configs/) 目录（[server.toml](configs/server.toml)、[server.yaml](configs/server.yaml)、[client.toml](configs/client.toml)、[client.yaml](configs/client.yaml)）。
 
-### 服务端 `server.toml`
-
-首次启动自动生成，运行时隧道、节点、域名与端口池可在面板中动态修改（持久化于 `<data_dir>/state.json`）：
+### 服务端 `server.toml` / `server.yaml`
 
 ```toml
 control_listen = ":8443"     # 控制通道 + Web 面板 + REST API
 http_listen    = ":80"       # HTTP 域名隧道入口（可设为 "off"）
 https_listen   = ":443"      # HTTPS 域名隧道入口（可设为 "off"）
 data_dir       = "/var/lib/nfr"
+auth_token     = "my-shared-token"  # 客户端共享连接密钥（留空自动生成）
 domain         = "example.com"
 public_host    = ""          # 无域名时对外展示的公网 IP / 主机名
 port_range     = [20000, 29999]
@@ -204,6 +226,7 @@ email   = "you@example.com"
 | `NFR_HTTP_LISTEN` | 覆盖 `http_listen`（默认 `:80`） |
 | `NFR_HTTPS_LISTEN` | 覆盖 `https_listen`（默认 `:443`） |
 | `NFR_DATA_DIR` | 覆盖 `data_dir`（默认 `/var/lib/nfr`） |
+| `NFR_AUTH_TOKEN` | 覆盖服务端 / 客户端共享连接密钥 `auth_token` |
 | `NFR_DOMAIN` | 覆盖 `domain` |
 | `NFR_PUBLIC_HOST` | 覆盖 `public_host` |
 | `NFR_PORT_RANGE` | 覆盖 `port_range`（格式 `20000-29999`） |

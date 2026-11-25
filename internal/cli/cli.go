@@ -33,20 +33,33 @@ func printVersion(w io.Writer) {
 }
 
 func defaultServerConfig() string {
+	for _, p := range []string{"/etc/nfr/server.toml", "/etc/nfr/server.yaml", "/etc/nfr/server.yml"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
 	return "/etc/nfr/server.toml"
 }
 
 func defaultAgentConfig() string {
+	var dir string
 	if os.Geteuid() == 0 {
-		return "/etc/nfr/agent.toml"
+		dir = "/etc/nfr"
+	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dir = filepath.Join(home, ".config", "nfr")
+	} else if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		dir = filepath.Join(u.HomeDir, ".config", "nfr")
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".config", "nfr", "agent.toml")
+	if dir != "" {
+		for _, name := range []string{"client.toml", "client.yaml", "client.yml", "agent.toml", "agent.yaml", "agent.yml"} {
+			p := filepath.Join(dir, name)
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+		return filepath.Join(dir, "client.toml")
 	}
-	if u, err := user.Current(); err == nil && u.HomeDir != "" {
-		return filepath.Join(u.HomeDir, ".config", "nfr", "agent.toml")
-	}
-	return "nfr-agent.toml"
+	return "client.toml"
 }
 
 func defaultNodeName() string {

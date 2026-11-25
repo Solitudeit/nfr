@@ -55,10 +55,25 @@ type Frame struct {
 	// Config carries the full desired state for one node.
 	Revision uint64       `json:"rev,omitempty"`
 	Tunnels  []TunnelSpec `json:"tunnels,omitempty"`
+	// Proxies carries optional declarative tunnels declared in the client's
+	// local config file (client.toml / client.yaml) during hello.
+	Proxies []ProxySpec `json:"proxies,omitempty"`
 
 	Code    string `json:"code,omitempty"`
 	Message string `json:"msg,omitempty"`
 	TS      int64  `json:"ts,omitempty"`
+}
+
+// ProxySpec is a tunnel declared in a client config file and synced to the
+// server when the client authenticates.
+type ProxySpec struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"` // tcp | udp | http
+	Local       string   `json:"local"`
+	RemotePort  int      `json:"remote_port,omitempty"`
+	Hosts       []string `json:"hosts,omitempty"`
+	BandwidthKB int      `json:"bandwidth_kb,omitempty"`
+	QuotaMB     int64    `json:"quota_mb,omitempty"`
 }
 
 // TunnelSpec is the agent's view of one tunnel: where to dial locally.

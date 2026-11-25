@@ -4,14 +4,11 @@
       <h1>节点</h1>
       <span class="badge-count">{{.OnlineNodes}} / {{len .Nodes}} 在线</span>
     </div>
-    <p class="lead">每台内网机器仅需维持一条主动 TLS 外连，无需公网 IP 或开放入站端口。</p>
+    <p class="lead">内网机器通过 <code>client.toml</code> 或 <code>client.yaml</code> 配置文件连接，主动 TLS 外连，无需公网 IP。</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="/nfr/tunnels">{{template "i-tunnels"}}查看隧道</a>
-    <form method="post" action="/nfr/nodes" style="margin:0">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <button class="btn primary" type="submit">{{template "i-plus"}}生成加入码</button>
-    </form>
+    <a class="btn primary" href="#connect-config">{{template "i-plus"}}接入新机器</a>
   </div>
 </div>
 
@@ -19,27 +16,15 @@
 <section class="card join-banner">
   <div class="join-banner-head">
     <div class="join-banner-title">
-      <span class="chip on">已生成加入码</span>
+      <span class="chip on">一次性加入码</span>
       <span class="join-code">{{.Code}}</span>
     </div>
     <span class="muted">5 分钟内有效 · 接入后本页自动刷新</span>
   </div>
-  <div class="field">
-    <span class="callout-sub">方式一：已安装 <code>nfrc</code>，直接运行接入</span>
-    <div class="copyfield">
-      <code>{{.Command}}</code>
-      <button type="button" class="btn sm primary" data-copy="{{.Command}}">复制命令</button>
-    </div>
+  <div class="copyfield">
+    <code>{{.Command}}</code>
+    <button type="button" class="btn sm primary" data-copy="{{.Command}}">复制命令</button>
   </div>
-  {{$oneLine := installJoinCmd .Command}}{{if $oneLine}}
-  <div class="field">
-    <span class="callout-sub">方式二：Linux 一键安装 <code>nfrc</code> + 接入 + 配置 systemd 开机自启</span>
-    <div class="copyfield">
-      <code>{{$oneLine}}</code>
-      <button type="button" class="btn sm" data-copy="{{$oneLine}}">复制一键脚本</button>
-    </div>
-  </div>
-  {{end}}
   {{if .JoinWarning}}<div class="flash warn compact" role="alert"><span class="flash-body">{{.JoinWarning}}</span></div>{{end}}
 </section>
 {{end}}
@@ -112,48 +97,70 @@
 <section class="card empty">
   <div class="empty-ico">{{template "i-empty"}}</div>
   <b>还没有内网设备接入</b>
-  <p>在下方生成一个一次性加入码，在目标机器运行 <code>nfrc join</code> 后即可自动上线。</p>
+  <p>将下方生成的 <code>client.toml</code> 或 <code>client.yaml</code> 放到内网机器，执行 <code>nfrc -c client.toml</code> 即可直接上线。</p>
 </section>
 {{end}}
 
-<div class="grid2 section-gap">
-  <form class="card form-card" method="post" action="/nfr/nodes">
-    <div class="card-head">
-      <h2>接入新机器</h2>
-      <p class="card-desc">生成一个 5 分钟有效的一次性加入码。</p>
+<section class="section" id="connect-config">
+  <div class="card cfg-gen"
+       data-srv="{{.ServerAddr}}"
+       data-tok="{{.AuthToken}}"
+       data-pin="{{if not .CAMode}}{{.Pin}}{{end}}"
+       data-ca="{{if .CAMode}}1{{else}}0{{end}}">
+    <div class="cfg-gen-head">
+      <div>
+        <h2>通过配置文件接入新机器</h2>
+        <p class="card-desc">无需加入码，配置文件永久有效；同名节点重连自动复用原节点与隧道，同时支持 TOML 与 YAML。</p>
+      </div>
+      <div class="seg-filter" role="tablist" aria-label="配置文件格式">
+        <button type="button" class="seg-btn active" data-cfg-fmt="toml">TOML (.toml)</button>
+        <button type="button" class="seg-btn" data-cfg-fmt="yaml">YAML (.yaml)</button>
+      </div>
     </div>
+
+    <div class="cfg-controls">
+      <div class="field">
+        <label class="field-lbl" for="cfg_name">节点名称</label>
+        <input id="cfg_name" value="my-node" placeholder="例如：nas、office-pc、homelab" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-lbl">启动命令</label>
+        <div class="copyfield">
+          <code id="cfg_cmd">nfrc -c client.toml</code>
+          <button type="button" class="btn xs" id="cfg_cmd_copy" data-copy="nfrc -c client.toml">复制</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="code-panel">
+      <div class="code-panel-bar">
+        <span class="mono" id="cfg_filename">client.toml</span>
+        <button type="button" class="btn xs primary" id="cfg_copy" data-copy="">复制配置文件</button>
+      </div>
+      <pre class="code-pre"><code id="cfg_preview"></code></pre>
+    </div>
+
+    <p class="hint">连接密钥 <code>auth_token</code> 可在 <a href="/nfr/settings">设置</a> 页面或服务端 <code>server.toml</code> / <code>server.yaml</code> 中修改。客户端配置文件里既可以只填连接信息并在面板里建隧道，也可以直接写 <code>proxies</code> 声明隧道。</p>
+  </div>
+</section>
+
+<details class="card adv-box section-gap">
+  <summary>
+    <span class="adv-title">其他方式：一次性加入码（旧版兼容）</span>
+    <span class="adv-sub">仅 5 分钟有效，适合临时命令行 <code>nfrc join</code></span>
+  </summary>
+  <form class="form-card adv-box-body" method="post" action="/nfr/nodes">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <div class="field">
-      <label class="field-lbl" for="nname">节点名称 <span class="muted">可选</span></label>
-      <input id="nname" name="name" placeholder="例如：nas、办公室主机、树莓派">
-      <span class="hint">仅用于在面板中标识机器，接入后可随时修改。</span>
-    </div>
-    <div class="card-actions">
-      <button class="btn primary" type="submit">{{template "i-plus"}}生成加入码</button>
+    <div class="key-create">
+      <div class="field">
+        <label class="field-lbl" for="nname">节点名称 <span class="muted">可选</span></label>
+        <input id="nname" name="name" placeholder="例如：edge-1">
+      </div>
+      <div></div>
+      <button class="btn" type="submit">{{template "i-plus"}}生成加入码</button>
     </div>
   </form>
-
-  <section class="card guide-card">
-    <div class="card-head">
-      <h2>接入流程</h2>
-      <p class="card-desc">三步把任意内网设备接到本服务端。</p>
-    </div>
-    <ol class="steps">
-      <li>
-        <b>生成加入码</b>
-        <span>一次性、5 分钟内有效，用完即焚，无需手写共享密钥。</span>
-      </li>
-      <li>
-        <b>在内网机器运行 <code>nfrc join</code></b>
-        <span>客户端自动写入 <code>agent.toml</code> 并建立加密反向长连接。</span>
-      </li>
-      <li>
-        <b>随时在面板创建与调整隧道</b>
-        <span>配置变更通过控制通道热推送，无需重启客户端。</span>
-      </li>
-    </ol>
-  </section>
-</div>
+</details>
 
 <script>
 (function () {
@@ -172,5 +179,67 @@
       btn.closest('.nc-rename').hidden = true;
     });
   });
+
+  // Live TOML / YAML client config generator
+  var box = document.querySelector('.cfg-gen');
+  if (!box) return;
+  var srv = box.getAttribute('data-srv') || 'your-server:8443';
+  var tok = box.getAttribute('data-tok') || 'your-auth-token';
+  var pin = box.getAttribute('data-pin') || '';
+  var ca = box.getAttribute('data-ca') === '1';
+  var nameInput = document.getElementById('cfg_name');
+  var preview = document.getElementById('cfg_preview');
+  var copyBtn = document.getElementById('cfg_copy');
+  var fnameEl = document.getElementById('cfg_filename');
+  var cmdEl = document.getElementById('cfg_cmd');
+  var cmdCopy = document.getElementById('cfg_cmd_copy');
+  var fmtBtns = Array.prototype.slice.call(box.querySelectorAll('[data-cfg-fmt]'));
+  var fmt = 'toml';
+
+  function render() {
+    var name = (nameInput.value || 'my-node').trim().replace(/"/g, '');
+    var txt = '';
+    if (fmt === 'yaml') {
+      txt = 'server_addr: "' + srv + '"\n' +
+            'auth_token: "' + tok + '"\n' +
+            'name: "' + name + '"\n' +
+            (ca ? 'ca: true\n' : (pin ? 'pin: "' + pin + '"\n' : '')) +
+            '\n# 可选：直接声明隧道（不写也可连上后在面板可视化管理）\n' +
+            '# proxies:\n' +
+            '#   - name: ssh\n' +
+            '#     type: tcp\n' +
+            '#     local: "127.0.0.1:22"\n' +
+            '#     remote_port: 20022\n';
+      fnameEl.textContent = 'client.yaml';
+      cmdEl.textContent = 'nfrc -c client.yaml';
+      cmdCopy.setAttribute('data-copy', 'nfrc -c client.yaml');
+    } else {
+      txt = 'server_addr = "' + srv + '"\n' +
+            'auth_token  = "' + tok + '"\n' +
+            'name        = "' + name + '"\n' +
+            (ca ? 'ca          = true\n' : (pin ? 'pin         = "' + pin + '"\n' : '')) +
+            '\n# 可选：直接声明隧道（不写也可连上后在面板可视化管理）\n' +
+            '# [[proxies]]\n' +
+            '# name        = "ssh"\n' +
+            '# type        = "tcp"\n' +
+            '# local       = "127.0.0.1:22"\n' +
+            '# remote_port = 20022\n';
+      fnameEl.textContent = 'client.toml';
+      cmdEl.textContent = 'nfrc -c client.toml';
+      cmdCopy.setAttribute('data-copy', 'nfrc -c client.toml');
+    }
+    preview.textContent = txt;
+    copyBtn.setAttribute('data-copy', txt);
+  }
+
+  fmtBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      fmt = b.getAttribute('data-cfg-fmt') || 'toml';
+      fmtBtns.forEach(function (x) { x.classList.toggle('active', x === b); });
+      render();
+    });
+  });
+  nameInput.addEventListener('input', render);
+  render();
 })();
 </script>

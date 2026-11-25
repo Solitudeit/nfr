@@ -1,0 +1,29 @@
+# NFR 客户端配置示例（YAML 格式，与 client.toml 完全等价）
+# 启动命令：nfrc -c client.yaml
+# 校验配置：nfrc verify -c client.yaml
+
+server_addr: "203.0.113.10:8443"
+auth_token: "change-me-to-a-strong-token"
+name: "my-node"
+
+# 可选：服务端自签证书指纹或公共 CA 校验
+# pin: ""
+# ca: false
+
+log_level: "info"
+
+# 可选：直接声明隧道（不写也可在 Web 面板里随时增删改）
+# proxies:
+#   - name: ssh
+#     type: tcp
+#     local: "127.0.0.1:22"
+#     remote_port: 20022
+#   - name: web
+#     type: http
+#     local: "127.0.0.1:8080"
+#     hosts:
+#       - app.example.com
+#   - name: dns
+#     type: udp
+#     local: "127.0.0.1:53"
+#     remote_port: 20053

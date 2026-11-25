@@ -600,13 +600,23 @@ type nodesData struct {
 	base
 	Nodes       []api.Node
 	OnlineNodes int
+	ServerAddr  string
+	AuthToken   string
+	Pin         string
+	CAMode      bool
 	Code        string
 	Command     string
 	JoinWarning string
 }
 
 func (p *Panel) nodes(w http.ResponseWriter, r *http.Request, s *session) {
-	d := nodesData{base: p.newBase(r, s, "nodes", "节点", "nodes")}
+	d := nodesData{
+		base:       p.newBase(r, s, "nodes", "节点", "nodes"),
+		ServerAddr: p.srv.JoinAddr(),
+		AuthToken:  p.srv.AuthToken(),
+		Pin:        p.srv.Pin(),
+		CAMode:     p.srv.CertSummary().Mode == "ca",
+	}
 	d.Nodes = p.srv.Nodes()
 	d.OnlineNodes = countOnline(d.Nodes)
 	p.labelNodes(r.Context(), d.Nodes)
@@ -687,21 +697,23 @@ func (p *Panel) servers(w http.ResponseWriter, r *http.Request, s *session) {
 
 type settingsData struct {
 	base
-	Name        string
-	Domain      string
-	PublicHost  string
-	APIEnabled  bool
-	PortLow     int
-	PortHigh    int
-	Email       string
-	Pin         string
-	PanelURL    string
-	CertSource  string
-	CertMode    string
-	CertExpiry  string
-	Keys        []api.APIKey
-	NewKey      string
-	JoinWarning string
+	Name                string
+	Domain              string
+	PublicHost          string
+	AuthToken           string
+	AuthTokenFromConfig bool
+	APIEnabled          bool
+	PortLow             int
+	PortHigh            int
+	Email               string
+	Pin                 string
+	PanelURL            string
+	CertSource          string
+	CertMode            string
+	CertExpiry          string
+	Keys                []api.APIKey
+	NewKey              string
+	JoinWarning         string
 }
 
 func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
@@ -774,6 +786,12 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 				}
 			}
 			d.Notice = "设置已保存"
+		case "auth_token":
+			if err := p.srv.SetAuthToken(r.FormValue("auth_token")); err != nil {
+				d.Error = err.Error()
+				break
+			}
+			d.Notice = "连接密钥已更新"
 		case "api":
 			if err := p.srv.ToggleAPI(formSwitch(r.FormValue("api_enabled"))); err != nil {
 				d.Error = err.Error()
@@ -808,6 +826,8 @@ func (p *Panel) settings(w http.ResponseWriter, r *http.Request, s *session) {
 	d.Name = info.Name
 	d.Domain = set.Domain
 	d.PublicHost = set.PublicHost
+	d.AuthToken = p.srv.AuthToken()
+	d.AuthTokenFromConfig = p.srv.AuthTokenFromConfig()
 	d.APIEnabled = set.APIEnabled
 	d.PortLow, d.PortHigh = set.PortRange[0], set.PortRange[1]
 	d.Email = set.HTTPSEmail

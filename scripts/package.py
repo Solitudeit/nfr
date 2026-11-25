@@ -149,6 +149,10 @@ def main():
             shutil.copy2(os.path.join(ROOT, "LICENSE"), os.path.join(stage, "LICENSE"))
             shutil.copy2(os.path.join(ROOT, "README.md"), os.path.join(stage, "README.md"))
 
+            cfg_src = os.path.join(ROOT, "configs")
+            if os.path.isdir(cfg_src):
+                shutil.copytree(cfg_src, os.path.join(stage, "configs"))
+
             if label_os == "linux":
                 sysd_dst = os.path.join(stage, "systemd")
                 os.makedirs(sysd_dst, exist_ok=True)

@@ -1,0 +1,37 @@
+# NFR 客户端配置示例（TOML 格式，同样支持 client.yaml）
+# 启动命令：nfrc -c client.toml
+# 校验配置：nfrc verify -c client.toml
+
+# 服务端控制端口地址（省略端口默认 :8443）
+server_addr = "203.0.113.10:8443"
+
+# 与服务端 server.toml / 面板中一致的连接密钥
+auth_token = "change-me-to-a-strong-token"
+
+# 节点显示名称（留空默认取本机主机名；同名重连自动复用原节点）
+name = "my-node"
+
+# 可选：服务端自签证书 SHA-256 指纹（留空首次信任）；若服务端使用公共 CA / ACME 证书则设 ca = true
+# pin = ""
+# ca  = false
+
+log_level = "info"
+
+# 可选：直接在配置文件中声明隧道（不写 proxies 也可连上后直接在 Web 面板中可视化创建和管理）
+# [[proxies]]
+# name        = "ssh"
+# type        = "tcp"
+# local       = "127.0.0.1:22"
+# remote_port = 20022
+#
+# [[proxies]]
+# name  = "web"
+# type  = "http"
+# local = "127.0.0.1:8080"
+# hosts = ["app.example.com"]
+#
+# [[proxies]]
+# name        = "dns"
+# type        = "udp"
+# local       = "127.0.0.1:53"
+# remote_port = 20053

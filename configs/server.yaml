@@ -1,0 +1,28 @@
+# NFR 服务端配置示例（YAML 格式，与 server.toml 完全等价）
+# 启动命令：nfrs -c server.yaml
+# 校验配置：nfrs verify -c server.yaml
+
+control_listen: ":8443"
+http_listen: ":80"
+https_listen: ":443"
+data_dir: "/var/lib/nfr"
+
+# 客户端连接共享密钥（与客户端 client.yaml / client.toml 的 auth_token 一致）
+auth_token: "change-me-to-a-strong-token"
+
+# 可选：公网域名 / 公网 IP
+domain: ""
+public_host: ""
+
+# TCP / UDP 公网端口分配范围
+port_range: [20000, 29999]
+log_level: "info"
+
+# 可选：首次启动预设面板密码
+# panel:
+#   password: "your-admin-password"
+
+# 可选：自动 HTTPS 证书（需配置 domain）
+# acme:
+#   enabled: true
+#   email: "ops@example.com"

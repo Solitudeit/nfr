@@ -16,7 +16,7 @@ func TestServerBannerAlwaysShowsConsoleAddress(t *testing.T) {
 	cfg := config.DefaultServer()
 	cfg.Domain = "panel.example.com"
 
-	out := serverBanner(cfg, "", "ab:cd:ef")
+	out := serverBanner(cfg, "", "nfr_t_demo", "ab:cd:ef")
 	if !strings.Contains(out, "面板") {
 		t.Fatalf("banner lost the console label:\n%s", out)
 	}
@@ -28,7 +28,7 @@ func TestServerBannerAlwaysShowsConsoleAddress(t *testing.T) {
 // The password is one-time by design. Repeating it on every start turns a
 // secret into a permanent journal entry, so the second start must not carry it.
 func TestServerBannerOmitsPasswordAfterFirstRun(t *testing.T) {
-	out := serverBanner(config.DefaultServer(), "", "ab:cd:ef")
+	out := serverBanner(config.DefaultServer(), "", "nfr_t_demo", "ab:cd:ef")
 	if strings.Contains(out, "密码") {
 		t.Fatalf("banner repeats the password on a later start:\n%s", out)
 	}
@@ -37,7 +37,7 @@ func TestServerBannerOmitsPasswordAfterFirstRun(t *testing.T) {
 // The first start still has to hand over the one-time password and say that it
 // will not come back.
 func TestServerBannerShowsPasswordOnFirstRun(t *testing.T) {
-	out := serverBanner(config.DefaultServer(), "k3m9xw2p", "ab:cd:ef")
+	out := serverBanner(config.DefaultServer(), "k3m9xw2p", "nfr_t_demo", "ab:cd:ef")
 	if !strings.Contains(out, "k3m9xw2p") {
 		t.Fatalf("first-run banner is missing the password:\n%s", out)
 	}

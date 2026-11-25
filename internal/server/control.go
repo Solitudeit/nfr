@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -246,31 +247,109 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 	ip := remoteIP(tc.RemoteAddr())
 	var node store.Node
 	var found bool
-	_ = s.st.View(func(st *store.State) error {
-		if n, ok := st.NodeByID(hello.NodeID); ok {
-			node, found = *n, true
+	usingSharedToken := strings.TrimSpace(hello.NodeID) == ""
+
+	if usingSharedToken {
+		if !s.joinAllowed(ip) {
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "too many attempts, try later"})
+			sess.Close()
+			return
 		}
-		return nil
-	})
-	if !found {
-		_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "unknown node, run nfrc join again"})
-		sess.Close()
-		return
+		shared := s.AuthToken()
+		if shared == "" {
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "server has no auth_token configured"})
+			sess.Close()
+			return
+		}
+		nonce := auth.RandomBytes(32)
+		if err := proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeChallenge, Nonce: nonce}); err != nil {
+			sess.Close()
+			return
+		}
+		_ = ctrl.SetReadDeadline(time.Now().Add(10 * time.Second))
+		authFrame, err := proto.ReadFrame(ctrl)
+		if err != nil || authFrame.Type != proto.TypeAuth || !auth.CheckMAC(auth.Hash(shared), nonce, authFrame.MAC) {
+			s.joinFailed(ip)
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "authentication failed: invalid auth_token"})
+			sess.Close()
+			return
+		}
+		_ = ctrl.SetReadDeadline(time.Time{})
+
+		name := strings.TrimSpace(hello.Node)
+		if name == "" {
+			name = "node-" + store.NewID()[:4]
+		}
+		now := time.Now().UTC()
+		created := false
+		if err := s.st.Update(func(st *store.State) error {
+			if existing, ok := st.NodeByName(name); ok {
+				existing.OS, existing.Arch, existing.Version = hello.OS, hello.Arch, hello.Version
+				existing.LastSeen = &now
+				existing.LastRemote = ip
+				node = *existing
+				return nil
+			}
+			node = store.Node{
+				ID:         store.NewID(),
+				Name:       name,
+				TokenHash:  auth.Hash(shared),
+				OS:         hello.OS,
+				Arch:       hello.Arch,
+				Version:    hello.Version,
+				CreatedAt:  now,
+				LastSeen:   &now,
+				LastRemote: ip,
+			}
+			st.Nodes = append(st.Nodes, node)
+			created = true
+			return nil
+		}); err != nil {
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: err.Error()})
+			sess.Close()
+			return
+		}
+		if created {
+			s.lg.Info("node registered via config", "node", node.Name, "id", node.ID, "remote", ip)
+			s.hub.publish(api.Event{Type: "node-joined", At: now, Message: node.Name})
+		}
+	} else {
+		_ = s.st.View(func(st *store.State) error {
+			if n, ok := st.NodeByID(hello.NodeID); ok {
+				node, found = *n, true
+			}
+			return nil
+		})
+		if !found {
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "unknown node; configure auth_token in client.toml / client.yaml or re-join"})
+			sess.Close()
+			return
+		}
+		nonce := auth.RandomBytes(32)
+		if err := proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeChallenge, Nonce: nonce}); err != nil {
+			sess.Close()
+			return
+		}
+		_ = ctrl.SetReadDeadline(time.Now().Add(10 * time.Second))
+		authFrame, err := proto.ReadFrame(ctrl)
+		if err != nil || authFrame.Type != proto.TypeAuth || !auth.CheckMAC(node.TokenHash, nonce, authFrame.MAC) {
+			s.joinFailed(ip)
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "authentication failed"})
+			sess.Close()
+			return
+		}
+		_ = ctrl.SetReadDeadline(time.Time{})
 	}
-	nonce := auth.RandomBytes(32)
-	if err := proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeChallenge, Nonce: nonce}); err != nil {
-		sess.Close()
-		return
+
+	// Sync any tunnels declared directly in the client's TOML/YAML config file.
+	if len(hello.Proxies) > 0 {
+		if err := s.syncDeclarativeProxies(node.ID, hello.Proxies); err != nil {
+			s.lg.Warn("sync client proxies failed", "node", node.Name, "err", err)
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "proxy config error: " + err.Error()})
+			sess.Close()
+			return
+		}
 	}
-	_ = ctrl.SetReadDeadline(time.Now().Add(10 * time.Second))
-	authFrame, err := proto.ReadFrame(ctrl)
-	if err != nil || authFrame.Type != proto.TypeAuth || !auth.CheckMAC(node.TokenHash, nonce, authFrame.MAC) {
-		s.joinFailed(ip)
-		_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "authentication failed"})
-		sess.Close()
-		return
-	}
-	_ = ctrl.SetReadDeadline(time.Time{})
 
 	st := s.st.Snapshot()
 	if err := proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeWelcome, NodeID: node.ID, Revision: st.Revision}); err != nil {
@@ -490,4 +569,97 @@ func (s *Server) openStream(nodeID string, h *proto.StreamHeader) (net.Conn, err
 	}
 	_ = st.SetWriteDeadline(time.Time{})
 	return st, nil
+}
+
+// syncDeclarativeProxies reconciles tunnels declared in a client's TOML/YAML
+// config file onto nodeID. Existing tunnels with the same name on this node are
+// updated in place; missing ones are created automatically.
+func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec) error {
+	now := time.Now().UTC()
+	changed, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
+		mutated := false
+		for _, p := range proxies {
+			name := strings.TrimSpace(p.Name)
+			typ := strings.ToLower(strings.TrimSpace(p.Type))
+			if typ == "" {
+				typ = store.TunnelTCP
+			}
+			var existing *store.Tunnel
+			for i := range st.Tunnels {
+				if strings.EqualFold(st.Tunnels[i].Name, name) {
+					existing = &st.Tunnels[i]
+					break
+				}
+			}
+			// If an HTTP proxy has no hosts, no remote_port, and server has no
+			// domain configured, auto-assign a free public port so IP-only VPS
+			// deployments work out of the box.
+			port := p.RemotePort
+			if typ == store.TunnelHTTP && port == 0 && len(p.Hosts) == 0 && st.Settings.Domain == "" {
+				if existing != nil && existing.RemotePort > 0 {
+					port = existing.RemotePort
+				} else {
+					picked, perr := pickPort(st, "", "tcp")
+					if perr != nil {
+						return false, perr
+					}
+					port = picked
+				}
+			}
+			en := true
+			bw := p.BandwidthKB
+			quota := p.QuotaMB
+			req := api.TunnelRequest{
+				Name:        name,
+				NodeID:      nodeID,
+				Type:        typ,
+				Local:       p.Local,
+				RemotePort:  port,
+				Hosts:       p.Hosts,
+				Enabled:     &en,
+				BandwidthKB: &bw,
+				QuotaMB:     &quota,
+			}
+			built, err := buildTunnel(st, req, existing, st.Settings.Domain, false)
+			if err != nil {
+				return false, fmt.Errorf("proxy %q: %w", name, err)
+			}
+			if existing != nil {
+				if existing.NodeID == built.NodeID &&
+					existing.Type == built.Type &&
+					existing.Local == built.Local &&
+					existing.RemotePort == built.RemotePort &&
+					strings.Join(existing.Hosts, ",") == strings.Join(built.Hosts, ",") &&
+					existing.Enabled == built.Enabled &&
+					existing.BandwidthKB == built.BandwidthKB &&
+					existing.QuotaMB == built.QuotaMB {
+					continue
+				}
+				existing.NodeID = built.NodeID
+				existing.Type = built.Type
+				existing.Local = built.Local
+				existing.RemotePort = built.RemotePort
+				existing.Hosts = built.Hosts
+				existing.Enabled = built.Enabled
+				existing.BandwidthKB = built.BandwidthKB
+				existing.QuotaMB = built.QuotaMB
+				existing.UpdatedAt = now
+				mutated = true
+			} else {
+				built.ID = store.NewID()
+				built.CreatedAt = now
+				built.UpdatedAt = now
+				st.Tunnels = append(st.Tunnels, *built)
+				mutated = true
+			}
+		}
+		return mutated, nil
+	})
+	if err != nil {
+		return err
+	}
+	if changed {
+		s.reconcile()
+	}
+	return nil
 }

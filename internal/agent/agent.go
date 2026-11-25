@@ -25,10 +25,13 @@ import (
 
 // Options describes one server this agent connects to.
 type Options struct {
-	Addr   string // host:port of the control listener
-	Token  string // node token minted by nfrc join
-	NodeID string
-	Pin    string
+	Addr      string // host:port of the control listener
+	AuthToken string // shared auth_token from client.toml / client.yaml
+	Name      string // node display name when connecting with AuthToken
+	Proxies   []proto.ProxySpec
+	Token     string // legacy per-node token minted by nfrc join
+	NodeID    string
+	Pin       string
 	// CA verifies the server with the system trust store instead of pinning
 	// its certificate fingerprint (used when the server runs ACME).
 	CA     bool
@@ -47,6 +50,7 @@ type Agent struct {
 	lg  *slog.Logger
 
 	mu     sync.Mutex
+	nodeID string                 // active node id returned by welcome
 	routes map[string]tunnelRoute // tunnel id -> local destination
 	sess   *yamux.Session
 
@@ -107,8 +111,13 @@ func (a *Agent) Run(ctx context.Context) {
 }
 
 func (a *Agent) session(ctx context.Context) error {
-	if a.opt.Token == "" || a.opt.NodeID == "" {
-		return errors.New("this machine has no node token yet, run: nfrc join <server> <code>")
+	secret := a.opt.Token
+	nodeID := a.opt.NodeID
+	if nodeID == "" {
+		secret = a.opt.AuthToken
+	}
+	if secret == "" {
+		return errors.New("no auth_token configured; set auth_token in client.toml / client.yaml")
 	}
 	host, _, err := net.SplitHostPort(a.opt.Addr)
 	if err != nil {
@@ -167,10 +176,12 @@ func (a *Agent) session(ctx context.Context) error {
 	hello := &proto.Frame{
 		Type:    proto.TypeHello,
 		Proto:   proto.Version,
-		NodeID:  a.opt.NodeID,
+		Node:    a.opt.Name,
+		NodeID:  nodeID,
 		OS:      runtime.GOOS,
 		Arch:    runtime.GOARCH,
 		Version: version.String(),
+		Proxies: a.opt.Proxies,
 	}
 	if err := proto.WriteFrame(ctrl, hello); err != nil {
 		return err
@@ -186,7 +197,7 @@ func (a *Agent) session(ctx context.Context) error {
 	if f.Type != proto.TypeChallenge {
 		return fmt.Errorf("unexpected frame %q during handshake", f.Type)
 	}
-	mac := auth.MAC(auth.Hash(a.opt.Token), f.Nonce)
+	mac := auth.MAC(auth.Hash(secret), f.Nonce)
 	if err := proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeAuth, MAC: mac}); err != nil {
 		return err
 	}
@@ -204,6 +215,7 @@ func (a *Agent) session(ctx context.Context) error {
 	a.lg.Info("connected", "server", a.opt.Addr, "node", f.NodeID, "revision", f.Revision)
 
 	a.mu.Lock()
+	a.nodeID = f.NodeID
 	a.sess = sess
 	a.ctrl = ctrl
 	a.mu.Unlock()
@@ -279,8 +291,14 @@ func (a *Agent) reportDialFailed(tunnelID, local string, cause error) {
 	if cause != nil {
 		msg = local + ": " + cause.Error()
 	}
+	a.mu.Lock()
+	nid := a.nodeID
+	a.mu.Unlock()
+	if nid == "" {
+		nid = a.opt.NodeID
+	}
 	_ = a.sendFrame(&proto.Frame{
-		Type: proto.TypeDialFailed, NodeID: a.opt.NodeID,
+		Type: proto.TypeDialFailed, NodeID: nid,
 		Code: tunnelID, Message: msg, TS: time.Now().Unix(),
 	})
 }

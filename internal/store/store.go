@@ -66,6 +66,9 @@ type Settings struct {
 	// this covers the case where the operator has no domain but does know the
 	// public address of a NAT'd host.
 	PublicHost string `json:"public_host,omitempty"`
+	// AuthToken is the shared secret clients can put in client.toml / client.yaml
+	// to connect directly without minting an expiring join code. Encrypted at rest.
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 // Tunnel is one published service.
@@ -170,6 +173,17 @@ func Open(dir string) (*Store, error) {
 			s.state.Settings.PortRange = [2]int{20000, 29999}
 		}
 		needsSave := false
+		if s.state.Settings.AuthToken != "" {
+			if strings.HasPrefix(s.state.Settings.AuthToken, encPrefix) {
+				plain, err := decryptSecret(s.key, s.state.Settings.AuthToken)
+				if err != nil {
+					return nil, fmt.Errorf("decrypt auth_token: %w", err)
+				}
+				s.state.Settings.AuthToken = plain
+			} else {
+				needsSave = true
+			}
+		}
 		for i := range s.state.Remotes {
 			ak := s.state.Remotes[i].APIKey
 			if ak == "" {
@@ -319,6 +333,13 @@ func cloneState(in State) State {
 
 func (s *Store) saveLocked() error {
 	disk := cloneState(s.state)
+	if disk.Settings.AuthToken != "" {
+		enc, err := encryptSecret(s.key, disk.Settings.AuthToken)
+		if err != nil {
+			return err
+		}
+		disk.Settings.AuthToken = enc
+	}
 	for i := range disk.Remotes {
 		if disk.Remotes[i].APIKey != "" {
 			enc, err := encryptSecret(s.key, disk.Remotes[i].APIKey)
@@ -389,6 +410,20 @@ func (st *State) TunnelByID(id string) (*Tunnel, bool) {
 func (st *State) NodeByID(id string) (*Node, bool) {
 	for i := range st.Nodes {
 		if st.Nodes[i].ID == id {
+			return &st.Nodes[i], true
+		}
+	}
+	return nil, false
+}
+
+// NodeByName finds a node by case-insensitive display name.
+func (st *State) NodeByName(name string) (*Node, bool) {
+	want := strings.TrimSpace(name)
+	if want == "" {
+		return nil, false
+	}
+	for i := range st.Nodes {
+		if strings.EqualFold(st.Nodes[i].Name, want) {
 			return &st.Nodes[i], true
 		}
 	}

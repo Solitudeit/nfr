@@ -175,7 +175,66 @@ func New(opts Options) (*Server, string, error) {
 			return nil, "", err
 		}
 	}
+	// Ensure a shared client auth_token always exists so operators can drop a
+	// static client.toml / client.yaml onto any machine immediately.
+	if err := s.ensureAuthToken(); err != nil {
+		return nil, "", fmt.Errorf("init auth_token: %w", err)
+	}
 	return s, generated, nil
+}
+
+func (s *Server) ensureAuthToken() error {
+	if tok := strings.TrimSpace(s.cfg.AuthToken); tok != "" {
+		return nil
+	}
+	_, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
+		if st.Settings.AuthToken != "" {
+			return false, nil
+		}
+		st.Settings.AuthToken = auth.NewSecret("nfr_t_", 18)
+		return true, nil
+	})
+	return err
+}
+
+// AuthToken returns the active shared client token. A token set in server.toml /
+// server.yaml / NFR_AUTH_TOKEN takes precedence over the persisted store value.
+func (s *Server) AuthToken() string {
+	if tok := strings.TrimSpace(s.cfg.AuthToken); tok != "" {
+		return tok
+	}
+	return s.st.Snapshot().Settings.AuthToken
+}
+
+// AuthTokenFromConfig reports whether auth_token is pinned by the server config
+// file or environment (and therefore read-only in the web console).
+func (s *Server) AuthTokenFromConfig() bool {
+	return strings.TrimSpace(s.cfg.AuthToken) != ""
+}
+
+// SetAuthToken updates the stored shared client token.
+func (s *Server) SetAuthToken(token string) error {
+	if s.AuthTokenFromConfig() {
+		return errBad("auth_token", "auth_token is set in server config / NFR_AUTH_TOKEN")
+	}
+	token = strings.TrimSpace(token)
+	if len(token) < 6 {
+		return errBad("auth_token", "auth_token must be at least 6 characters")
+	}
+	if err := s.st.Update(func(st *store.State) error {
+		st.Settings.AuthToken = token
+		return nil
+	}); err != nil {
+		return err
+	}
+	s.notify("auth token updated")
+	return nil
+}
+
+// JoinAddr returns the host:port address clients should put into server_addr.
+func (s *Server) JoinAddr() string {
+	host, _ := s.joinHost()
+	return host
 }
 
 // Pin is the certificate fingerprint peers should trust.
