@@ -76,13 +76,6 @@
           {{else}}
           <div class="flash warn" role="alert">这台服务器当前没有可选的内网设备。先在内网机器运行 <code>nfrc join</code>，设备上线后再回来建隧道。</div>
           {{end}}
-          {{if .LocalTarget}}
-          <div class="np-local" role="note">
-            <span class="chip warn">服务端本机</span>
-            <span class="np-local-txt">面板所在的这台机器也能作为出口（设置里已开启），它不走 agent，和上面的内网设备不是一类目标。</span>
-            <button type="button" class="btn sm{{if and .SelNode (eq .SelNode.ID .LocalTarget.ID)}} primary{{end}}" data-local-node="{{.LocalTarget.ID}}">{{if and .SelNode (eq .SelNode.ID .LocalTarget.ID)}}已选定{{else}}选它{{end}}</button>
-          </div>
-          {{end}}
         </div>
       </div>
 
@@ -175,7 +168,7 @@
     </label>
     <span class="right"></span>
     <a class="btn ghost" href="/nfr/tunnels?server={{.Current}}">取消</a>
-    <button type="submit" class="btn primary" id="tsubmit"{{if and (not .IsLocal) (eq (len .Nodes) 0) (not .LocalTarget)}} disabled{{end}}>{{if .Edit}}保存修改{{else if .Draft}}存为停用草稿{{else}}创建隧道{{end}}</button>
+    <button type="submit" class="btn primary" id="tsubmit"{{if and (not .IsLocal) (eq (len .Nodes) 0)}} disabled{{end}}>{{if .Edit}}保存修改{{else if .Draft}}存为停用草稿{{else}}创建隧道{{end}}</button>
   </section>
 </form>
 
@@ -276,24 +269,6 @@
         if (v > 65535) v = 65535;
         port.value = v;
       });
-    });
-  }
-
-  // ---- 服务端本机选项（与 agent 节点隔离） ------------------------------
-  var localBtn = document.querySelector('[data-local-node]');
-  if (localBtn) {
-    localBtn.addEventListener('click', function () {
-      var field = document.getElementById('node_id');
-      if (!field) {
-        field = document.createElement('input');
-        field.type = 'hidden';
-        field.name = 'node_id';
-        field.id = 'node_id';
-        form.appendChild(field);
-      }
-      field.value = localBtn.dataset.localNode;
-      localBtn.classList.add('primary');
-      localBtn.textContent = '已选定';
     });
   }
 

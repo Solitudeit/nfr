@@ -135,17 +135,32 @@ func (s *Server) joinAllowed(ip string) bool {
 	return true
 }
 
+func (s *Server) pruneAttempts(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for ip, a := range s.attempts {
+		if !a.until.IsZero() && now.After(a.until) {
+			delete(s.attempts, ip)
+		}
+	}
+}
+
 func (s *Server) joinFailed(ip string) {
+	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a := s.attempts[ip]
-	if a == nil || time.Now().After(a.until) {
+	if a == nil || (!a.until.IsZero() && now.After(a.until)) {
 		a = &attempt{}
 		s.attempts[ip] = a
 	}
 	a.count++
 	if a.count >= 5 {
-		a.until = time.Now().Add(15 * time.Minute)
+		a.until = now.Add(15 * time.Minute)
+	} else {
+		// Expire partial failed counts after 15 minutes of quiet so s.attempts
+		// does not grow unbounded from random internet scanners.
+		a.until = now.Add(15 * time.Minute)
 	}
 }
 
@@ -448,12 +463,8 @@ func (s *Server) dropSession(nodeID string, a *agentSession) {
 	s.mu.Unlock()
 }
 
-// openStream dials one stream to the named node's agent. The built-in node has
-// no agent, so its streams go straight to the local service.
+// openStream dials one stream to the named node's agent.
 func (s *Server) openStream(nodeID string, h *proto.StreamHeader) (net.Conn, error) {
-	if nodeID == localNodeID {
-		return s.localStream(h)
-	}
 	a := s.sessionFor(nodeID)
 	if a == nil || a.sess == nil {
 		return nil, fmt.Errorf("node offline")

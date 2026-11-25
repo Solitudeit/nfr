@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -359,118 +358,32 @@ func TestSetNodeName(t *testing.T) {
 	}
 }
 
-func TestConsoleHostIsNotATargetByDefault(t *testing.T) {
+func TestTunnelRequiresJoinedNode(t *testing.T) {
 	s, _ := newTestServer(t, nil)
 
 	if nodes := s.Nodes(); len(nodes) != 0 {
-		t.Fatalf("console host leaks into the node list: %+v", nodes)
+		t.Fatalf("unexpected initial nodes: %+v", nodes)
 	}
-	// An inner address belongs to the machine that joined. Until the operator
-	// opts in, asking for the console host must fail loudly rather than quietly
-	// dial a local address on the server.
-	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "self", NodeID: localNodeID, Type: "tcp", Local: "127.0.0.1:9"}); err == nil {
-		t.Fatal("console host accepted as a tunnel target while disabled")
+	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "self", NodeID: "local", Type: "tcp", Local: "127.0.0.1:9"}); err == nil {
+		t.Fatal("non-existent local node accepted as a tunnel target")
 	}
 	if _, err := s.CreateTunnel(api.TunnelRequest{Name: "self2", Type: "tcp", Local: "127.0.0.1:9"}); err == nil {
 		t.Fatal("a tunnel without a node was accepted")
 	}
 }
 
-func TestConsoleHostCanBeEnabledExplicitly(t *testing.T) {
-	s, _ := newTestServer(t, nil)
-
-	if err := s.SetLocalNode(true); err != nil {
-		t.Fatalf("enable the console host: %v", err)
+func TestSettingsDomainAppliesToNewHTTPTunnel(t *testing.T) {
+	s, st := newTestServer(t, func(c *config.Server) { c.Domain = "" })
+	addNode(t, st, "n1")
+	if err := s.UpdateSettings("dynamic.example.com", "", false, [2]int{20000, 29999}, ""); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
-	nodes := s.Nodes()
-	if len(nodes) != 1 || nodes[0].ID != localNodeID || !nodes[0].Online || !nodes[0].Local {
-		t.Fatalf("console host missing after opting in: %+v", nodes)
-	}
-	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "self", NodeID: localNodeID, Type: "tcp", Local: "127.0.0.1:9"})
+	tun, err := s.CreateTunnel(api.TunnelRequest{Name: "app", NodeID: "n1", Type: "http", Local: "8080"})
 	if err != nil {
-		t.Fatalf("create tunnel on the console host: %v", err)
+		t.Fatalf("create http tunnel after setting domain in settings: %v", err)
 	}
-	if tun.NodeName == "" {
-		t.Fatal("tunnel has no node name for the console host")
-	}
-
-	if err := s.RemoveNode(localNodeID); err == nil {
-		t.Fatal("console host was removable")
-	}
-	if err := s.SetNodeName(localNodeID, "home"); err != nil {
-		t.Fatalf("rename the console host: %v", err)
-	}
-	if got := s.Nodes()[0].Name; got != "home" {
-		t.Fatalf("console host name = %q, want home", got)
-	}
-
-	// Switching it back off must not silently keep the old tunnels alive: they
-	// now point at a node that is gone, and say so.
-	if err := s.SetLocalNode(false); err != nil {
-		t.Fatalf("disable the console host: %v", err)
-	}
-	got := s.Tunnels()
-	if len(got) != 1 || !got[0].NodeMissing {
-		t.Fatalf("tunnel did not report its lost node: %+v", got)
-	}
-}
-
-func TestConsoleHostForwardsTraffic(t *testing.T) {
-	s, _ := newTestServer(t, nil)
-	if err := s.SetLocalNode(true); err != nil {
-		t.Fatalf("enable the console host: %v", err)
-	}
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Backend", "local")
-		_, _ = io.WriteString(w, "hello from the built-in node")
-	}))
-	defer backend.Close()
-
-	port := 0
-	for p := 25100; p < 25200; p++ {
-		if canListen("tcp", p) {
-			port = p
-			break
-		}
-	}
-	if port == 0 {
-		t.Skip("no free port in the default range")
-	}
-	addr := strings.TrimPrefix(backend.URL, "http://")
-	if _, err := s.CreateTunnel(api.TunnelRequest{
-		Name: "localtcp", NodeID: localNodeID, Type: "tcp", Local: addr, RemotePort: port,
-	}); err != nil {
-		t.Fatalf("create tunnel: %v", err)
-	}
-
-	// reconcile() opens the public listener asynchronously enough that a short
-	// retry loop is the simplest reliable way to wait for it.
-	var conn net.Conn
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
-		if err == nil {
-			conn = c
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("public port never opened: %v", err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	defer conn.Close()
-
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"); err != nil {
-		t.Fatalf("write request: %v", err)
-	}
-	body, err := io.ReadAll(conn)
-	if err != nil {
-		t.Fatalf("read response: %v", err)
-	}
-	if !strings.Contains(string(body), "hello from the built-in node") {
-		t.Fatalf("unexpected response: %q", body)
+	if len(tun.Hosts) != 1 || tun.Hosts[0] != "app.dynamic.example.com" {
+		t.Fatalf("hosts = %v, want [app.dynamic.example.com]", tun.Hosts)
 	}
 }
 

@@ -65,10 +65,6 @@ type Settings struct {
 	// this covers the case where the operator has no domain but does know the
 	// public address of a NAT'd host.
 	PublicHost string `json:"public_host,omitempty"`
-	// LocalNode exposes the console host itself as a tunnel target. It is off
-	// by default: an inner address belongs to the machine that joined, not to
-	// the server, so silently dialling it here would break that promise.
-	LocalNode bool `json:"local_node,omitempty"`
 }
 
 // Tunnel is one published service.
@@ -193,43 +189,106 @@ func (s *Store) View(fn func(*State) error) error {
 // the in-memory state is rolled back, so a handler that fails halfway through
 // cannot leave the process disagreeing with its own file.
 func (s *Store) Update(fn func(*State) error) error {
+	_, err := s.UpdateIf(func(st *State) (bool, error) {
+		if err := fn(st); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	return err
+}
+
+// UpdateIf applies fn and persists the result only when fn reports changed=true
+// and err==nil. When changed is false, Revision is not bumped and nothing is
+// written to disk.
+func (s *Store) UpdateIf(fn func(*State) (bool, error)) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	backup, err := deepCopy(s.state)
+	backup := cloneState(s.state)
+	changed, err := fn(&s.state)
 	if err != nil {
-		return err
-	}
-	if err := fn(&s.state); err != nil {
 		s.state = backup
-		return err
+		return false, err
+	}
+	if !changed {
+		s.state = backup
+		return false, nil
 	}
 	s.state.Revision = backup.Revision + 1
 	if err := s.saveLocked(); err != nil {
 		s.state = backup
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }
 
 // Snapshot returns a deep copy safe to hand to HTTP handlers.
 func (s *Store) Snapshot() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	dup, err := deepCopy(s.state)
-	if err != nil {
-		return s.state
-	}
-	return dup
+	return cloneState(s.state)
 }
 
-func deepCopy(in State) (State, error) {
-	b, err := json.Marshal(in)
-	if err != nil {
-		return in, err
+func cloneTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
 	}
-	var out State
-	err = json.Unmarshal(b, &out)
-	return out, err
+	cp := *t
+	return &cp
+}
+
+func cloneStrings(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneState(in State) State {
+	out := in
+	if in.Tunnels != nil {
+		out.Tunnels = make([]Tunnel, len(in.Tunnels))
+		for i, t := range in.Tunnels {
+			t.Hosts = cloneStrings(t.Hosts)
+			out.Tunnels[i] = t
+		}
+	}
+	if in.Nodes != nil {
+		out.Nodes = make([]Node, len(in.Nodes))
+		for i, n := range in.Nodes {
+			n.LastSeen = cloneTimePtr(n.LastSeen)
+			out.Nodes[i] = n
+		}
+	}
+	if in.Joins != nil {
+		out.Joins = make([]auth.JoinCode, len(in.Joins))
+		for i, j := range in.Joins {
+			j.UsedAt = cloneTimePtr(j.UsedAt)
+			out.Joins[i] = j
+		}
+	}
+	if in.Leases != nil {
+		out.Leases = make([]Lease, len(in.Leases))
+		copy(out.Leases, in.Leases)
+	}
+	if in.Remotes != nil {
+		out.Remotes = make([]Remote, len(in.Remotes))
+		for i, r := range in.Remotes {
+			r.LastSeen = cloneTimePtr(r.LastSeen)
+			out.Remotes[i] = r
+		}
+	}
+	if in.APIKeys != nil {
+		out.APIKeys = make([]auth.APIKey, len(in.APIKeys))
+		for i, k := range in.APIKeys {
+			k.LastUsed = cloneTimePtr(k.LastUsed)
+			k.AllowFrom = cloneStrings(k.AllowFrom)
+			out.APIKeys[i] = k
+		}
+	}
+	return out
 }
 
 func (s *Store) saveLocked() error {
@@ -343,15 +402,20 @@ func (st *State) TunnelsForNode(nodeID string) []Tunnel {
 	return out
 }
 
-// PruneLeases drops expired reservations.
-func (st *State) PruneLeases(now time.Time) {
-	kept := st.Leases[:0]
+// PruneLeases drops expired reservations and reports whether any were removed.
+func (st *State) PruneLeases(now time.Time) bool {
+	if len(st.Leases) == 0 {
+		return false
+	}
+	kept := make([]Lease, 0, len(st.Leases))
 	for _, l := range st.Leases {
 		if now.Before(l.ExpiresAt) {
 			kept = append(kept, l)
 		}
 	}
+	removed := len(kept) != len(st.Leases)
 	st.Leases = kept
+	return removed
 }
 
 // JoinCodeByValue finds a pending join code.
@@ -374,9 +438,13 @@ func (st *State) APIKeyByHash(h string) (*auth.APIKey, bool) {
 	return nil, false
 }
 
-// PruneJoins removes codes that expired more than an hour ago.
-func (st *State) PruneJoins(now time.Time) {
-	kept := st.Joins[:0]
+// PruneJoins removes expired or stale redeemed codes and reports whether any
+// were removed.
+func (st *State) PruneJoins(now time.Time) bool {
+	if len(st.Joins) == 0 {
+		return false
+	}
+	kept := make([]auth.JoinCode, 0, len(st.Joins))
 	for _, j := range st.Joins {
 		if j.UsedAt == nil && now.After(j.ExpiresAt) {
 			continue
@@ -386,7 +454,9 @@ func (st *State) PruneJoins(now time.Time) {
 		}
 		kept = append(kept, j)
 	}
+	removed := len(kept) != len(st.Joins)
 	st.Joins = kept
+	return removed
 }
 
 // FindJoinCodeByTunnel finds the first unused, unexpired join code bound to a
@@ -404,7 +474,10 @@ func FindJoinCodeByTunnel(st *State, tunnelID string) (*auth.JoinCode, bool) {
 
 // DeleteJoinsByTunnel removes every join code bound to a tunnel.
 func DeleteJoinsByTunnel(st *State, tunnelID string) {
-	kept := st.Joins[:0]
+	if len(st.Joins) == 0 {
+		return
+	}
+	kept := make([]auth.JoinCode, 0, len(st.Joins))
 	for _, j := range st.Joins {
 		if j.TunnelID == tunnelID {
 			continue

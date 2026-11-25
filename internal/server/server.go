@@ -127,10 +127,15 @@ func New(opts Options) (*Server, string, error) {
 		return nil
 	})
 	if need {
-		plain := auth.NewSecret("", 9)
-		hash, err := config.HashPassword(plain)
-		if err != nil {
-			return nil, "", err
+		hash := strings.TrimSpace(opts.Config.Panel.Password)
+		if hash == "" {
+			plain := auth.NewSecret("", 9)
+			var err error
+			hash, err = config.HashPassword(plain)
+			if err != nil {
+				return nil, "", err
+			}
+			generated = plain
 		}
 		if err := s.st.Update(func(st *store.State) error {
 			st.PanelPassword = hash
@@ -138,7 +143,6 @@ func New(opts Options) (*Server, string, error) {
 		}); err != nil {
 			return nil, "", err
 		}
-		generated = plain
 	}
 	return s, generated, nil
 }
@@ -188,13 +192,14 @@ func (s *Server) loop(ctx context.Context) {
 			s.met.Sample()
 		case <-slow.C:
 			now := time.Now().UTC()
-			_ = s.st.Update(func(st *store.State) error {
-				st.PruneLeases(now)
-				st.PruneJoins(now)
-				return nil
+			_, _ = s.st.UpdateIf(func(st *store.State) (bool, error) {
+				l := st.PruneLeases(now)
+				j := st.PruneJoins(now)
+				return l || j, nil
 			})
 			s.flushQuotas()
 			s.pruneUDPSessions()
+			s.pruneAttempts(now)
 		}
 	}
 }
@@ -399,7 +404,11 @@ func (s *Server) advertisedControl() string {
 	if err != nil {
 		return s.cfg.ControlListen
 	}
-	host = transport.BestHost(s.cfg.Domain, host)
+	pref := s.publicHost()
+	if pref == "" {
+		pref = s.cfg.Domain
+	}
+	host = transport.BestHost(pref, host)
 	if port == "443" {
 		return host
 	}
@@ -554,22 +563,12 @@ func (s *Server) Tunnels() []api.Tunnel {
 		nodeOnline := online[t.NodeID]
 		nodeMissing := false
 		awaiting := t.NodeID == ""
-		if t.NodeID == localNodeID {
-			// The console host is only a target when the operator opted in;
-			// otherwise the tunnel has lost its node and says so.
-			if st.Settings.LocalNode {
-				nodeName = st.Name
-				if nodeName == "" {
-					nodeName = "NFR"
-				}
-				nodeOnline = true
+		if !awaiting {
+			if n, ok := st.NodeByID(t.NodeID); ok {
+				nodeName = n.Name
 			} else {
 				nodeMissing = true
 			}
-		} else if n, ok := st.NodeByID(t.NodeID); ok {
-			nodeName = n.Name
-		} else {
-			nodeMissing = true
 		}
 		v := api.Tunnel{
 			ID: t.ID, Name: t.Name, NodeID: t.NodeID, NodeName: nodeName,
@@ -635,7 +634,7 @@ func (s *Server) Nodes() []api.Node {
 		sess[id] = a.remote
 	}
 	s.mu.Unlock()
-	out := make([]api.Node, 0, len(st.Nodes)+1)
+	out := make([]api.Node, 0, len(st.Nodes))
 	for _, n := range st.Nodes {
 		v := api.Node{
 			ID: n.ID, Name: n.Name, OS: n.OS, Arch: n.Arch, Version: n.Version,
@@ -651,12 +650,6 @@ func (s *Server) Nodes() []api.Node {
 			v.RemoteAddr = addr
 		}
 		out = append(out, v)
-	}
-	// The built-in node goes last so callers that pick the first online node
-	// (scripts and integrations) keep choosing a real agent. It is hidden
-	// unless the operator opted in to tunnelling the console host itself.
-	if st.Settings.LocalNode {
-		out = append(out, s.localNode(st))
 	}
 	return out
 }
@@ -798,15 +791,23 @@ func seedSettings(st *store.Store, cfg config.Server) error {
 	if !fresh {
 		return nil
 	}
-	return st.Update(func(s *store.State) error {
-		if cfg.Domain != "" {
+	_, err := st.UpdateIf(func(s *store.State) (bool, error) {
+		changed := false
+		if cfg.Domain != "" && s.Settings.Domain != cfg.Domain {
 			s.Settings.Domain = cfg.Domain
+			changed = true
 		}
-		if cfg.PortRange[0] > 0 && cfg.PortRange[1] >= cfg.PortRange[0] {
+		if cfg.PortRange[0] > 0 && cfg.PortRange[1] >= cfg.PortRange[0] && s.Settings.PortRange != cfg.PortRange {
 			s.Settings.PortRange = cfg.PortRange
+			changed = true
 		}
-		return nil
+		if cfg.ACME.Email != "" && s.Settings.HTTPSEmail == "" {
+			s.Settings.HTTPSEmail = cfg.ACME.Email
+			changed = true
+		}
+		return changed, nil
 	})
+	return err
 }
 
 // oneConnListener yields a single accepted connection.

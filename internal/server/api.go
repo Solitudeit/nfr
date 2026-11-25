@@ -459,7 +459,6 @@ type settingsView struct {
 	APIEnabled bool   `json:"api_enabled"`
 	PortRange  [2]int `json:"port_range"`
 	HTTPSEmail string `json:"https_email"`
-	LocalNode  bool   `json:"local_node,omitempty"`
 }
 
 func (s *Server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -468,7 +467,6 @@ func (s *Server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		Domain: st.Settings.Domain, PublicHost: st.Settings.PublicHost,
 		APIEnabled: st.Settings.APIEnabled,
 		PortRange:  st.Settings.PortRange, HTTPSEmail: st.Settings.HTTPSEmail,
-		LocalNode: st.Settings.LocalNode,
 	})
 }
 
@@ -478,10 +476,6 @@ func (s *Server) apiPatchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.UpdateSettings(req.Domain, req.PublicHost, req.APIEnabled, req.PortRange, req.HTTPSEmail); err != nil {
-		writeErr2(w, err)
-		return
-	}
-	if err := s.SetLocalNode(req.LocalNode); err != nil {
 		writeErr2(w, err)
 		return
 	}

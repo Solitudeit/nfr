@@ -8,33 +8,6 @@
   </div>
 </div>
 
-{{if .LocalTarget}}
-<section class="panel" style="margin-bottom:18px">
-  <div class="panel-head">
-    <h2>服务端本机</h2>
-    <span class="card-sub">设置里显式开启 · 不走 agent，和下面的内网设备不是一类目标</span>
-  </div>
-  <div class="node-grid">
-    <section class="card node-card" data-nid="{{.LocalTarget.ID}}">
-      <div class="nc-top">
-        <span class="dot on"></span>
-        <span class="nc-name">{{.LocalTarget.Name}}</span>
-        {{if .LocalTarget.Region}}<span class="chip loc" title="按公网 IP 归属地">{{.LocalTarget.Region}}</span>{{end}}
-        <span class="chip warn">服务端本机</span>
-      </div>
-      <div class="nc-meta">
-        <span>{{if .LocalTarget.OS}}{{.LocalTarget.OS}} / {{.LocalTarget.Arch}}{{if .LocalTarget.Version}} · {{vshort .LocalTarget.Version}}{{end}}{{else}}系统未知{{end}}</span>
-        <span>{{.LocalTarget.Tunnels}} 条隧道</span>
-        <span>面板所在的这台机器</span>
-      </div>
-      <div class="nc-actions">
-        <a class="btn sm" href="/nfr/tunnels/new?server=local&amp;node={{.LocalTarget.ID}}">新建隧道</a>
-      </div>
-    </section>
-  </div>
-</section>
-{{end}}
-
 {{if .Nodes}}
 <div class="node-grid">
   {{range .Nodes}}

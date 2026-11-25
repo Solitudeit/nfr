@@ -15,7 +15,6 @@ type Settings struct {
 	PortRange  [2]int
 	HTTPSEmail string
 	PublicHost string
-	LocalNode  bool
 }
 
 // Settings returns the current settings.
@@ -27,7 +26,6 @@ func (s *Server) Settings() Settings {
 		PortRange:  st.Settings.PortRange,
 		HTTPSEmail: st.Settings.HTTPSEmail,
 		PublicHost: st.Settings.PublicHost,
-		LocalNode:  st.Settings.LocalNode,
 	}
 }
 

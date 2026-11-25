@@ -18,7 +18,7 @@ import (
 func (s *Server) CreateTunnel(req api.TunnelRequest) (api.Tunnel, error) {
 	var created store.Tunnel
 	err := s.st.Update(func(st *store.State) error {
-		t, err := buildTunnel(st, req, nil, s.cfg.Domain, false)
+		t, err := buildTunnel(st, req, nil, st.Settings.Domain, false)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 		// skip the node check. The ordinary API passes false and can never
 		// quietly create a nodeless tunnel.
 		req.NodeID = ""
-		t, err := buildTunnel(st, req, nil, s.cfg.Domain, true)
+		t, err := buildTunnel(st, req, nil, st.Settings.Domain, true)
 		if err != nil {
 			return err
 		}
@@ -132,13 +132,12 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 
 // UpdateTunnel replaces the editable fields of a tunnel.
 func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, error) {
-	var node string
 	err := s.st.Update(func(st *store.State) error {
 		cur, ok := st.TunnelByID(id)
 		if !ok {
 			return errNotFound("tunnel not found")
 		}
-		next, err := buildTunnel(st, req, cur, s.cfg.Domain, false)
+		next, err := buildTunnel(st, req, cur, st.Settings.Domain, false)
 		if err != nil {
 			return err
 		}
@@ -152,15 +151,14 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 		cur.BandwidthKB = next.BandwidthKB
 		cur.QuotaMB = next.QuotaMB
 		cur.UpdatedAt = time.Now().UTC()
-		node = cur.NodeID
 		return nil
 	})
 	if err != nil {
 		return api.Tunnel{}, err
 	}
+	s.clearTargetDown(id)
 	s.reconcile()
 	s.notify("tunnel updated: " + id)
-	s.pushConfig(node)
 	if v, ok := s.Tunnel(id); ok {
 		return v, nil
 	}
@@ -264,15 +262,16 @@ func (s *Server) TunnelJoinCode(id string) (api.JoinCodeResponse, bool) {
 // SetTunnelEnabled flips the enabled switch.
 func (s *Server) SetTunnelEnabled(id string, on bool) error {
 	s.clearTargetDown(id)
-	var node string
 	err := s.st.Update(func(st *store.State) error {
 		t, ok := st.TunnelByID(id)
 		if !ok {
 			return errNotFound("tunnel not found")
 		}
 		t.Enabled = on
+		if on {
+			t.QuotaPaused = false
+		}
 		t.UpdatedAt = time.Now().UTC()
-		node = t.NodeID
 		return nil
 	})
 	if err != nil {
@@ -280,7 +279,6 @@ func (s *Server) SetTunnelEnabled(id string, on bool) error {
 	}
 	s.reconcile()
 	s.notify("tunnel toggled: " + id)
-	s.pushConfig(node)
 	return nil
 }
 
@@ -361,10 +359,6 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 		// waits for a device to redeem the join code minted alongside it. The
 		// ordinary API never gets here (allowAwaiting stays false), so a
 		// normal create cannot quietly produce a nodeless tunnel.
-	} else if nodeID == localNodeID {
-		if !st.Settings.LocalNode {
-			return nil, errBad("node_id", "the console host is not available as a tunnel target")
-		}
 	} else if _, ok := st.NodeByID(nodeID); !ok {
 		return nil, errBad("node_id", "choose a node that has joined")
 	}
@@ -771,25 +765,16 @@ func (s *Server) publicHost() string {
 	return st.Settings.PublicHost
 }
 
-// SetLocalNode turns the console host into a tunnel target. Off by default:
-// an inner address always belongs to the machine that joined.
-func (s *Server) SetLocalNode(on bool) error {
+// ToggleAPI flips the REST API switch.
+func (s *Server) ToggleAPI(on bool) error {
 	err := s.st.Update(func(st *store.State) error {
-		st.Settings.LocalNode = on
+		st.Settings.APIEnabled = on
 		return nil
 	})
 	if err == nil {
 		s.notify("settings updated")
 	}
 	return err
-}
-
-// ToggleAPI flips the REST API switch.
-func (s *Server) ToggleAPI(on bool) error {
-	return s.st.Update(func(st *store.State) error {
-		st.Settings.APIEnabled = on
-		return nil
-	})
 }
 
 // SetInstanceName renames this node.
@@ -804,14 +789,12 @@ func (s *Server) SetInstanceName(name string) error {
 	})
 }
 
-// RemoveNode forgets an agent and its tunnels.
+// RemoveNode forgets an agent, disconnects any live session, and drops its tunnels.
 func (s *Server) RemoveNode(id string) error {
-	if id == localNodeID {
-		return errBad("id", "the built-in node cannot be removed")
-	}
+	var removedTunnels []string
 	err := s.st.Update(func(st *store.State) error {
 		found := false
-		nodes := st.Nodes[:0]
+		nodes := make([]store.Node, 0, len(st.Nodes))
 		for _, n := range st.Nodes {
 			if n.ID == id {
 				found = true
@@ -823,20 +806,43 @@ func (s *Server) RemoveNode(id string) error {
 			return errNotFound("node not found")
 		}
 		st.Nodes = nodes
-		tunnels := st.Tunnels[:0]
+		tunnels := make([]store.Tunnel, 0, len(st.Tunnels))
+		removedSet := map[string]bool{}
 		for _, t := range st.Tunnels {
-			if t.NodeID != id {
-				tunnels = append(tunnels, t)
+			if t.NodeID == id {
+				removedTunnels = append(removedTunnels, t.ID)
+				removedSet[t.ID] = true
+				continue
 			}
+			tunnels = append(tunnels, t)
 		}
 		st.Tunnels = tunnels
+		if len(removedSet) > 0 && len(st.Leases) > 0 {
+			leases := make([]store.Lease, 0, len(st.Leases))
+			for _, l := range st.Leases {
+				if !removedSet[l.TunnelID] {
+					leases = append(leases, l)
+				}
+			}
+			st.Leases = leases
+		}
 		return nil
 	})
-	if err == nil {
-		s.reconcile()
-		s.notify("node removed")
+	if err != nil {
+		return err
 	}
-	return err
+	if sess := s.sessionFor(id); sess != nil {
+		s.dropSession(id, sess)
+		sess.close()
+	}
+	for _, tid := range removedTunnels {
+		s.clearTargetDown(tid)
+		s.met.Drop(tid)
+		s.dropLimit(tid)
+	}
+	s.reconcile()
+	s.notify("node removed")
+	return nil
 }
 
 // SetNodeName renames an agent node. The name is cosmetic: it only shows up in
@@ -845,17 +851,6 @@ func (s *Server) SetNodeName(id, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errBad("name", "name is required")
-	}
-	if id == localNodeID {
-		// The built-in node is named after the instance itself.
-		err := s.st.Update(func(st *store.State) error {
-			st.Name = name
-			return nil
-		})
-		if err == nil {
-			s.notify("instance renamed")
-		}
-		return err
 	}
 	err := s.st.Update(func(st *store.State) error {
 		n, ok := st.NodeByID(id)

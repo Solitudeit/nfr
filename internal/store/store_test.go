@@ -124,3 +124,40 @@ func TestNewIDUnique(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+func TestUpdateIfSkipsNoopAndClonesDeeply(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := st.Update(func(s *State) error {
+		s.Tunnels = append(s.Tunnels, Tunnel{ID: "t1", Name: "web", Hosts: []string{"a.example.com"}})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	rev := st.Snapshot().Revision
+	changed, err := st.UpdateIf(func(s *State) (bool, error) {
+		s.Tunnels[0].Hosts[0] = "mutated.example.com"
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("noop UpdateIf: %v", err)
+	}
+	if changed {
+		t.Fatal("noop UpdateIf reported changed=true")
+	}
+	snap := st.Snapshot()
+	if snap.Revision != rev {
+		t.Fatalf("noop UpdateIf bumped revision: got %d want %d", snap.Revision, rev)
+	}
+	if snap.Tunnels[0].Hosts[0] != "a.example.com" {
+		t.Fatalf("noop UpdateIf leaked slice mutation: %v", snap.Tunnels[0].Hosts)
+	}
+	// Mutating Snapshot must not affect internal store state.
+	snap.Tunnels[0].Hosts[0] = "external.example.com"
+	if got := st.Snapshot().Tunnels[0].Hosts[0]; got != "a.example.com" {
+		t.Fatalf("Snapshot mutation leaked into store: %q", got)
+	}
+}

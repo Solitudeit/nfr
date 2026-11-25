@@ -38,8 +38,7 @@ type Tunnel struct {
 	UsedBytes   int64    `json:"used_bytes,omitempty"`
 	QuotaPaused bool     `json:"quota_paused,omitempty"`
 	Online      bool     `json:"online"`
-	// NodeMissing marks a tunnel whose node no longer exists, which is what a
-	// tunnel pointed at the console host looks like when that target is off.
+	// NodeMissing marks a tunnel whose node no longer exists in the registry.
 	NodeMissing bool `json:"node_missing,omitempty"`
 	// Awaiting marks a tunnel that was created before its node exists and
 	// waits for a device to redeem the join code minted at creation.
@@ -75,7 +74,6 @@ type Node struct {
 	Arch       string     `json:"arch,omitempty"`
 	Version    string     `json:"version,omitempty"`
 	Online     bool       `json:"online"`
-	Local      bool       `json:"local,omitempty"`  // NFR's own host, always online
 	Region     string     `json:"region,omitempty"` // country name, filled in by the console
 	RemoteAddr string     `json:"remote_addr,omitempty"`
 	LastSeen   *time.Time `json:"last_seen,omitempty"`

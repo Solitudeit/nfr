@@ -192,9 +192,6 @@ func TestSettingsExposeThePublicAddress(t *testing.T) {
 	if !strings.Contains(after, `value="203.0.113.7"`) {
 		t.Error("public address did not persist")
 	}
-	if st := p.srv.Settings(); st.LocalNode {
-		t.Error("local_node should stay off unless explicitly ticked")
-	}
 }
 
 func TestFormSwitchReadsCheckboxesAndBooleans(t *testing.T) {
@@ -254,28 +251,6 @@ func TestTunnelsCarriesStatsAndFourNavItems(t *testing.T) {
 	}
 }
 
-func TestTunnelsStatsCountsFullNodePopulation(t *testing.T) {
-	p, password := newPanel(t)
-	if err := p.srv.SetLocalNode(true); err != nil {
-		t.Fatal(err)
-	}
-	cookies := login(t, p, password)
-
-	// The stats block must count the same population the JS repaint uses:
-	// every node in p.srv.Nodes(), console host included — not just the
-	// agent nodes splitNodes hands the node list. With only the console
-	// host present, that is one node, online (api.Node marks Local always
-	// online), out of one.
-	rec := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("tunnels = %d", rec.Code)
-	}
-	want := `data-stat="nodes-online">1 / 1<`
-	if !strings.Contains(rec.Body.String(), want) {
-		t.Fatalf("tunnels stats missing full population %q in body: %.400s", want, rec.Body.String())
-	}
-}
-
 func extractCSRF(t *testing.T, body string) string {
 	t.Helper()
 	const marker = `name="csrf" value="`
@@ -291,39 +266,19 @@ func extractCSRF(t *testing.T, body string) string {
 	return rest[:j]
 }
 
-func TestNodesHideTheConsoleHostByDefault(t *testing.T) {
+func TestNodesNeverOfferConsoleHost(t *testing.T) {
 	p, password := newPanel(t)
 	cookies := login(t, p, password)
 
-	// An inner address belongs to the machine that joined. Until the operator
-	// opts in, the console host must not be offered as a tunnel target, and it
-	// must never be labelled in a way that suggests it is a normal agent.
 	for _, path := range []string{"/nfr/nodes", "/nfr/tunnels?server=local", "/nfr/tunnels/new?server=local"} {
 		rec := do(p, http.MethodGet, path, nil, cookies)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s = %d", path, rec.Code)
 		}
 		body := rec.Body.String()
-		if strings.Contains(body, `data-id="local"`) || strings.Contains(body, `data-nid="local"`) {
+		if strings.Contains(body, `data-id="local"`) || strings.Contains(body, `data-nid="local"`) || strings.Contains(body, `data-local-node=`) {
 			t.Fatalf("%s offers the console host as a target", path)
 		}
-	}
-}
-
-func TestTunnelFormOffersTheConsoleHostWhenEnabled(t *testing.T) {
-	p, password := newPanel(t)
-	cookies := login(t, p, password)
-
-	if err := p.srv.SetLocalNode(true); err != nil {
-		t.Fatalf("enable local node: %v", err)
-	}
-	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
-	body := rec.Body.String()
-	if !strings.Contains(body, `data-local-node="local"`) {
-		t.Fatal("the console host is missing from the form once it is enabled")
-	}
-	if !strings.Contains(body, "服务端本机") {
-		t.Fatal("the console host is offered without the badge that separates it from agents")
 	}
 }
 
@@ -492,33 +447,41 @@ func TestOfflineTunnelPointsAtConfigRestart(t *testing.T) {
 	}
 }
 
-// A healthy tunnel must not carry the offline advice: the hint is a repair for
-// a node that is gone, and showing it everywhere would turn it into noise.
+// A disabled or awaiting tunnel must not carry the offline advice: the hint is
+// a repair for an enabled tunnel whose node is offline.
 func TestOfflineHintStaysOnOfflineCards(t *testing.T) {
-	p, password := newPanel(t)
+	dir := t.TempDir()
+	cfg := config.DefaultServer()
+	cfg.DataDir = dir
+	cfg.ControlListen = "off"
+	cfg.HTTPListen = "off"
+	cfg.HTTPSListen = "off"
+	cfg.Domain = "example.com"
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if err := st.Update(func(s *store.State) error {
+		s.Nodes = append(s.Nodes, store.Node{ID: "edge1", Name: "edge-1"})
+		s.Tunnels = append(s.Tunnels, store.Tunnel{
+			ID: "disabled1", Name: "disabled-tunnel", NodeID: "edge1",
+			Type: "tcp", Local: "127.0.0.1:8080", RemotePort: 20012, Enabled: false,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	srv, password, err := server.New(server.Options{Config: cfg, Store: st, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatalf("server: %v", err)
+	}
+	p := New(srv, log.New("error", ""))
+	p.geo = stubLocator{}
 	cookies := login(t, p, password)
-	if err := p.srv.SetLocalNode(true); err != nil {
-		t.Fatalf("enable local node: %v", err)
-	}
-	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
-	csrf := extractCSRF(t, rec.Body.String())
-	rec = do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
-		"csrf":       {csrf},
-		"server":     {"local"},
-		"node_id":    {"local"},
-		"name":       {"healthy"},
-		"type":       {"tcp"},
-		"local_host": {"127.0.0.1"},
-		"local_port": {"8080"},
-		"enabled":    {"1"},
-	}, cookies)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("save status = %d", rec.Code)
-	}
 
-	rec = do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
+	rec := do(p, http.MethodGet, "/nfr/tunnels?server=local", nil, cookies)
 	if body := rec.Body.String(); strings.Contains(body, "不要重新 join") {
-		t.Fatal("a healthy tunnel carries the offline restart hint")
+		t.Fatal("a disabled tunnel carries the offline restart hint")
 	}
 }
 
@@ -561,19 +524,37 @@ func TestRegenCodeRoute(t *testing.T) {
 }
 
 func TestRegenCodeAlreadyJoinedConflict(t *testing.T) {
-	p, password := newPanel(t)
+	dir := t.TempDir()
+	cfg := config.DefaultServer()
+	cfg.DataDir = dir
+	cfg.ControlListen = "off"
+	cfg.HTTPListen = "off"
+	cfg.HTTPSListen = "off"
+	cfg.Domain = "example.com"
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if err := st.Update(func(s *store.State) error {
+		s.Nodes = append(s.Nodes, store.Node{ID: "n1", Name: "edge-1"})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	srv, password, err := server.New(server.Options{Config: cfg, Store: st, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatalf("server: %v", err)
+	}
+	p := New(srv, log.New("error", ""))
+	p.geo = stubLocator{}
 	cookies := login(t, p, password)
 
-	if err := p.srv.SetLocalNode(true); err != nil {
-		t.Fatalf("enable local node: %v", err)
-	}
-	// A joined tunnel: node_id=local goes through the ordinary create path.
 	rec := do(p, http.MethodGet, "/nfr/tunnels/new?server=local", nil, cookies)
 	csrf := extractCSRF(t, rec.Body.String())
 	rec = do(p, http.MethodPost, "/nfr/tunnels/save", url.Values{
 		"csrf":       {csrf},
 		"server":     {"local"},
-		"node_id":    {"local"},
+		"node_id":    {"n1"},
 		"name":       {"joined"},
 		"type":       {"tcp"},
 		"local_host": {"127.0.0.1"},
