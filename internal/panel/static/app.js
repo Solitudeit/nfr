@@ -344,7 +344,7 @@
     if (drawerEl && drawerEl.hidden && lastSeenEventKey && latest !== lastSeenEventKey) {
       eventDots.forEach(function (d) { d.hidden = false; });
     }
-    if (!lastSeenEventKey) lastSeenEventKey = latest;
+    if (!lastSeenEventKey || !drawerEl || !drawerEl.hidden) lastSeenEventKey = latest;
     var frag = document.createDocumentFragment();
     for (var i = eventItems.length - 1; i >= 0; i--) {
       var ev = eventItems[i];

@@ -36,11 +36,37 @@ func NewTrusted(baseURL, key string) *Client {
 	return newClient(baseURL, key, "", true)
 }
 
-func newClient(baseURL, key, pin string, ca bool) *Client {
-	baseURL = strings.TrimRight(baseURL, "/")
-	if !strings.Contains(baseURL, "://") {
-		baseURL = "https://" + baseURL
+// NormalizeBaseURL cleans an operator-entered remote URL: prepends https://
+// when omitted, trims whitespace, and strips trailing /nfr or /nfr/ panel paths
+// so copying a browser URL (e.g. http://host:8443/nfr/) still targets the root
+// API and discovery routes cleanly.
+func NormalizeBaseURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
 	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	if u, err := url.Parse(s); err == nil && u.Host != "" {
+		path := strings.TrimRight(u.Path, "/")
+		if strings.EqualFold(path, "/nfr") || strings.HasPrefix(strings.ToLower(path), "/nfr/") {
+			path = ""
+		}
+		u.Path = path
+		u.RawQuery = ""
+		u.Fragment = ""
+		return strings.TrimRight(u.String(), "/")
+	}
+	s = strings.TrimRight(s, "/")
+	if strings.HasSuffix(strings.ToLower(s), "/nfr") {
+		s = s[:len(s)-4]
+	}
+	return strings.TrimRight(s, "/")
+}
+
+func newClient(baseURL, key, pin string, ca bool) *Client {
+	baseURL = NormalizeBaseURL(baseURL)
 	host := hostOf(baseURL)
 	tlsCfg := transport.WebClientConfig(host, pin)
 	if ca {
@@ -182,10 +208,7 @@ func (c *Client) Probe(ctx context.Context) (api.Info, error) {
 // returns "pin" plus the fingerprint for self-signed or operator supplied
 // certificates, or "ca" with an empty pin when the instance uses ACME.
 func VerifyMode(ctx context.Context, baseURL string) (string, string, error) {
-	if !strings.Contains(baseURL, "://") {
-		baseURL = "https://" + baseURL
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
+	baseURL = NormalizeBaseURL(baseURL)
 	tr := &http.Transport{TLSClientConfig: transport.WebClientConfig(hostOf(baseURL), "")}
 	client := &http.Client{Timeout: 10 * time.Second, Transport: tr}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/.well-known/nfr", nil)
@@ -218,10 +241,8 @@ func VerifyMode(ctx context.Context, baseURL string) (string, string, error) {
 }
 
 func PinFor(ctx context.Context, baseURL string) (string, error) {
-	if !strings.Contains(baseURL, "://") {
-		baseURL = "https://" + baseURL
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/v1/info", nil)
+	baseURL = NormalizeBaseURL(baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/info", nil)
 	if err != nil {
 		return "", err
 	}

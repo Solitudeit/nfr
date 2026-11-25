@@ -51,7 +51,7 @@
         <div class="flash warn compact" id="nodewarn" role="alert" hidden></div>
         <span class="hint">{{if $isEdit}}可直接点击其他节点卡片，一键将此隧道迁移到目标机器。{{else}}选择目标内网机器；若机器尚未部署客户端，选「＋ 新设备」即可先建隧道再拿加入命令。{{end}}</span>
         {{else}}
-        <div class="flash warn" role="alert"><span class="flash-body">这台服务器当前没有可选的内网设备。请先在内网机器运行 <code>nfrc join</code>，设备上线后再创建隧道。</span></div>
+        <div class="flash warn" role="alert"><span class="flash-body">这台服务器当前没有可选的内网设备。请先在内网机器通过 <code>client.toml</code> / <code>client.yaml</code> 启动 <code>nfrc</code>，设备上线后再创建隧道。</span></div>
         {{end}}
       </div>
 
@@ -190,11 +190,24 @@
 
   function kind() { return typeField.value || typeSel.value || 'tcp'; }
 
+  function clearLease() {
+    var l = document.getElementById('lease');
+    if (l) l.value = '';
+  }
+
   function setProto(k) {
+    var prev = typeField.value;
     typeSel.value = k;
     typeField.value = k;
     typeHint.textContent = hints[k] || hints.tcp;
     document.getElementById('hostrow').hidden = k !== 'http';
+    if (prev && prev !== k) {
+      clearLease();
+      if (k === 'http' && port && port.getAttribute('data-auto-grabbed') === '1') {
+        port.value = '';
+        port.removeAttribute('data-auto-grabbed');
+      }
+    }
     protoCards.forEach(function (c) {
       var on = c.getAttribute('data-proto-val') === k;
       c.classList.toggle('sel', on);
@@ -269,12 +282,19 @@
     }
   }
 
-  // Auto-allocate port when opening advanced section
+  // Auto-allocate port when opening advanced section for TCP/UDP only (never
+  // hijack domain-based HTTP tunnels by silently filling a remote port).
   var adv = document.querySelector('details.adv');
   var port = document.getElementById('port');
   if (adv && port && port.value === '') {
     adv.addEventListener('toggle', function () {
-      if (adv.open && port.value === '' && typeof window.grab === 'function') window.grab();
+      if (adv.open && port.value === '' && kind() !== 'http' && typeof window.grab === 'function') window.grab();
+    });
+  }
+  if (port) {
+    port.addEventListener('input', function () {
+      clearLease();
+      port.removeAttribute('data-auto-grabbed');
     });
   }
 
@@ -291,6 +311,8 @@
         if (v < 0) v = 0;
         if (v > 65535) v = 65535;
         port.value = v;
+        clearLease();
+        port.removeAttribute('data-auto-grabbed');
       });
     });
   }
@@ -316,6 +338,7 @@
       var j = await res.json();
       if (!res.ok) { hint.textContent = j.error || '暂时拿不到端口，请重试。'; return; }
       port.value = j.port;
+      port.setAttribute('data-auto-grabbed', '1');
       document.getElementById('lease').value = j.lease_id;
       hint.textContent = '已保留端口 ' + j.port + ' 至 ' + new Date(j.expires_at).toLocaleTimeString() + '，保存后固定生效。';
     } catch (e) {

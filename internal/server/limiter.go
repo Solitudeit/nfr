@@ -97,7 +97,17 @@ func (s *Server) limiterFor(t store.Tunnel) *tunnelLimit {
 	return l
 }
 
-// dropLimit forgets a tunnel's limiter and usage flush baseline.
+// clearLimitBucket forgets only the bandwidth shaping buckets for id,
+// preserving the quota flush baseline in s.flushed while the tunnel still
+// exists in metrics (e.g. when paused for exceeding its monthly quota).
+func (s *Server) clearLimitBucket(id string) {
+	s.mu.Lock()
+	delete(s.limits, id)
+	s.mu.Unlock()
+}
+
+// dropLimit forgets a tunnel's limiter and usage flush baseline (call only when
+// the tunnel and its metrics counter are being removed).
 func (s *Server) dropLimit(id string) {
 	s.mu.Lock()
 	delete(s.limits, id)

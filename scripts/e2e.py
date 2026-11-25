@@ -363,7 +363,7 @@ def main():
         card = html[html.index('id="t-%s"' % tid):]
         card = card[:card.index("</article>")]
         check("awaiting card shows config restart",
-              "nfrc -c" in card and "agent.toml" in card,
+              "nfrc -c" in card and "client.toml" in card,
               "no config-start hint on the awaiting card")
         # The card command joins and then keeps the agent connected (it is
         # meant to be pasted on the device), so the harness redeems it with

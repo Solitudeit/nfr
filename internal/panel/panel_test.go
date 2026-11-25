@@ -392,7 +392,7 @@ func TestAwaitingCardShowsConfigRestartPath(t *testing.T) {
 	if !strings.Contains(body, "nfrc -c") {
 		t.Fatal("the awaiting card never mentions starting the client from its saved config")
 	}
-	if !strings.Contains(body, "agent.toml") {
+	if !strings.Contains(body, "client.toml") {
 		t.Fatal("the awaiting card does not name the config file the client restarts from")
 	}
 }

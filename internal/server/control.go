@@ -343,6 +343,11 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 			s.hub.publish(api.Event{Type: "node-joined", At: now, Message: node.Name})
 		}
 	} else {
+		if !s.joinAllowed(ip) {
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "too many attempts, try later"})
+			sess.Close()
+			return
+		}
 		_ = s.st.View(func(st *store.State) error {
 			if n, ok := st.NodeByID(hello.NodeID); ok {
 				node, found = *n, true
@@ -623,7 +628,7 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 			}
 			var existing *store.Tunnel
 			for i := range st.Tunnels {
-				if strings.EqualFold(st.Tunnels[i].Name, name) {
+				if st.Tunnels[i].NodeID == nodeID && strings.EqualFold(st.Tunnels[i].Name, name) {
 					existing = &st.Tunnels[i]
 					break
 				}
@@ -644,6 +649,18 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 				}
 			}
 			en := true
+			clearQuotaPause := false
+			if existing != nil {
+				en = existing.Enabled
+				if existing.QuotaPaused {
+					if p.QuotaMB == 0 || existing.UsedBytes <= p.QuotaMB<<20 {
+						en = true
+						clearQuotaPause = true
+					} else {
+						en = false
+					}
+				}
+			}
 			bw := p.BandwidthKB
 			quota := p.QuotaMB
 			req := api.TunnelRequest{
@@ -670,6 +687,7 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 					existing.Enabled == built.Enabled &&
 					existing.BandwidthKB == built.BandwidthKB &&
 					existing.QuotaMB == built.QuotaMB &&
+					!clearQuotaPause &&
 					existing.ManagedByConfig {
 					continue
 				}
@@ -679,6 +697,9 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 				existing.RemotePort = built.RemotePort
 				existing.Hosts = built.Hosts
 				existing.Enabled = built.Enabled
+				if clearQuotaPause {
+					existing.QuotaPaused = false
+				}
 				existing.BandwidthKB = built.BandwidthKB
 				existing.QuotaMB = built.QuotaMB
 				existing.ManagedByConfig = true

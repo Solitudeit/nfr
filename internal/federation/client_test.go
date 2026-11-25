@@ -128,4 +128,7 @@ func TestTrustedClientUsesWebALPNAndParsesHostWithPath(t *testing.T) {
 	if len(tr.TLSClientConfig.NextProtos) == 0 || tr.TLSClientConfig.NextProtos[0] != "http/1.1" {
 		t.Fatalf("NextProtos = %v, want [http/1.1]", tr.TLSClientConfig.NextProtos)
 	}
+	if c.BaseURL != "https://hk.example.com:8443" {
+		t.Fatalf("BaseURL = %q, want %q (stripped /nfr/ suffix)", c.BaseURL, "https://hk.example.com:8443")
+	}
 }

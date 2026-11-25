@@ -300,6 +300,26 @@ func (s *Server) pruneUDPSessions() {
 	}
 }
 
+// pruneUDPSessionsForActive immediately closes active visitor UDP sessions
+// belonging to tunnels that were disabled, quota-paused, or deleted.
+func (s *Server) pruneUDPSessionsForActive(active map[int]store.Tunnel) {
+	activeIDs := make(map[string]bool, len(active))
+	for _, t := range active {
+		activeIDs[t.ID] = true
+	}
+	var drop []*udpSession
+	s.mu.Lock()
+	for _, sess := range s.udpSess {
+		if !activeIDs[sess.tunnel.ID] {
+			drop = append(drop, sess)
+		}
+	}
+	s.mu.Unlock()
+	for _, sess := range drop {
+		sess.close()
+	}
+}
+
 // closeUDPSessions drops every session, e.g. when the server shuts down.
 func (s *Server) closeUDPSessions() {
 	s.mu.Lock()

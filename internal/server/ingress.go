@@ -71,6 +71,7 @@ func (s *Server) reconcile() {
 	for _, pl := range closePLs {
 		pl.close()
 	}
+	s.pruneUDPSessionsForActive(udpDesired)
 
 	lc := transport.ListenConfig()
 	for _, port := range open {

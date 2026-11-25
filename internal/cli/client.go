@@ -192,9 +192,15 @@ func performJoin(cfgPath, serverArg, code, name string) config.Agent {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	base := serverArg
-	if !strings.Contains(base, "://") {
+	base := strings.TrimSpace(serverArg)
+	if strings.HasPrefix(strings.ToLower(base), "http://") {
+		base = "https://" + base[len("http://"):]
+	} else if !strings.Contains(base, "://") {
 		base = "https://" + base
+	}
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(strings.ToLower(base), "/nfr") {
+		base = base[:len(base)-4]
 	}
 	base = strings.TrimRight(base, "/")
 
@@ -282,34 +288,49 @@ func runAgentsWithReload(cfgPath string, cfg config.Agent, lg *slog.Logger) {
 	reloadCh, stopReload := notifyReload()
 	defer stopReload()
 
+	runAgentsReloadLoop(ctx, reloadCh, cfgPath, cfg, lg, runAgentsContext)
+}
+
+func runAgentsReloadLoop(
+	ctx context.Context,
+	reloadCh <-chan os.Signal,
+	cfgPath string,
+	cfg config.Agent,
+	lg *slog.Logger,
+	runFn func(context.Context, config.Agent, *slog.Logger),
+) {
 	for {
 		runCtx, runCancel := context.WithCancel(ctx)
 		done := make(chan struct{})
 		go func(c config.Agent) {
 			defer close(done)
-			runAgentsContext(runCtx, c, lg)
+			runFn(runCtx, c, lg)
 		}(cfg)
 
-		select {
-		case <-ctx.Done():
-			runCancel()
-			<-done
-			return
-		case <-reloadCh:
-			next, _, err := config.LoadAgent(cfgPath)
-			if err != nil {
-				lg.Error("reload failed: cannot parse config, keeping current session", "path", cfgPath, "err", err)
-				continue
+		reloaded := false
+		for !reloaded {
+			select {
+			case <-ctx.Done():
+				runCancel()
+				<-done
+				return
+			case <-reloadCh:
+				next, _, err := config.LoadAgent(cfgPath)
+				if err != nil {
+					lg.Error("reload failed: cannot parse config, keeping current session", "path", cfgPath, "err", err)
+					continue
+				}
+				next.ApplyEnv()
+				if err := next.Validate(); err != nil {
+					lg.Error("reload failed: invalid config, keeping current session", "path", cfgPath, "err", err)
+					continue
+				}
+				lg.Info("reloading client configuration", "path", cfgPath, "servers", len(next.EffectiveServers()))
+				runCancel()
+				<-done
+				cfg = next
+				reloaded = true
 			}
-			next.ApplyEnv()
-			if err := next.Validate(); err != nil {
-				lg.Error("reload failed: invalid config, keeping current session", "path", cfgPath, "err", err)
-				continue
-			}
-			lg.Info("reloading client configuration", "path", cfgPath, "servers", len(next.EffectiveServers()))
-			runCancel()
-			<-done
-			cfg = next
 		}
 	}
 }

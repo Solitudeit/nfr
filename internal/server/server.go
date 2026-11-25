@@ -231,10 +231,17 @@ func (s *Server) SetAuthToken(token string) error {
 	return nil
 }
 
-// JoinAddr returns the host:port address clients should put into server_addr.
+// JoinAddr returns the explicit host:port address clients should put into
+// server_addr in client.toml / client.yaml. Unlike legacy `nfrc join`, direct
+// config connections default portless hosts to :8443, so the port is always
+// included (even when control_listen is :443).
 func (s *Server) JoinAddr() string {
-	host, _ := s.joinHost()
-	return host
+	host, port, err := net.SplitHostPort(s.cfg.ControlListen)
+	if err != nil {
+		host, port = "", "8443"
+	}
+	host = transport.BestHost(s.publicHost(), host)
+	return net.JoinHostPort(host, port)
 }
 
 // Pin is the certificate fingerprint peers should trust.

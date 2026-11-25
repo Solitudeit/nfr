@@ -578,13 +578,35 @@ func isLocalOnlyHost(host string) bool {
 
 // AddRemote registers another instance for management.
 func (s *Server) AddRemote(ctx context.Context, req api.RemoteRequest) (api.Remote, error) {
-	url := strings.TrimSpace(req.URL)
+	url := federation.NormalizeBaseURL(req.URL)
 	if url == "" || req.APIKey == "" {
 		return api.Remote{}, errBad("url", "address and API key are required")
 	}
 	pin := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(req.Pin)), ":", "")
 	caMode := false
-	if pin == "" {
+
+	// Direct NFR control ports always accept TLS on the same port even when the
+	// web console defaults to plain HTTP. If the operator pasted http://host:8443
+	// (e.g. from the banner or browser URL bar), upgrade to https:// whenever
+	// TLS discovery succeeds so API keys and certificate pinning stay protected.
+	if strings.HasPrefix(strings.ToLower(url), "http://") {
+		httpsURL := "https://" + url[len("http://"):]
+		if pin == "" {
+			if mode, p, err := federation.VerifyMode(ctx, httpsURL); err == nil {
+				url = httpsURL
+				if mode == "ca" {
+					caMode = true
+				} else {
+					pin = p
+				}
+			}
+		} else {
+			if _, err := federation.New(httpsURL, req.APIKey, pin).Probe(ctx); err == nil {
+				url = httpsURL
+			}
+		}
+	}
+	if pin == "" && !caMode {
 		mode, p, err := federation.VerifyMode(ctx, url)
 		if err != nil {
 			return api.Remote{}, errBad("unreachable", "cannot reach "+url+": "+err.Error())

@@ -77,7 +77,7 @@ func (s *Server) flushQuotas() {
 	})
 
 	for _, p := range paused {
-		s.dropLimit(p.id)
+		s.clearLimitBucket(p.id)
 		s.reconcile()
 		s.pushConfig(p.node)
 		s.notify("quota exceeded: " + p.name + " paused until next month")
