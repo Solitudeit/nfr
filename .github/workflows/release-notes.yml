@@ -1,0 +1,62 @@
+name: sync-release-notes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/release-notes/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync release notes to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, urllib.error, urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "nfr-release-notes-sync",
+          }
+
+          for path in sorted(glob.glob(".github/release-notes/*.md")):
+              tag = os.path.basename(path)[:-3]
+              body_text = open(path, "r", encoding="utf-8").read().strip() + "\n"
+              get_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+              try:
+                  req = urllib.request.Request(get_url, headers=headers)
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      rel = json.loads(resp.read().decode())
+              except urllib.error.HTTPError as e:
+                  if e.code == 404:
+                      print(f"skip {tag}: release not found yet")
+                      continue
+                  raise
+              if (rel.get("body") or "").strip() == body_text.strip():
+                  print(f"skip {tag}: release notes already up to date")
+                  continue
+              patch_url = f"https://api.github.com/repos/{repo}/releases/{rel['id']}"
+              payload = json.dumps({"body": body_text}).encode("utf-8")
+              preq = urllib.request.Request(
+                  patch_url,
+                  data=payload,
+                  headers={**headers, "Content-Type": "application/json"},
+                  method="PATCH",
+              )
+              with urllib.request.urlopen(preq, timeout=30) as presp:
+                  presp.read()
+              print(f"updated release notes for {tag} (id={rel['id']})")
+          PY
