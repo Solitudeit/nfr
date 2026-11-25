@@ -149,8 +149,9 @@ func New(opts Options) (*Server, string, error) {
 		return nil
 	})
 	if need {
-		hash := strings.TrimSpace(opts.Config.Panel.Password)
-		if hash == "" {
+		rawPass := strings.TrimSpace(opts.Config.Panel.Password)
+		var hash string
+		if rawPass == "" {
 			plain := auth.NewSecret("", 9)
 			var err error
 			hash, err = config.HashPassword(plain)
@@ -158,6 +159,14 @@ func New(opts Options) (*Server, string, error) {
 				return nil, "", err
 			}
 			generated = plain
+		} else if config.IsBcryptHash(rawPass) {
+			hash = rawPass
+		} else {
+			var err error
+			hash, err = config.HashPassword(rawPass)
+			if err != nil {
+				return nil, "", err
+			}
 		}
 		if err := s.st.Update(func(st *store.State) error {
 			st.PanelPassword = hash
@@ -525,8 +534,8 @@ func (s *Server) panelURL() string {
 }
 
 // PanelBaseURL builds the console address for a configuration: the configured
-// domain when present, otherwise the first real network address of this
-// machine — "localhost" is useless on a headless public server.
+// domain or public host when present, otherwise the first real network address
+// of this machine — "localhost" is useless on a headless public server.
 func PanelBaseURL(cfg config.Server) string {
 	_, port, err := net.SplitHostPort(cfg.ControlListen)
 	if err != nil {
@@ -534,28 +543,41 @@ func PanelBaseURL(cfg config.Server) string {
 	}
 	host := cfg.Domain
 	if host == "" {
+		host = cfg.PublicHost
+	}
+	if host == "" {
 		host = firstSiteHost()
 	}
 	return "https://" + net.JoinHostPort(host, port) + "/nfr/"
 }
 
 // ConsoleCandidates lists the addresses a user may realistically paste into a
-// browser: the configured domain first, then every interface address, then
-// localhost as the last resort.
+// browser: the configured domain / public host first, then every interface
+// address, then localhost as the last resort.
 func ConsoleCandidates(cfg config.Server) []string {
 	_, port, err := net.SplitHostPort(cfg.ControlListen)
 	if err != nil {
 		port = "8443"
 	}
 	var out []string
-	if cfg.Domain != "" {
-		out = append(out, "https://"+net.JoinHostPort(cfg.Domain, port)+"/nfr/")
+	seen := map[string]bool{}
+	add := func(h string) {
+		if h == "" {
+			return
+		}
+		u := "https://" + net.JoinHostPort(h, port) + "/nfr/"
+		if !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
 	}
+	add(cfg.Domain)
+	add(cfg.PublicHost)
 	for _, ip := range siteIPs() {
-		out = append(out, "https://"+net.JoinHostPort(ip, port)+"/nfr/")
+		add(ip)
 	}
 	if len(out) == 0 {
-		out = append(out, "https://"+net.JoinHostPort("localhost", port)+"/nfr/")
+		add("localhost")
 	}
 	return out
 }
@@ -863,6 +885,10 @@ func seedSettings(st *store.Store, cfg config.Server) error {
 		changed := false
 		if cfg.Domain != "" && s.Settings.Domain != cfg.Domain {
 			s.Settings.Domain = cfg.Domain
+			changed = true
+		}
+		if cfg.PublicHost != "" && s.Settings.PublicHost != cfg.PublicHost {
+			s.Settings.PublicHost = cfg.PublicHost
 			changed = true
 		}
 		if cfg.PortRange[0] > 0 && cfg.PortRange[1] >= cfg.PortRange[0] && s.Settings.PortRange != cfg.PortRange {

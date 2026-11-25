@@ -63,3 +63,42 @@ func TestAgentSaveMode(t *testing.T) {
 		t.Fatalf("round trip mismatch: %+v", got.Servers)
 	}
 }
+
+func TestServerApplyEnvAndValidate(t *testing.T) {
+	t.Setenv("NFR_CONTROL_LISTEN", "127.0.0.1:9443")
+	t.Setenv("NFR_HTTP_LISTEN", "off")
+	t.Setenv("NFR_HTTPS_LISTEN", "off")
+	t.Setenv("NFR_DOMAIN", "env.example.com")
+	t.Setenv("NFR_PUBLIC_HOST", "203.0.113.20")
+	t.Setenv("NFR_PORT_RANGE", "25000-26000")
+	t.Setenv("NFR_PASSWORD", "env-secret-pw")
+	t.Setenv("NFR_ACME_ENABLED", "true")
+	t.Setenv("NFR_ACME_EMAIL", "ops@example.com")
+
+	cfg := DefaultServer()
+	cfg.DataDir = t.TempDir()
+	cfg.ApplyEnv()
+
+	if cfg.ControlListen != "127.0.0.1:9443" || cfg.HTTPListen != "off" || cfg.Domain != "env.example.com" || cfg.PublicHost != "203.0.113.20" {
+		t.Fatalf("ApplyEnv missed fields: %+v", cfg)
+	}
+	if cfg.PortRange != [2]int{25000, 26000} || cfg.Panel.Password != "env-secret-pw" || !cfg.ACME.Enabled || cfg.ACME.Email != "ops@example.com" {
+		t.Fatalf("ApplyEnv missed fields: %+v", cfg)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid env config failed validation: %v", err)
+	}
+
+	bad := DefaultServer()
+	bad.ControlListen = "not-a-host-port"
+	if err := bad.Validate(); err == nil {
+		t.Fatal("invalid control_listen passed Validate")
+	}
+
+	badACME := DefaultServer()
+	badACME.ACME.Enabled = true
+	badACME.Domain = ""
+	if err := badACME.Validate(); err == nil {
+		t.Fatal("ACME without domain passed Validate")
+	}
+}

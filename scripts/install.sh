@@ -1,21 +1,29 @@
 #!/bin/sh
-# Install the latest nfr release for this machine.
+# Install or manage NFR (nfrs / nfrc) on Linux or macOS.
 #
-#   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sh
+# Public server (binaries + systemd service):
+#   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+#     | sudo sh -s -- --server --systemd
 #
-# Two binaries are installed:
-#   nfrs  the control node, for the public server
-#   nfrc  the client, for the machines inside your network
+#   # Optional: set the initial console password directly instead of random:
+#   curl -fsSL .../install.sh | sudo NFR_PASSWORD='my-strong-password' sh -s -- --server --systemd
+#
+# Private machine (install nfrc + join + install & start systemd service in one command):
+#   curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+#     | sudo sh -s -- --client --join example.com:8443 ABC123 --systemd
+#
+# Binaries only (no systemd):
+#   curl -fsSL .../install.sh | sudo sh
+#
+# Uninstall binaries and systemd units (keeps /etc/nfr and /var/lib/nfr):
+#   curl -fsSL .../install.sh | sudo sh -s -- --uninstall
 #
 # Environment:
-#   NFR_VERSION  pin a release (e.g. v0.9.0), default: latest
-#   NFR_PREFIX   install directory, default: /usr/local/bin
-#   NFR_ONLY     "server" or "client" to install just one of them
-#   NFR_SYSTEMD  set to 1 to also install nfr-server.service and start it
-#                (server only, Linux with systemd, must run as root)
-#
-# Pass --systemd as the first argument to do the same without env vars:
-#   curl -fsSL .../install.sh | sudo sh -s -- --systemd
+#   NFR_VERSION   pin a release (e.g. v0.11.0), default: latest
+#   NFR_PREFIX    install directory, default: /usr/local/bin
+#   NFR_ONLY      "server" or "client" to install just one binary
+#   NFR_SYSTEMD   set to 1 to install and start the corresponding systemd unit
+#   NFR_PASSWORD  initial admin password on a fresh server install (>= 8 chars)
 set -eu
 
 repo="Solitudeit/nfr"
@@ -23,18 +31,68 @@ prefix="${NFR_PREFIX:-/usr/local/bin}"
 version="${NFR_VERSION:-latest}"
 only="${NFR_ONLY:-}"
 systemd="${NFR_SYSTEMD:-}"
-for arg in "$@"; do
-  case "$arg" in
+password="${NFR_PASSWORD:-}"
+join_server=""
+join_code=""
+join_name=""
+uninstall=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --systemd) systemd=1 ;;
     --server) only=server ;;
     --client) only=client ;;
+    --uninstall) uninstall=1 ;;
+    --password)
+      shift
+      [ "$#" -gt 0 ] || { echo "--password requires a value" >&2; exit 1; }
+      password="$1"
+      ;;
+    --name)
+      shift
+      [ "$#" -gt 0 ] || { echo "--name requires a value" >&2; exit 1; }
+      join_name="$1"
+      ;;
+    --join)
+      shift
+      [ "$#" -ge 2 ] || { echo "--join requires <server> <code>" >&2; exit 1; }
+      join_server="$1"
+      join_code="$2"
+      shift
+      if [ -z "$only" ]; then only=client; fi
+      ;;
     -h|--help)
-      sed -n '2,20p' "$0" 2>/dev/null || echo "see comments at the top of install.sh"
+      sed -n '2,27p' "$0" 2>/dev/null || echo "see comments at the top of install.sh"
       exit 0
       ;;
-    *) echo "unknown option: $arg" >&2; exit 1 ;;
+    *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
+  shift
 done
+
+do_uninstall() {
+  if [ "$(id -u)" != 0 ]; then
+    echo "--uninstall needs root (try: ... | sudo sh -s -- --uninstall)" >&2
+    exit 1
+  fi
+  if [ -d /run/systemd/system ]; then
+    for unit in nfr-server nfr-agent; do
+      if systemctl list-unit-files "$unit.service" >/dev/null 2>&1; then
+        systemctl disable --now "$unit" 2>/dev/null || true
+      fi
+      rm -f "/etc/systemd/system/$unit.service"
+    done
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+  rm -f "$prefix/nfrs" "$prefix/nfrc"
+  echo "uninstalled nfrs/nfrc binaries and systemd units."
+  echo "configuration (/etc/nfr) and state (/var/lib/nfr) were preserved; remove them manually if no longer needed."
+  exit 0
+}
+
+if [ "$uninstall" = 1 ]; then
+  do_uninstall
+fi
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
@@ -70,18 +128,60 @@ fetch() {
   fi
 }
 
+sums_file=""
+fetch_sums() {
+  if [ -n "$sums_file" ]; then return 0; fi
+  sums_file=$(mktemp)
+  if ! fetch "$base/SHA256SUMS" "$sums_file" 2>/dev/null; then
+    rm -f "$sums_file"
+    sums_file=""
+  fi
+}
+
+cleanup_sums() {
+  if [ -n "$sums_file" ] && [ -f "$sums_file" ]; then
+    rm -f "$sums_file"
+  fi
+}
+trap cleanup_sums EXIT
+
+verify_checksum() {
+  asset="$1"
+  file="$2"
+  fetch_sums
+  if [ -z "$sums_file" ]; then
+    return 0
+  fi
+  expected=$(awk -v f="$asset" '$2 == f || $2 == ("*" f) { print $1; exit }' "$sums_file")
+  if [ -z "$expected" ]; then
+    return 0
+  fi
+  actual=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$file" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$file" | awk '{print $1}')
+  else
+    return 0
+  fi
+  if [ "$actual" != "$expected" ]; then
+    echo "checksum mismatch for $asset: got $actual want $expected" >&2
+    exit 1
+  fi
+}
+
 install_one() {
   name="$1"
-  url="$base/$name-$os-$arch"
-  if [ "$os" = windows ]; then url="$url.exe"; fi
+  asset="$name-$os-$arch"
+  if [ "$os" = windows ]; then asset="$asset.exe"; fi
+  url="$base/$asset"
   tmp=$(mktemp)
-  trap 'rm -f "$tmp"' EXIT
   echo "downloading $url"
   fetch "$url" "$tmp"
+  verify_checksum "$asset" "$tmp"
   chmod +x "$tmp"
   mkdir -p "$prefix"
   mv "$tmp" "$prefix/$name"
-  trap - EXIT
   echo "installed $prefix/$name"
 }
 
@@ -94,46 +194,40 @@ case "$only" in
     ;;
 esac
 
-install_systemd() {
+install_server_systemd() {
   if [ "$(id -u)" != 0 ]; then
-    echo "NFR_SYSTEMD=1 needs root (try: curl ... | sudo NFR_SYSTEMD=1 sh)" >&2
+    echo "--systemd needs root (try: curl ... | sudo sh -s -- --server --systemd)" >&2
     exit 1
   fi
   if [ ! -d /run/systemd/system ]; then
-    echo "systemd not detected; binaries are installed, start them yourself" >&2
+    echo "systemd not detected; binaries are installed, start them yourself: $prefix/nfrs -c /etc/nfr/server.toml" >&2
     return 0
   fi
-  # A server started by hand (bare `nfrs`) holds the control port; systemd
-  # cannot bind it. Stop it first — state survives, only the process goes.
-  # `stop` reads data_dir from the config, so this also works when the data
-  # directory was moved; a quiet "nothing running" answer is expected.
+  # Stop any legacy -d/--daemon process before systemd binds control_listen.
   if out=$("$prefix/nfrs" stop -c /etc/nfr/server.toml 2>&1); then
     case "$out" in
       *没有正在运行*) ;;
       *) echo "$out" ;;
     esac
   fi
-  # The unit uses StateDirectory=/ConfigurationDirectory=, which makes systemd
-  # create these; doing it here too keeps ReadWritePaths-style overrides and
-  # older units working.
   data_dir=/var/lib/nfr
   mkdir -p /etc/nfr "$data_dir"
   unit=/etc/systemd/system/nfr-server.service
   tmp=$(mktemp)
-  trap 'rm -f "$tmp"' EXIT
   fetch "$base/nfr-server.service" "$tmp"
   mv "$tmp" "$unit"
-  trap - EXIT
   echo "installed $unit"
-  # Every start prints the panel address, so echo it from the journal instead of
-  # making the operator scroll. The password is first-run only by design.
+
   fresh=0
   [ -f "$data_dir/state.json" ] || fresh=1
+  if [ "$fresh" = 1 ] && [ -n "$password" ]; then
+    "$prefix/nfrs" reset-password -c /etc/nfr/server.toml "$password"
+    fresh=0
+  fi
+
   was_active=$(systemctl is-active nfr-server 2>/dev/null || true)
   systemctl daemon-reload
   if [ "$was_active" = active ]; then
-    # `enable --now` leaves an already-running unit alone, so an upgrade would
-    # keep serving from the old binary in memory until the next reboot.
     systemctl restart nfr-server
   else
     systemctl enable --now nfr-server
@@ -145,25 +239,18 @@ install_systemd() {
   if [ "$fresh" = 1 ]; then
     echo "首次启动的登录信息（密码只打印这一次）："
   else
-    echo "面板地址（密码沿用 $data_dir/state.json；忘了见 docs/deploy.md）："
+    echo "面板地址（密码沿用 $data_dir/state.json；忘了用 sudo nfrs reset-password）："
   fi
-  # Bound by time, not by line count: on an upgrade the previous first-run
-  # banner may still sit within the last N lines, and re-printing that password
-  # would put a stale secret back into the terminal.
   shown=$(journalctl -u nfr-server --since '-3 min' --no-pager -o cat 2>/dev/null |
     grep -E '面板|密码|证书指纹' || true)
   if [ -n "$shown" ]; then
     echo "$shown"
   elif [ -f "$data_dir/initial-password.txt" ]; then
-    # Plenty of hosts have no journal at all (containers, journald disabled,
-    # volatile journal already rotated). The control node parks the same banner
-    # next to its state file and the panel deletes it on the first sign-in, so
-    # its presence means the password has not been used yet.
     echo "  （这台机器没有可读的 journal，下面是 nfrs 写下的启动信息）"
     cat "$data_dir/initial-password.txt"
     echo "  （登录成功后这个文件会自动删除）"
   else
-    echo "  (取不到日志，用 sudo journalctl -u nfr-server -n 20 自己看)"
+    "$prefix/nfrs" status -c /etc/nfr/server.toml || true
   fi
   if ! systemctl is-active --quiet nfr-server; then
     echo
@@ -176,13 +263,47 @@ install_systemd() {
   fi
 }
 
-# Report what landed. A partial install (NFR_ONLY) skips the other binary.
+install_client_systemd() {
+  if [ "$(id -u)" != 0 ]; then
+    echo "--systemd needs root (try: curl ... | sudo sh -s -- --client --join <server> <code> --systemd)" >&2
+    exit 1
+  fi
+  if [ ! -d /run/systemd/system ]; then
+    echo "systemd not detected; start client yourself: $prefix/nfrc -c /etc/nfr/agent.toml" >&2
+    return 0
+  fi
+  mkdir -p /etc/nfr
+  unit=/etc/systemd/system/nfr-agent.service
+  tmp=$(mktemp)
+  fetch "$base/nfr-agent.service" "$tmp"
+  mv "$tmp" "$unit"
+  echo "installed $unit"
+  was_active=$(systemctl is-active nfr-agent 2>/dev/null || true)
+  systemctl daemon-reload
+  if [ "$was_active" = active ]; then
+    systemctl restart nfr-agent
+  else
+    systemctl enable --now nfr-agent
+  fi
+  sleep 1
+  echo
+  systemctl status nfr-agent --no-pager --lines=10 || true
+}
+
 if command -v "$prefix/nfrs" >/dev/null 2>&1; then "$prefix/nfrs" version; fi
 if command -v "$prefix/nfrc" >/dev/null 2>&1; then "$prefix/nfrc" version; fi
 
+if [ -n "$join_server" ] && [ -n "$join_code" ]; then
+  if [ -n "$join_name" ]; then
+    "$prefix/nfrc" join --no-start --name "$join_name" "$join_server" "$join_code"
+  else
+    "$prefix/nfrc" join --no-start "$join_server" "$join_code"
+  fi
+fi
+
 if [ -n "$systemd" ]; then
   case "$only" in
-    client) echo "NFR_SYSTEMD ignored with NFR_ONLY=client" >&2 ;;
-    *) install_systemd ;;
+    client) install_client_systemd ;;
+    *) install_server_systemd ;;
   esac
 fi

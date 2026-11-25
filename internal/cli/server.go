@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/solitudeit/nfr/internal/auth"
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/log"
 	"github.com/solitudeit/nfr/internal/panel"
@@ -26,27 +27,30 @@ import (
 // ServerUsage is the help text of nfrs.
 const serverUsage = `%[1]s — NFR control node
 
-  %[1]s                     start the control node: it prints the console
-                            address, enters the background and returns;
-                            add --foreground to keep it attached
-  %[1]s stop                stop the background control node
-  %[1]s status              show the local configuration
-  %[1]s proxy-config <dom>  print a reverse-proxy snippet for a busy 80/443
-  %[1]s version             print the build version
+  %[1]s                      start the control node in the foreground (no daemon)
+  %[1]s verify               validate server.toml syntax and paths
+  %[1]s reset-password [pw]  reset the console admin password (random if omitted)
+  %[1]s status               show the local configuration
+  %[1]s stop                 stop a node started with -d / --daemon
+  %[1]s proxy-config <dom>   print a reverse-proxy snippet for a busy 80/443
+  %[1]s version              print the build version
 
 Flags of the bare command:
 
-  -c <path>      configuration file (default /etc/nfr/server.toml)
-  --foreground   stay in the foreground (systemd, containers, debugging)
+  -c <path>            configuration file (default /etc/nfr/server.toml)
+  -d, --daemon         detach into the background (for manual runs without systemd/Docker)
+  --foreground         keep in the foreground (default; kept for compatibility)
+  --control <addr>     override control_listen (env: NFR_CONTROL_LISTEN)
+  --http <addr>        override http_listen (env: NFR_HTTP_LISTEN)
+  --https <addr>       override https_listen (env: NFR_HTTPS_LISTEN)
+  --data-dir <dir>     override data_dir (env: NFR_DATA_DIR)
+  --domain <dom>       override domain (env: NFR_DOMAIN)
+  --public-host <host> override public_host (env: NFR_PUBLIC_HOST)
+  --password <pw>      initial console password on first run (env: NFR_PASSWORD)
 
-First run on the public server:
+Typical use (foreground — managed by systemd or Docker):
 
-  %[1]s
-
-It prints the console URL and a one-time password, then keeps running in the
-background. Then, inside your network:
-
-  nfrc join <server> <code>
+  %[1]s -c /etc/nfr/server.toml
 
 Documentation: https://github.com/Solitudeit/nfr
 `
@@ -55,6 +59,12 @@ Documentation: https://github.com/Solitudeit/nfr
 func RunServer(args []string) {
 	if len(args) > 0 {
 		switch args[0] {
+		case "verify":
+			cmdServerVerify(args[1:])
+			return
+		case "reset-password":
+			cmdResetPassword(args[1:])
+			return
 		case "stop":
 			cmdStop(args[1:])
 			return
@@ -85,39 +95,158 @@ func RunServer(args []string) {
 	cmdServer(args)
 }
 
+type serverFlags struct {
+	cfgPath    string
+	daemon     bool
+	child      bool
+	control    string
+	httpAddr   string
+	httpsAddr  string
+	dataDir    string
+	domain     string
+	publicHost string
+	password   string
+}
+
+func (f serverFlags) apply(cfg *config.Server) {
+	if f.control != "" {
+		cfg.ControlListen = f.control
+	}
+	if f.httpAddr != "" {
+		cfg.HTTPListen = f.httpAddr
+	}
+	if f.httpsAddr != "" {
+		cfg.HTTPSListen = f.httpsAddr
+	}
+	if f.dataDir != "" {
+		cfg.DataDir = f.dataDir
+	}
+	if f.domain != "" {
+		cfg.Domain = f.domain
+	}
+	if f.publicHost != "" {
+		cfg.PublicHost = f.publicHost
+	}
+	if f.password != "" {
+		cfg.Panel.Password = f.password
+	}
+}
+
 func cmdServer(args []string) {
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
-	cfgPath := fs.String("c", defaultServerConfig(), "configuration file")
-	foreground := fs.Bool("foreground", false, "stay in the foreground (systemd, containers, debugging)")
-	child := fs.Bool("daemon-child", false, "internal use: run as the detached background process")
+	var sf serverFlags
+	fs.StringVar(&sf.cfgPath, "c", defaultServerConfig(), "configuration file")
+	fs.BoolVar(&sf.daemon, "d", false, "detach into the background")
+	fs.BoolVar(&sf.daemon, "daemon", false, "detach into the background")
+	_ = fs.Bool("foreground", false, "stay in the foreground (default)")
+	fs.BoolVar(&sf.child, "daemon-child", false, "internal use: run as the detached background process")
+	fs.StringVar(&sf.control, "control", "", "override control_listen")
+	fs.StringVar(&sf.httpAddr, "http", "", "override http_listen")
+	fs.StringVar(&sf.httpsAddr, "https", "", "override https_listen")
+	fs.StringVar(&sf.dataDir, "data-dir", "", "override data_dir")
+	fs.StringVar(&sf.domain, "domain", "", "override domain")
+	fs.StringVar(&sf.publicHost, "public-host", "", "override public_host")
+	fs.StringVar(&sf.password, "password", "", "initial console password on first run")
 	_ = fs.Parse(args)
 
-	if *child {
-		runServer(*cfgPath, true)
+	cfg, existed, err := config.LoadServer(sf.cfgPath)
+	if err != nil {
+		fatal("read config: %v", err)
+	}
+	cfg.ApplyEnv()
+	sf.apply(&cfg)
+	if err := cfg.Validate(); err != nil {
+		fatal("invalid config: %v", err)
+	}
+
+	if sf.child {
+		runServer(sf.cfgPath, cfg, existed, true)
 		return
 	}
+	if sf.daemon {
+		if runtime.GOOS == "windows" {
+			fmt.Println("  后台运行暂不支持 Windows，本次以前台运行（Ctrl-C 停止）。")
+			fmt.Println()
+			runServer(sf.cfgPath, cfg, existed, false)
+			return
+		}
+		daemonize(sf.cfgPath, cfg, sf)
+		return
+	}
+	runServer(sf.cfgPath, cfg, existed, false)
+}
+
+func cmdServerVerify(args []string) {
+	fs := flag.NewFlagSet("verify", flag.ExitOnError)
+	cfgPath := fs.String("c", defaultServerConfig(), "configuration file")
+	_ = fs.Parse(args)
+
+	cfg, existed, err := config.LoadServer(*cfgPath)
+	if err != nil {
+		fatal("read config: %v", err)
+	}
+	cfg.ApplyEnv()
+	if err := cfg.Validate(); err != nil {
+		fatal("invalid config: %v", err)
+	}
+	if existed {
+		fmt.Printf("%s: configuration %s syntax is ok\n", Program, *cfgPath)
+	} else {
+		fmt.Printf("%s: %s does not exist yet (defaults + env are valid)\n", Program, *cfgPath)
+	}
+}
+
+func cmdResetPassword(args []string) {
+	fs := flag.NewFlagSet("reset-password", flag.ExitOnError)
+	cfgPath := fs.String("c", defaultServerConfig(), "configuration file")
+	_ = fs.Parse(args)
 
 	cfg, _, err := config.LoadServer(*cfgPath)
 	if err != nil {
 		fatal("read config: %v", err)
 	}
-	if *foreground {
-		runServer(*cfgPath, false)
-		return
+	cfg.ApplyEnv()
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		fatal("create data directory: %v", err)
 	}
-	if runtime.GOOS == "windows" {
-		fmt.Println("  后台运行暂不支持 Windows，本次以前台运行（Ctrl-C 停止）。")
-		fmt.Println()
-		runServer(*cfgPath, false)
-		return
+	plain := ""
+	generated := false
+	if fs.NArg() > 0 {
+		plain = fs.Arg(0)
+		if len(plain) < 8 {
+			fatal("password must be at least 8 characters")
+		}
+	} else {
+		plain = auth.NewSecret("", 9)
+		generated = true
 	}
-	daemonize(*cfgPath, cfg)
+	hash, err := config.HashPassword(plain)
+	if err != nil {
+		fatal("hash password: %v", err)
+	}
+	st, err := store.Open(cfg.DataDir)
+	if err != nil {
+		fatal("open state: %v", err)
+	}
+	if err := st.Update(func(s *store.State) error {
+		s.PanelPassword = hash
+		return nil
+	}); err != nil {
+		fatal("save password: %v", err)
+	}
+	_ = os.Remove(server.InitialPasswordPath(cfg.DataDir))
+	if generated {
+		fmt.Printf("  新密码  %s\n", plain)
+	} else {
+		fmt.Println("  管理员密码已更新。")
+	}
+	fmt.Println("  如果 nfrs 正在运行，请重启进程使新状态生效（例如 systemctl restart nfr-server）。")
 }
 
 // daemonize spawns a detached copy of this process and stays just long enough
 // to print the first-run banner (console address + one-time password) before
 // returning the terminal to the user.
-func daemonize(cfgPath string, cfg config.Server) {
+func daemonize(cfgPath string, cfg config.Server, sf serverFlags) {
 	exe, err := os.Executable()
 	if err != nil {
 		fatal("locate executable: %v", err)
@@ -137,7 +266,29 @@ func daemonize(cfgPath string, cfg config.Server) {
 	firstRun := filepath.Join(cfg.DataDir, "first-run.txt")
 	_ = os.Remove(firstRun)
 
-	cmd := exec.Command(exe, "-c", cfgPath, "--daemon-child")
+	childArgs := []string{"-c", cfgPath, "--daemon-child"}
+	if sf.control != "" {
+		childArgs = append(childArgs, "--control", sf.control)
+	}
+	if sf.httpAddr != "" {
+		childArgs = append(childArgs, "--http", sf.httpAddr)
+	}
+	if sf.httpsAddr != "" {
+		childArgs = append(childArgs, "--https", sf.httpsAddr)
+	}
+	if sf.dataDir != "" {
+		childArgs = append(childArgs, "--data-dir", sf.dataDir)
+	}
+	if sf.domain != "" {
+		childArgs = append(childArgs, "--domain", sf.domain)
+	}
+	if sf.publicHost != "" {
+		childArgs = append(childArgs, "--public-host", sf.publicHost)
+	}
+	if sf.password != "" {
+		childArgs = append(childArgs, "--password", sf.password)
+	}
+	cmd := exec.Command(exe, childArgs...)
 	cmd.Stdout, cmd.Stderr = lf, lf
 	cmd.SysProcAttr = daemonSysProcAttr()
 	if err := cmd.Start(); err != nil {
@@ -221,14 +372,16 @@ func waitControl(addr string, budget time.Duration) bool {
 }
 
 // runServer is the actual control node, either as a foreground process
-// (systemd, containers, debugging) or as the detached background child.
-func runServer(cfgPath string, child bool) {
-	cfg, existed, err := config.LoadServer(cfgPath)
-	if err != nil {
-		fatal("read config: %v", err)
-	}
+// (default, systemd, containers, debugging) or as the detached background child.
+func runServer(cfgPath string, cfg config.Server, existed bool, child bool) {
 	if !existed {
-		if err := cfg.Save(cfgPath); err != nil {
+		// Never write a plaintext NFR_PASSWORD / --password into server.toml;
+		// the hashed credential is persisted inside state.json only.
+		toSave := cfg
+		if toSave.Panel.Password != "" && !config.IsBcryptHash(toSave.Panel.Password) {
+			toSave.Panel.Password = ""
+		}
+		if err := toSave.Save(cfgPath); err != nil {
 			fatal("write default config: %v", err)
 		}
 	}
@@ -250,23 +403,15 @@ func runServer(cfgPath string, child bool) {
 	srv.SetPanel(panel.New(srv, lg))
 
 	// Print the console address on every start, not just the first one: under
-	// systemd the banner scrolls out of the terminal within seconds and the
-	// journal is the only place left to look. Only the one-time password stays
-	// first-run-only.
+	// systemd or Docker the banner is the quickest way to find the URL. Only
+	// the auto-generated one-time password stays first-run-only.
 	banner := serverBanner(cfg, generated, srv.Info().Pinned)
 	if generated != "" {
-		// Under systemd stdout ends up in the journal, and a host without
-		// journald keeps nothing at all. Park the same banner next to the
-		// state so the password is readable from the filesystem until the
-		// first successful sign-in clears it.
 		if werr := keepInitialPassword(cfg.DataDir, banner); werr != nil {
 			lg.Warn("could not park the first-run password", "err", werr)
 		}
 	}
 	if child {
-		// Hand the banner to the parent process, which prints it and returns
-		// the terminal. It is removed again once read; leftovers from a run
-		// that never saw a parent are cleared on the next start.
 		_ = os.WriteFile(filepath.Join(cfg.DataDir, "first-run.txt"), []byte(banner), 0o600)
 	} else {
 		fmt.Print(banner)
@@ -274,11 +419,6 @@ func runServer(cfgPath string, child bool) {
 	if child {
 		_ = os.WriteFile(filepath.Join(cfg.DataDir, "nfr.pid"), []byte(strconv.Itoa(os.Getpid())), 0o644)
 		defer func() { _ = os.Remove(filepath.Join(cfg.DataDir, "nfr.pid")) }()
-	}
-	if !child {
-		fmt.Printf(`
-  正在前台运行，Ctrl-C 停止；退出终端后仍需运行时用:  %s
-`, Program)
 	}
 	lg.Info("starting", "control", cfg.ControlListen, "http", cfg.HTTPListen, "https", cfg.HTTPSListen, "data", cfg.DataDir)
 

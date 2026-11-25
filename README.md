@@ -59,57 +59,31 @@ NFR 是一款自托管的内网穿透 / 反向隧道工具：把内网的服务�
 
 ### 1. 公网服务器
 
-公网服务器上，一条命令从裸机到能用的面板：
+公网服务器上，一条命令装好 `nfrs` 并由 systemd 托管（可选通过 `NFR_PASSWORD` 直接指定管理员密码，免去翻日志）：
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
-  | sudo sh -s -- --systemd
+  | sudo NFR_PASSWORD='change-me-now' sh -s -- --server --systemd
 ```
 
-它装好 `nfrs` / `nfrc`、写入 `/etc/systemd/system/nfr-server.service` 并启动，
-然后把面板地址从日志里挑出来打给你。重复执行等于升级：已经在跑时会
-`systemctl restart`（否则面板还是旧进程），地址照打，密码沿用原来那份。
-不加 `--systemd` 就只装二进制（内网机器用这个）。
+不传 `NFR_PASSWORD` 时，首次启动会自动生成随机密码并打印在日志里（同时写入 `/var/lib/nfr/initial-password.txt`，首次登录成功后自动删除）。忘记密码直接执行 `sudo nfrs reset-password` 重置，不需要手改 `state.json`。
 
-每次启动都会打印面板地址；第一次启动还会自己写 `/etc/nfr/server.toml`、
-生成自签证书和管理员密码：
-
-```
-  NFR 控制节点已就绪
-  ────────────────────
-  面板      https://203.0.113.10:8443/nfr/
-  密码      k3m9xw2p
-  证书指纹  3f:0e:...
-
-  密码只显示这一次，登录后请在「设置」里修改。
-```
-
-之后再启动就只剩地址和指纹（密码不再重复打印）。任何 `nfrs status` 也会列出面板地址。
-
-安装脚本从 journal 里取上面这段。有些机器根本没有可读的 journal（容器、
-journald 关掉、日志已轮转），所以首次启动时 `nfrs` 还会把同一段信息写进
-`/var/lib/nfr/initial-password.txt`（`0600`）；脚本取不到日志时直接读这个文件。
-**第一次登录成功后它会被自动删除**，密码用掉就不再留在磁盘上。
-
-不想用 systemd 就直接前台起一次：
+`nfrs` **默认前台运行**（适合 systemd / Docker / 调试）：
 
 ```bash
-sudo mkdir -p /etc/nfr && sudo nfrs -c /etc/nfr/server.toml   # 打印完自动转后台
-sudo nfrs stop                                                # 改交给 systemd 前先停掉
+nfrs verify -c /etc/nfr/server.toml     # 校验配置语法与路径（不启动服务）
+nfrs -c /etc/nfr/server.toml            # 前台启动（想手动转后台显式加 -d）
 ```
 
-⚠️ 两种方式不要同时跑——都监听 `control_listen`（默认 8443），后起的会
-`bind: address already in use`。
-
-> 也可以用 Docker 起，同样一条命令：
+> 也可以直接用 Docker / Docker Compose 起（同一镜像同时包含 `nfrs` 和 `nfrc`，完整示例见 [deploy/docker/compose.yml](deploy/docker/compose.yml)）：
 >
 > ```bash
-> docker run -d --name nfr --restart=always -p 8443:8443 -p 80:80 -p 443:443 \
->   -v nfr-data:/var/lib/nfr ghcr.io/solitudeit/nfr
-> docker logs nfr      # 面板地址与密码
+> docker run -d --name nfr-server --restart=unless-stopped --network host \
+>   -e NFR_PASSWORD='change-me-now' \
+>   -v nfr-data:/var/lib/nfr ghcr.io/solitudeit/nfr:latest
 > ```
 >
-> 要接域名 + 80/443，或让 Let's Encrypt 签证书，改 `/etc/nfr/server.toml` 后重启即可，
+> 要接域名 + 80/443，或让 Let's Encrypt 签证书，改 `/etc/nfr/server.toml`（或设 `NFR_DOMAIN` / `NFR_ACME_ENABLED=true`）后重启即可，
 > 细节见 [docs/deploy.md](docs/deploy.md)。
 >
 > 80/443 已经被 nginx / Caddy 占着？把 `http_listen` 改到 `127.0.0.1:8080`、
@@ -119,17 +93,25 @@ sudo nfrs stop                                                # 改交给 system
 ### 2. 内网机器
 
 隧道由内网那台机器发起，服务器不代替它拨「内网地址」——所以在内网机器上接 agent：
-面板「节点」页点「生成加入码」，把打印出来的那条命令粘到内网机器；
-也可以直接在「隧道」页新建隧道时选「＋ 新设备」，保存后卡片上就给出绑定这条隧道的加入命令，设备一接入隧道自动生效。
+面板「节点」页点「生成加入码」，或直接在「隧道」页新建隧道时选「＋ 新设备」拿到加入码。
+
+一条命令完成**安装 `nfrc` + 兑换加入码 + 注册 `nfr-agent.service` 开机自启**：
 
 ```bash
-nfrc join example.com ABC123
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+  | sudo sh -s -- --client --join example.com:8443 ABC123 --systemd
+```
+
+如果已安装 `nfrc`，直接前台运行：
+
+```bash
+nfrc join example.com:8443 ABC123
 ```
 
 它记下证书指纹、换取长期令牌、写入 `/etc/nfr/agent.toml`，然后**直接保持连接**。
 如果打印出来的命令里是本机地址，面板会同时提示——先去「设置」填「对外地址」
 （公网 IP 或解析到这台机器的名字），再加入别的机器。
-Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfrc` 作为服务。
+Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfrc -c /etc/nfr/agent.toml` 作为服务。
 断线会自己重连（1s 起，指数退避到 30s），服务器重启后隧道照样恢复。
 
 **重启也是同一条命令**：加入码只需用一次，之后不要重新 `join`（那会新建一个节点），
@@ -139,7 +121,7 @@ Ctrl-C 停止；交给 systemd 时先加 `--no-start`，再跑 `nfrc` 作为服�
 nfrc -c /etc/nfr/agent.toml
 ```
 
-（普通用户不是 root 时配置在 `~/.config/nfr/agent.toml`。）
+（普通用户不是 root 时配置在 `~/.config/nfr/agent.toml`；容器部署可通过 `NFR_SERVER` + `NFR_CODE` 环境变量首次自动 join。）
 
 `join` 结束时的输出、`--no-start` 的提示、以及面板上「等待接入」的卡片都会把这一行
 印出来，不用记。

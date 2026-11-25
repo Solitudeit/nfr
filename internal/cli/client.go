@@ -33,7 +33,8 @@ import (
 const clientUsage = `%[1]s — NFR client (the side that lives inside your network)
 
   %[1]s join <server> <code>   join this machine and keep it connected
-  %[1]s                        connect with the saved agent.toml
+  %[1]s                        connect with the saved agent.toml (foreground)
+  %[1]s verify                 validate agent.toml syntax
   %[1]s status                 show the local configuration
   %[1]s version                print the build version
 
@@ -44,12 +45,15 @@ Join flags:
   --name <n>   name shown in the console (default: this machine's hostname)
   --no-start   save the configuration but do not start the agent
 
+Environment variables (container / automated first-run):
+
+  NFR_SERVER / NFR_CODE / NFR_NAME
+      When agent.toml has no server yet, %[1]s automatically joins once on
+      startup and persists the token to agent.toml for subsequent restarts.
+
 Typical use, on the machine that runs the service you want to publish:
 
   nfrc join tunnel.example.com ABC123
-
-It saves the token and keeps the outbound connection open. Tunnels are
-created in the console on the server; this side only follows the config.
 
 Documentation: https://github.com/Solitudeit/nfr
 `
@@ -60,6 +64,9 @@ func RunClient(args []string) {
 		switch args[0] {
 		case "join":
 			cmdJoin(args[1:])
+			return
+		case "verify":
+			cmdClientVerify(args[1:])
 			return
 		case "agent":
 			// Accepted for compatibility with the old single binary and with
@@ -86,6 +93,25 @@ func RunClient(args []string) {
 	cmdAgent(args)
 }
 
+func cmdClientVerify(args []string) {
+	fs := flag.NewFlagSet("verify", flag.ExitOnError)
+	cfgPath := fs.String("c", defaultAgentConfig(), "configuration file")
+	_ = fs.Parse(args)
+
+	cfg, existed, err := config.LoadAgent(*cfgPath)
+	if err != nil {
+		fatal("read config: %v", err)
+	}
+	if !existed {
+		fatal("config file %s does not exist", *cfgPath)
+	}
+	cfg.ApplyEnv()
+	if err := cfg.Validate(); err != nil {
+		fatal("invalid config: %v", err)
+	}
+	fmt.Printf("%s: configuration %s syntax is ok (%d server(s))\n", Program, *cfgPath, len(cfg.Servers))
+}
+
 func cmdAgent(args []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	cfgPath := fs.String("c", defaultAgentConfig(), "configuration file")
@@ -95,8 +121,23 @@ func cmdAgent(args []string) {
 	if err != nil {
 		fatal("read config: %v", err)
 	}
+	cfg.ApplyEnv()
 	if !existed || len(cfg.Servers) == 0 {
-		fatal("no server configured\n\n  run: %s join <server> <code>", Program)
+		envSrv := strings.TrimSpace(os.Getenv("NFR_SERVER"))
+		envCode := strings.TrimSpace(os.Getenv("NFR_CODE"))
+		if envSrv != "" && envCode != "" {
+			envName := strings.TrimSpace(os.Getenv("NFR_NAME"))
+			if envName == "" {
+				envName = defaultNodeName()
+			}
+			cfg = performJoin(*cfgPath, envSrv, envCode, envName)
+			cfg.ApplyEnv()
+		} else {
+			fatal("no server configured\n\n  run: %s join <server> <code>", Program)
+		}
+	}
+	if err := cfg.Validate(); err != nil {
+		fatal("invalid config: %v", err)
 	}
 	runAgents(cfg, log.New(cfg.LogLevel, cfg.LogFile))
 }
@@ -126,6 +167,21 @@ func cmdJoin(args []string) {
 		*name = defaultNodeName()
 	}
 
+	cfg := performJoin(*cfgPath, serverArg, code, *name)
+	cfg.ApplyEnv()
+
+	if *noStart {
+		printJoinSummaryNoStart(*cfgPath)
+		return
+	}
+
+	lg := log.New(cfg.LogLevel, cfg.LogFile)
+	fmt.Print("\n  Keeping it connected; press Ctrl-C to stop.\n\n")
+	runAgents(cfg, lg)
+}
+
+func performJoin(cfgPath, serverArg, code, name string) config.Agent {
+	code = strings.ToUpper(strings.TrimSpace(code))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -149,12 +205,12 @@ func cmdJoin(args []string) {
 		observedPin = ""
 	}
 
-	welcome, err := joinOverTLS(ctx, control, observedPin, caMode, code, *name)
+	welcome, err := joinOverTLS(ctx, control, observedPin, caMode, code, name)
 	if err != nil {
 		fatal("join failed: %v", err)
 	}
 
-	cfg, _, err := config.LoadAgent(*cfgPath)
+	cfg, _, err := config.LoadAgent(cfgPath)
 	if err != nil {
 		fatal("read config: %v", err)
 	}
@@ -162,7 +218,7 @@ func cmdJoin(args []string) {
 		Addr:   control,
 		NodeID: welcome.NodeID,
 		Token:  welcome.Token,
-		Name:   *name,
+		Name:   name,
 		Pin:    observedPin,
 		CA:     caMode,
 	}
@@ -176,20 +232,12 @@ func cmdJoin(args []string) {
 	if !replaced {
 		cfg.Servers = append(cfg.Servers, entry)
 	}
-	if err := cfg.Save(*cfgPath); err != nil {
+	if err := cfg.Save(cfgPath); err != nil {
 		fatal("save config: %v", err)
 	}
 
-	printJoinSummary(*name, welcome.NodeID, control, *cfgPath, certLabel(caMode, observedPin))
-
-	if *noStart {
-		printJoinSummaryNoStart(*cfgPath)
-		return
-	}
-
-	lg := log.New(cfg.LogLevel, cfg.LogFile)
-	fmt.Print("\n  Keeping it connected; press Ctrl-C to stop.\n\n")
-	runAgents(cfg, lg)
+	printJoinSummary(name, welcome.NodeID, control, cfgPath, certLabel(caMode, observedPin))
+	return cfg
 }
 
 // printJoinSummary reports what join just saved. The restart command is part

@@ -11,39 +11,39 @@
 | 443/tcp | 域名模式的 HTTPS 入口（可选） | `https_listen`，可设 `"off"` |
 | 20000-29999/tcp | HTTP 与 TCP 隧道的公网端口 | `port_range`（面板里也能改） |
 
-从一台干净的机器到能用的面板，一条命令：
+从一台干净的机器到能用的面板，一条命令（可通过 `NFR_PASSWORD` 直接指定首次密码；脚本会自动校验 `SHA256SUMS`）：
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
-  | sudo sh -s -- --systemd
+  | sudo NFR_PASSWORD='change-me-now' sh -s -- --server --systemd
 ```
 
-它依次做三件事：装 `nfrs`/`nfrc` 到 `/usr/local/bin`；下载
+它依次做三件事：下载并校验 `nfrs` 到 `/usr/local/bin`；下载
 `nfr-server.service` 到 `/etc/systemd/system` 并 `daemon-reload`；`enable --now`
-后把 `systemctl status` 打出来。首次启动会自己写 `/etc/nfr/server.toml`、
-生成自签证书和数据目录，并把面板地址、一次性密码、证书指纹打进日志
+后把 `systemctl status` 打出来。若未传 `NFR_PASSWORD`，首次启动会生成随机密码并打进日志
 （`sudo journalctl -u nfr-server -n 15` 可再看）。unit 用
 `StateDirectory=nfr` / `ConfigurationDirectory=nfr` 让 systemd 先建好
 `/var/lib/nfr` 与 `/etc/nfr` 并保持可写，所以全新机器上首次启动就能写出配置。
 别把它们改成 `ReadWritePaths=`——目录不存在时那个选项会让 unit 以
 `status=226/NAMESPACE` 直接失败。
 
-不想用 systemd，就只装二进制、手动前台起一次（打印完转后台，`nfrs stop` 停）：
+不想用 systemd，就只装二进制，直接前台运行（想手动转后台显式传 `-d` / `--daemon`，用 `nfrs stop` 停）：
 
 ```bash
 curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh | sudo sh
-sudo mkdir -p /etc/nfr && sudo nfrs -c /etc/nfr/server.toml
+nfrs verify -c /etc/nfr/server.toml
+sudo nfrs -c /etc/nfr/server.toml
 ```
 
 **两种方式别同时跑**：都监听 `control_listen`（默认 8443），后起的会
-`bind: address already in use`。从手动换到 systemd 时先 `sudo nfrs stop`。
+`bind: address already in use`。从 `-d` 后台模式换到 systemd 时先 `sudo nfrs stop`。
 
 面板地址在**每次启动时都会打印**（`journalctl -u nfr-server -n 15` 里能看到，
-`nfrs status` 也会列出来）；只有一次性密码是首次启动独有。
+`nfrs status` 也会列出来）；只有未显式设置密码时生成的随机密码是首次启动独有。
 
 有些机器没有可读的 journal——容器、journald 被关掉、日志已经轮转，
-`journalctl` 只会回一句 `No journal files were found`。所以首次启动时
-`nfrs` 会把同一段信息（含密码）写进 `/var/lib/nfr/initial-password.txt`，
+`journalctl` 只会回一句 `No journal files were found`。所以未指定 `NFR_PASSWORD` 时，
+首次启动 `nfrs` 会把同一段信息（含随机密码）写进 `/var/lib/nfr/initial-password.txt`，
 权限 `0600`：
 
 ```bash
@@ -54,8 +54,12 @@ sudo cat /var/lib/nfr/initial-password.txt   # 密码用掉之后这个文件就
 也会单独列一行 `password`。**第一次登录成功后文件会被删除**，所以它不会
 长期躺着一个明文密码。
 
-忘了密码就在面板「设置」里改；彻底进不去时，删掉 `state.json` 里的
-`panel_password` 字段再重启，会重新生成一个并重新写出上面那个文件。
+忘了密码直接用命令行重置（无需手改 `state.json`），然后重启服务：
+
+```bash
+sudo nfrs reset-password -c /etc/nfr/server.toml 'new-strong-password'
+sudo systemctl restart nfr-server
+```
 
 建好的隧道默认按 **公网端口** 访问：面板里给隧道分配一个 `20000-29999` 的端口，
 访客直接打开 `http://服务器IP:端口`，不需要域名、证书或 nginx。只有想「一条 80/443
@@ -101,18 +105,30 @@ tls_key  = "/etc/letsencrypt/live/example.com/privkey.pem"
 ```
 优先级：显式证书文件 > ACME > 自签。
 
-## Docker
+## Docker / Docker Compose
+
+镜像同时打包了 `nfrs` 与 `nfrc`，默认前台运行并自带 `HEALTHCHECK`：
 
 ```bash
-docker run -d --name nfr --restart=always \
-  -p 8443:8443 -p 80:80 -p 443:443 \
+docker run -d --name nfr-server --restart=unless-stopped --network host \
+  -e NFR_PASSWORD='change-me-now' \
+  -e NFR_PUBLIC_HOST='203.0.113.10' \
   -v nfr-data:/var/lib/nfr \
-  ghcr.io/solitudeit/nfr
-docker logs nfr          # 首次启动的面板地址与密码在这里
+  ghcr.io/solitudeit/nfr:latest
 ```
 
-注意：容器默认以 root 运行，否则绑不了 80/443。想降权就把
-`http_listen` / `https_listen` 换成高位端口，再用端口映射或反代转发。
+也可以使用仓库自带的 [deploy/docker/compose.yml](../deploy/docker/compose.yml)：
+
+```bash
+# 公网服务端
+NFR_PASSWORD='change-me-now' docker compose -f deploy/docker/compose.yml up -d nfrs
+
+# 内网客户端（同一镜像，首次自动 join 并保存 agent.toml，之后重启自动重连）
+NFR_SERVER='203.0.113.10:8443' NFR_CODE='ABC123' \
+  docker compose -f deploy/docker/compose.yml --profile client up -d nfrc
+```
+
+推荐 `--network host`（这样 `nfrs` 可以自由绑定 `port_range` 里的任意公网端口，无需在 Docker 里映射一万个端口；`nfrc` 也能直接访问宿主机的 `127.0.0.1` 服务）。如需桥接模式，只映射 8443/80/443 与所需端口段即可。
 
 ## 和已有的 nginx / Caddy 共存
 
@@ -169,12 +185,26 @@ nfrc join example.com ABC123                 # 加入码在面板「节点」页
 探测到的本机网卡地址。三者都没有（例如云主机在内网网卡后面）时，面板会在命令旁
 给出警告——先去「设置」填对外地址，再把命令粘到别的机器上。
 
-`join` 默认写完配置就一直连着，适合 `tmux`/`screen` 里直接跑；交给 systemd 时：
+最省事的方式是一条命令完成「装 `nfrc` + 兑换加入码 + 装好 `nfr-agent.service` 开机自启」：
 
 ```bash
-nfrc join --no-start example.com ABC123
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+  | sudo sh -s -- --client --join example.com:8443 ABC123 --systemd
+```
+
+手动安装时，`join` 默认写完配置就一直前台连着，适合 `tmux`/`screen` 里直接跑；交给 systemd 时：
+
+```bash
+nfrc join --no-start example.com:8443 ABC123
 sudo cp deploy/systemd/nfr-agent.service /etc/systemd/system/
 sudo systemctl enable --now nfr-agent
+```
+
+卸载（保留 `/etc/nfr` 配置和 `/var/lib/nfr` 数据）：
+
+```bash
+curl -fsSL https://github.com/Solitudeit/nfr/releases/latest/download/install.sh \
+  | sudo sh -s -- --uninstall
 ```
 
 加入码只用来换一次令牌，换完就作废。**之后重启客户端不要再 `join`**（每 `join`
