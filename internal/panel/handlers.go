@@ -391,10 +391,6 @@ func (p *Panel) tunnelSave(w http.ResponseWriter, r *http.Request, s *session) {
 		p.backErr(w, r, "/nfr/tunnels", err)
 		return
 	}
-	if req.Type == "http" {
-		p.ok(w, r, "/nfr/tunnels", "隧道已保存")
-		return
-	}
 	p.ok(w, r, "/nfr/tunnels", "隧道已保存")
 }
 

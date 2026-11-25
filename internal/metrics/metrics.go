@@ -142,6 +142,32 @@ func (r *Registry) Sample() {
 	}
 }
 
+// LiveSnapshot renders every known tunnel's counters and current rates without
+// copying the rolling history ring buffers.
+func (r *Registry) LiveSnapshot() []Snapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Snapshot, 0, len(r.m))
+	for id, c := range r.m {
+		h := r.hist[id]
+		s := Snapshot{
+			TunnelID: id,
+			In:       c.In.Load(),
+			Out:      c.Out.Load(),
+			Conns:    c.Conns.Load(),
+			Errs:     c.Errs.Load(),
+			Active:   c.Active.Load(),
+		}
+		if h != nil {
+			last := (h.secI + secWindow - 1) % secWindow
+			s.InRate = h.sec[last].In
+			s.OutRate = h.sec[last].Out
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 // Snapshot renders every known tunnel.
 func (r *Registry) Snapshot() []Snapshot {
 	r.mu.Lock()

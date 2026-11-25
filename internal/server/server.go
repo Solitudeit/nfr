@@ -600,7 +600,7 @@ var siteIPs = sync.OnceValue(func() []string {
 func (s *Server) Tunnels() []api.Tunnel {
 	st := s.st.Snapshot()
 	stats := map[string]metrics.Snapshot{}
-	for _, m := range s.met.Snapshot() {
+	for _, m := range s.met.LiveSnapshot() {
 		stats[m.TunnelID] = m
 	}
 	s.mu.Lock()
@@ -878,10 +878,10 @@ func seedSettings(st *store.Store, cfg config.Server) error {
 // chanListener feeds already-handshaked TLS connections to a single shared
 // http.Server so Close() tears down every active keep-alive and SSE stream.
 type chanListener struct {
-	addr   net.Addr
-	ch     chan net.Conn
-	done   chan struct{}
-	once   sync.Once
+	addr net.Addr
+	ch   chan net.Conn
+	done chan struct{}
+	once sync.Once
 }
 
 func newChanListener(addr net.Addr) *chanListener {

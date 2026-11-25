@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/solitudeit/nfr/internal/config"
 	"github.com/solitudeit/nfr/internal/log"
@@ -660,4 +661,133 @@ func TestFailedLoginKeepsTheParkedPassword(t *testing.T) {
 	if _, err := os.Stat(parked); err != nil {
 		t.Fatalf("a failed sign-in deleted the parked password: %v", err)
 	}
+}
+
+func TestSettingsFormsDoNotClobberEachOther(t *testing.T) {
+	p, password := newPanel(t)
+	cookies := login(t, p, password)
+
+	page := do(p, http.MethodGet, "/nfr/settings", nil, cookies)
+	csrf := extractCSRF(t, page.Body.String())
+
+	// Enable REST API via its dedicated action.
+	rec := do(p, http.MethodPost, "/nfr/settings", url.Values{
+		"csrf":        {csrf},
+		"action":      {"api"},
+		"api_enabled": {"1"},
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enable api status = %d", rec.Code)
+	}
+	if !p.srv.Settings().APIEnabled {
+		t.Fatal("APIEnabled did not turn on")
+	}
+
+	// Saving instance settings must NOT turn off APIEnabled.
+	rec = do(p, http.MethodPost, "/nfr/settings", url.Values{
+		"csrf":        {csrf},
+		"action":      {"instance"},
+		"name":        {"EdgeHub"},
+		"domain":      {"hub.example.com"},
+		"public_host": {"203.0.113.9"},
+		"port_low":    {"21000"},
+		"port_high":   {"22000"},
+		"email":       {"ops@example.com"},
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save instance status = %d", rec.Code)
+	}
+	st := p.srv.Settings()
+	if !st.APIEnabled {
+		t.Fatal("saving instance settings silently disabled REST API")
+	}
+	if st.Domain != "hub.example.com" || st.PublicHost != "203.0.113.9" || st.PortRange != [2]int{21000, 22000} {
+		t.Fatalf("instance settings lost: %+v", st)
+	}
+
+	// Toggling REST API off must NOT wipe instance settings.
+	rec = do(p, http.MethodPost, "/nfr/settings", url.Values{
+		"csrf":   {csrf},
+		"action": {"api"},
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable api status = %d", rec.Code)
+	}
+	st = p.srv.Settings()
+	if st.APIEnabled {
+		t.Fatal("REST API did not turn off")
+	}
+	if st.Domain != "hub.example.com" || st.PublicHost != "203.0.113.9" {
+		t.Fatalf("toggling API clobbered instance settings: %+v", st)
+	}
+}
+
+func TestEditHTTPTunnelPrefillsHosts(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultServer()
+	cfg.DataDir = dir
+	cfg.ControlListen = "off"
+	cfg.HTTPListen = "off"
+	cfg.HTTPSListen = "off"
+	cfg.Domain = "example.com"
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if err := st.Update(func(s *store.State) error {
+		s.Nodes = append(s.Nodes, store.Node{ID: "n1", Name: "edge-1"})
+		s.Tunnels = append(s.Tunnels, store.Tunnel{
+			ID: "h1", Name: "blog", NodeID: "n1", Type: "http",
+			Local: "127.0.0.1:8080", Hosts: []string{"a.example.com", "b.example.com"}, Enabled: true,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	srv, password, err := server.New(server.Options{Config: cfg, Store: st, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatalf("server: %v", err)
+	}
+	p := New(srv, log.New("error", ""))
+	p.geo = stubLocator{}
+	cookies := login(t, p, password)
+
+	rec := do(p, http.MethodGet, "/nfr/tunnels/edit?id=h1&server=local", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "a.example.com, b.example.com") {
+		t.Fatalf("edit form did not prefill hosts textarea")
+	}
+}
+
+func TestGeoResolverNeverBlocksRender(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"success":true,"country":"新加坡","country_code":"SG"}`)
+	}))
+	defer slow.Close()
+
+	g := newGeoResolver()
+	g.endpoint = slow.URL + "/"
+
+	start := time.Now()
+	first := g.locate(context.Background(), geoQuery{Host: "1.1.1.1"})
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("locate blocked caller for %v", elapsed)
+	}
+	if first.Country != "" {
+		t.Fatalf("expected empty cache-miss result, got %+v", first)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got := g.locate(context.Background(), geoQuery{Host: "1.1.1.1"})
+		if got.Country == "新加坡" && got.Code == "SG" {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("background geo refresh never populated cache")
 }

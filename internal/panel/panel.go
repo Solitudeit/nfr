@@ -58,9 +58,10 @@ type Panel struct {
 	pages map[string]*template.Template
 	geo   locator
 
-	mu       sync.Mutex
-	sessions map[string]*session
-	fails    map[string]*failState
+	mu        sync.Mutex
+	sessions  map[string]*session
+	fails     map[string]*failState
+	lastPrune time.Time
 }
 
 // New builds the console for a node.
@@ -290,14 +291,33 @@ func (p *Panel) current(r *http.Request) *session {
 	if err != nil || c.Value == "" {
 		return nil
 	}
+	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.pruneLocked(now)
 	s, ok := p.sessions[c.Value]
-	if !ok || time.Now().After(s.exp) {
+	if !ok || now.After(s.exp) {
 		delete(p.sessions, c.Value)
 		return nil
 	}
 	return s
+}
+
+func (p *Panel) pruneLocked(now time.Time) {
+	if now.Sub(p.lastPrune) < 5*time.Minute {
+		return
+	}
+	p.lastPrune = now
+	for id, s := range p.sessions {
+		if now.After(s.exp) {
+			delete(p.sessions, id)
+		}
+	}
+	for ip, f := range p.fails {
+		if !f.until.IsZero() && now.After(f.until) {
+			delete(p.fails, ip)
+		}
+	}
 }
 
 func (p *Panel) checkCSRF(r *http.Request, s *session) bool {
@@ -362,34 +382,34 @@ func (p *Panel) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) allowed(ip string) bool {
+	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	f := p.fails[ip]
 	if f == nil {
 		return true
 	}
-	if time.Now().Before(f.until) {
+	if f.count >= maxFails && now.Before(f.until) {
 		return false
 	}
-	if f.count >= maxFails && !f.until.IsZero() && time.Now().After(f.until) {
-		f.count = 0
-		f.until = time.Time{}
+	if !f.until.IsZero() && now.After(f.until) {
+		delete(p.fails, ip)
 	}
 	return true
 }
 
 func (p *Panel) failed(ip string) {
+	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.pruneLocked(now)
 	f := p.fails[ip]
-	if f == nil {
+	if f == nil || (!f.until.IsZero() && now.After(f.until)) {
 		f = &failState{}
 		p.fails[ip] = f
 	}
 	f.count++
-	if f.count >= maxFails {
-		f.until = time.Now().Add(lockFor)
-	}
+	f.until = now.Add(lockFor)
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +517,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if i := strings.IndexByte(xff, ','); i > 0 {
+				xff = xff[:i]
+			}
+			if v := strings.TrimSpace(xff); v != "" {
+				return v
+			}
+		}
 	}
 	return host
 }

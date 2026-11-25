@@ -32,7 +32,7 @@ func applyUsage(t *store.Tunnel, delta int64, month string) bool {
 
 // flushQuotas persists the traffic deltas and disables tunnels over quota.
 func (s *Server) flushQuotas() {
-	snaps := s.met.Snapshot()
+	snaps := s.met.LiveSnapshot()
 	if len(snaps) == 0 {
 		return
 	}

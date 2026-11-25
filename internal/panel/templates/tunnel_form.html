@@ -133,7 +133,7 @@
           <div class="tf-row" id="hostrow" hidden>
             <label class="tf-label" for="hosts">绑定域名</label>
             <div class="tf-field">
-              <textarea id="hosts" name="hosts" rows="2" placeholder="多个用逗号分隔，如 nas.example.com"></textarea>
+              <textarea id="hosts" name="hosts" rows="2" placeholder="多个用逗号分隔，如 nas.example.com">{{if .Edit}}{{join .Edit.Hosts ", "}}{{end}}</textarea>
               <span class="tf-hint">填了就按 Host / SNI 分流走 80 / 443；不填则通过上面的公网端口访问。</span>
             </div>
           </div>

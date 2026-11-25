@@ -44,8 +44,9 @@ nfrc ──TCP──▶ nfrs:8443
 - **HTTP 隧道**有两种入口：分配了公网端口的，server 在那个端口上跑一个
   HTTP 服务，所有请求都送给这条隧道（访客用 `http://服务器IP:端口`）；
   没分配端口的，server 在 80/443 上按 `Host`（TLS 下优先看 SNI）匹配域名。
-  两种都重写请求头后写进一条 yamux 流；agent 转发给内网服务，响应原路返回。
-  WebSocket/Upgrade 走 `proxyUpgrade`：接管连接后双向裸拷。
+  两种都通过按隧道复用的标准 `httputil.ReverseProxy` + `http.Transport` 连接池，
+  经 yamux 流转发给内网服务（自动补齐 `X-Forwarded-*`，原生支持流式响应与
+  WebSocket/Upgrade，并按字节准确计入入站/出站流量与限速）。
 - **TCP 隧道**：server 在端口池里 listen，来一个连接开一条流，agent 拨
   `local` 后双向拷贝。
 - **半关闭**：HTTP/1.0 和 ssh 依赖 FIN 语义。yamux 的 `Close()` 是半关闭
@@ -66,14 +67,12 @@ nfrc ──TCP──▶ nfrs:8443
 合起来只输出一个词（就绪 / 活跃 / 已停用 / 配额停用 / 节点离线 / 需重新选择节点 /
 目标不可达），渲染和 4 秒轮询用的是同一个字段，所以页面不会自相矛盾。
 
-内置的「服务端本机」默认不是隧道目标：内网地址属于加入的机器，悄悄在服务器上
-拨它会让一条隧道看起来能用却打到别处。需要时可以设置里显式打开。
-
 ## 状态
 
 `<data_dir>/state.json`，0600，写入走「临时文件 → fsync → rename → 目录 fsync」。
 内容是 tunnels / nodes / joins / leases / remotes / api_keys / settings / 面板密码哈希。
-没有数据库：单进程持锁读写，`Update` 失败会整体回滚，不会出现内存和文件不一致。
+没有数据库：单进程持锁读写，`Update` 失败会整体回滚，不会出现内存和文件不一致；
+被纳管远端的 `api_key` 使用 `<data_dir>/secret.key`（0600）以 AES-256-GCM 加密后落盘。
 
 端口租约也在里面：面板点「获取端口」→ `POST /api/v1/ports/allocate` →
 服务端确认「state 里没被占 + OS 层能 bind」→ 10 分钟租约；保存隧道时校验租约，
