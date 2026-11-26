@@ -202,6 +202,17 @@ export const useDashboardStore = defineStore('dashboard', () => {
     unreadAlerts.value = 0
   }
 
+  function upsertTunnel(updated: Tunnel) {
+    const idx = tunnels.value.findIndex((t) => t.id === updated.id)
+    if (idx >= 0) {
+      const next = tunnels.value.slice()
+      next[idx] = updated
+      tunnels.value = next
+    } else {
+      tunnels.value = [...tunnels.value, updated]
+    }
+  }
+
   async function probeTunnel(tunnelID: string): Promise<ProbeResult> {
     probingIds.value = { ...probingIds.value, [tunnelID]: true }
     try {
@@ -272,6 +283,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     startRealtime,
     stopRealtime,
     clearUnreadAlerts,
+    upsertTunnel,
     probeTunnel,
     probeAllTunnels,
     clearProbeSummary,

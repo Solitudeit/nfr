@@ -87,8 +87,9 @@ type TunnelRequest struct {
 	NodeID     string   `json:"node_id"`
 	Type       string   `json:"type"`
 	Local      string   `json:"local"`
-	RemotePort int      `json:"remote_port"`
-	Hosts      []string `json:"hosts,omitempty"`
+	RemotePort      int      `json:"remote_port"`
+	ClearRemotePort bool     `json:"clear_remote_port,omitempty"`
+	Hosts           []string `json:"hosts,omitempty"`
 	Enabled    *bool    `json:"enabled,omitempty"`
 	LeaseID    string   `json:"lease_id,omitempty"`
 	// BandwidthKB caps each direction of the tunnel in kilobytes per second.

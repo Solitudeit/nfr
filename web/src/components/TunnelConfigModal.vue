@@ -15,6 +15,7 @@ import {
 } from 'naive-ui'
 import { CheckmarkOutline, CopyOutline, DownloadOutline } from '@vicons/ionicons5'
 import { apiRequest } from '@/api/client'
+import { useDashboardStore } from '@/stores/dashboard'
 import type { Tunnel, TunnelConfigResponse } from '@/types/api'
 import { copyToClipboard, downloadTextFile } from '@/utils/format'
 import ClientDownloadCard from '@/components/ClientDownloadCard.vue'
@@ -29,15 +30,22 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
+const dashStore = useDashboardStore()
 const format = ref<'toml' | 'yaml'>('toml')
 const loading = ref(false)
 const errMsg = ref('')
 const data = ref<TunnelConfigResponse | null>(null)
+const configRev = ref(0)
 const copiedConfig = ref(false)
 const copiedCmd = ref(false)
 let copiedConfigTimer: number | undefined
 let copiedCmdTimer: number | undefined
 let fetchSeq = 0
+
+const liveTunnel = computed(() => {
+  if (!props.tunnel) return null
+  return dashStore.tunnels.find((t) => t.id === props.tunnel?.id) ?? props.tunnel
+})
 
 onBeforeUnmount(() => {
   window.clearTimeout(copiedConfigTimer)
@@ -57,19 +65,33 @@ const activeFilename = computed(() => {
 const runCommand = computed(() => `nfrc -c ${activeFilename.value}`)
 
 watch(
-  () => [props.show, props.tunnel?.id],
+  () => [
+    props.show,
+    liveTunnel.value?.id,
+    liveTunnel.value?.updated_at,
+    liveTunnel.value?.name,
+    liveTunnel.value?.local,
+    liveTunnel.value?.remote_port,
+  ] as const,
   async ([open, id]) => {
-    if (!open || !id) return
+    if (!open || !id) {
+      fetchSeq++
+      loading.value = false
+      errMsg.value = ''
+      data.value = null
+      return
+    }
     const seq = ++fetchSeq
     loading.value = true
     errMsg.value = ''
     data.value = null
     try {
       const res = await apiRequest<TunnelConfigResponse>(
-        `/tunnels/${encodeURIComponent(String(id))}/config`
+        `/tunnels/${encodeURIComponent(String(id))}/config?_t=${Date.now()}`
       )
       if (seq !== fetchSeq) return
       data.value = res
+      configRev.value += 1
     } catch (err) {
       if (seq !== fetchSeq) return
       errMsg.value = err instanceof Error ? err.message : '生成配置失败'
@@ -120,7 +142,7 @@ async function handleCopyCmd() {
     :show="show"
     preset="card"
     :trap-focus="false"
-    :title="tunnel ? `生成启动配置 · ${tunnel.name}` : '生成启动配置'"
+    :title="liveTunnel ? `生成启动配置 · ${liveTunnel.name}` : '生成启动配置'"
     :bordered="false"
     class="nfr-modal-card"
     @update:show="emit('update:show', $event)"
@@ -160,7 +182,7 @@ async function handleCopyCmd() {
       </div>
 
       <Transition name="nfr-fade" mode="out-in">
-        <div :key="format" class="nfr-code-box cfg-code">
+        <div :key="`${format}-${data.tunnel_id}-${configRev}`" class="nfr-code-box cfg-code">
           <NCode :code="activeText" :language="format === 'toml' ? 'ini' : 'yaml'" />
         </div>
       </Transition>

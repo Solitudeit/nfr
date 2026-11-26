@@ -38,7 +38,12 @@ const dashStore = useDashboardStore()
 const searchText = ref('')
 const protocolFilter = ref('all')
 
-const activeTunnel = ref<Tunnel | null>(null)
+const activeTunnelId = ref<string | null>(null)
+const activeTunnelFallback = ref<Tunnel | null>(null)
+const activeTunnel = computed<Tunnel | null>(() => {
+  if (!activeTunnelId.value) return null
+  return dashStore.tunnels.find((t) => t.id === activeTunnelId.value) ?? activeTunnelFallback.value
+})
 const configModalOpen = ref(false)
 const detailModalOpen = ref(false)
 const editDrawerOpen = ref(false)
@@ -121,7 +126,8 @@ function buildMenuOptions(t: Tunnel): DropdownOption[] {
 }
 
 async function handleMenuSelect(key: string, t: Tunnel) {
-  activeTunnel.value = t
+  activeTunnelId.value = t.id
+  activeTunnelFallback.value = t
   switch (key) {
     case 'detail':
       detailModalOpen.value = true
@@ -186,6 +192,15 @@ function handleDelete(t: Tunnel) {
       }
     },
   })
+}
+function handleTunnelSaved(updated?: Tunnel) {
+  if (updated) {
+    dashStore.upsertTunnel(updated)
+    if (activeTunnelId.value === updated.id) {
+      activeTunnelFallback.value = updated
+    }
+  }
+  void dashStore.fetchDashboard(true)
 }
 </script>
 
@@ -299,7 +314,7 @@ function handleDelete(t: Tunnel) {
     <TunnelEditDrawer
       v-model:show="editDrawerOpen"
       :tunnel="activeTunnel"
-      @saved="dashStore.fetchDashboard(true)"
+      @saved="handleTunnelSaved"
     />
   </div>
 </template>

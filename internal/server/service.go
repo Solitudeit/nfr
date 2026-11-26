@@ -393,10 +393,10 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 		if local == "" {
 			local = existing.Local
 		}
-		if port == 0 {
+		if port == 0 && !req.ClearRemotePort {
 			port = existing.RemotePort
 		}
-		if len(hosts) == 0 {
+		if hosts == nil {
 			hosts = existing.Hosts
 		}
 		t.Enabled = existing.Enabled

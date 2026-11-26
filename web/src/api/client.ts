@@ -47,6 +47,7 @@ export async function apiRequest<T>(
       method,
       headers,
       credentials: 'same-origin',
+      cache: 'no-store',
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: ctrl ? ctrl.signal : undefined,
     })

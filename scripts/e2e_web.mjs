@@ -343,8 +343,43 @@ async function main() {
     await page.waitForSelector('text=编辑隧道', { timeout: 5000 })
     await page.waitForTimeout(350)
     await assertTrueZeroOverflow('edit drawer @375px')
-    await page.keyboard.press('Escape')
+    // Edit name, local IP, local port, and remote port directly without pre-blurring,
+    // then immediately open 生成启动配置 and verify TOML/YAML & clipboard reflect every edit.
+    const editDrawer = page.locator('.n-drawer')
+    await editDrawer.locator('input[placeholder*="web"]').fill('JiaoShi2')
+    await editDrawer.locator('input[placeholder="127.0.0.1"]').fill('127.0.0.2')
+    const editNums = editDrawer.locator('.n-input-number input')
+    await editNums.nth(0).fill('19090')
+    await editNums.nth(1).fill('24680')
+    await editDrawer.locator('button:has-text("保存修改")').click()
+    await page.waitForSelector('.n-drawer', { state: 'detached', timeout: 5000 })
+
+    await page.click('.tunnel-card button:has-text("更多")')
+    await page.click('.n-dropdown-option:has-text("生成启动配置")')
+    await page.waitForSelector('.cfg-code', { timeout: 10000 })
+    const editedTitle = await page.locator('.n-modal .n-card-header__main').innerText()
+    const editedToml = await page.locator('.cfg-code').innerText()
+    check(
+      'edited tunnel config immediately reflects new name, local IP, local port, and remote port',
+      editedTitle.includes('JiaoShi2') &&
+        editedToml.includes('name = "JiaoShi2"') &&
+        editedToml.includes('local = "127.0.0.2:19090"') &&
+        editedToml.includes('remote_port = 24680') &&
+        !editedToml.includes('local_port = 0'),
+      `title=${editedTitle} toml=${editedToml}`,
+    )
+    await page.click('.cfg-bar >> text=YAML')
     await page.waitForTimeout(250)
+    const editedYaml = await page.locator('.cfg-code').innerText()
+    check(
+      'edited tunnel YAML reflects new local IP, local port, and remote port',
+      editedYaml.includes('name: JiaoShi2') &&
+        editedYaml.includes('local: 127.0.0.2:19090') &&
+        editedYaml.includes('remote_port: 24680'),
+      editedYaml,
+    )
+    await page.click('.n-modal .n-base-close')
+    await page.waitForSelector('.n-modal', { state: 'detached', timeout: 5000 })
 
     // 5. All 4 routes across all 4 viewports + 3 settings tabs
     for (const [w, h] of [[360, 800], [375, 812], [390, 844], [1440, 900]]) {

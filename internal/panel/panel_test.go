@@ -387,9 +387,95 @@ func TestStandaloneTunnelConfigAndKickAPI(t *testing.T) {
 		!strings.Contains(cfgResp.TOML, `name = "t-`+created.Tunnel.ID+`"`) ||
 		!strings.Contains(cfgResp.TOML, `name = "jiaoshi"`) ||
 		!strings.Contains(cfgResp.TOML, `remote_port = 23456`) ||
+		strings.Contains(cfgResp.TOML, `local_port = 0`) ||
+		strings.Contains(cfgResp.TOML, `bandwidth_kb = 0`) ||
+		strings.Contains(cfgResp.TOML, `quota_mb = 0`) ||
 		!strings.Contains(cfgResp.YAML, "jiaoshi") ||
 		cfgResp.FilenameTOML == "" || cfgResp.RunHint == "" {
 		t.Fatalf("bad per-tunnel config payload: %+v", cfgResp)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Fatalf("expected Cache-Control no-store on tunnel config, got %q", cc)
+	}
+
+	// Edit tunnel name, local IP, local port, remote port, bandwidth & quota,
+	// then immediately fetch generated config and verify every field synced.
+	rec = doJSON(p, http.MethodPatch, "/nfr/api/tunnels/"+created.Tunnel.ID, map[string]any{
+		"name":         "jiaoshi-v2",
+		"node_id":      "",
+		"type":         "tcp",
+		"local":        "192.168.1.25:9443",
+		"remote_port":  24567,
+		"bandwidth_kb": 512,
+		"quota_mb":     2048,
+		"enabled":      true,
+	}, cookies, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update tunnel = %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(p, http.MethodGet, "/nfr/api/tunnels/"+created.Tunnel.ID+"/config", nil, cookies, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("updated tunnel config = %d %s", rec.Code, rec.Body.String())
+	}
+	cfgResp = struct {
+		TunnelID     string `json:"tunnel_id"`
+		FilenameTOML string `json:"filename_toml"`
+		TOML         string `json:"toml"`
+		YAML         string `json:"yaml"`
+		RunHint      string `json:"run_hint"`
+	}{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfgResp); err != nil {
+		t.Fatalf("decode updated config: %v", err)
+	}
+	for _, want := range []string{
+		`name = "jiaoshi-v2"`,
+		`local = "192.168.1.25:9443"`,
+		`remote_port = 24567`,
+		`bandwidth_kb = 512`,
+		`quota_mb = 2048`,
+	} {
+		if !strings.Contains(cfgResp.TOML, want) {
+			t.Fatalf("updated TOML missing %q:\n%s", want, cfgResp.TOML)
+		}
+	}
+	if strings.Contains(cfgResp.TOML, "23456") || strings.Contains(cfgResp.TOML, "127.0.0.1:8080") {
+		t.Fatalf("updated TOML still contains stale values:\n%s", cfgResp.TOML)
+	}
+	for _, want := range []string{
+		"name: jiaoshi-v2",
+		"local: 192.168.1.25:9443",
+		"remote_port: 24567",
+	} {
+		if !strings.Contains(cfgResp.YAML, want) {
+			t.Fatalf("updated YAML missing %q:\n%s", want, cfgResp.YAML)
+		}
+	}
+	if cfgResp.FilenameTOML != "nfrc-jiaoshi-v2.toml" {
+		t.Fatalf("expected updated filename nfrc-jiaoshi-v2.toml, got %q", cfgResp.FilenameTOML)
+	}
+
+	// Clearing remote_port with clear_remote_port=true allocates a fresh port instead of silently keeping old port.
+	rec = doJSON(p, http.MethodPatch, "/nfr/api/tunnels/"+created.Tunnel.ID, map[string]any{
+		"name":              "jiaoshi-v2",
+		"node_id":           "",
+		"type":              "tcp",
+		"local":             "192.168.1.25:9443",
+		"remote_port":       0,
+		"clear_remote_port": true,
+		"enabled":           true,
+	}, cookies, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear remote port update = %d %s", rec.Code, rec.Body.String())
+	}
+	var cleared struct {
+		Tunnel api.Tunnel `json:"tunnel"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cleared); err != nil {
+		t.Fatalf("decode cleared: %v", err)
+	}
+	if cleared.Tunnel.RemotePort == 0 {
+		t.Fatalf("expected auto-assigned remote port, got 0")
 	}
 
 	// Kick offline tunnel returns 200 ok with kicked=false.

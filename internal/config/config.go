@@ -67,11 +67,11 @@ type ProxyConfig struct {
 	Type        string   `toml:"type" yaml:"type"` // tcp | udp | http
 	Local       string   `toml:"local,omitempty" yaml:"local,omitempty"`
 	LocalIP     string   `toml:"local_ip,omitempty" yaml:"local_ip,omitempty"`
-	LocalPort   int      `toml:"local_port,omitempty" yaml:"local_port,omitempty"`
-	RemotePort  int      `toml:"remote_port,omitempty" yaml:"remote_port,omitempty"`
+	LocalPort   int      `toml:"local_port,omitempty,omitzero" yaml:"local_port,omitempty"`
+	RemotePort  int      `toml:"remote_port,omitempty,omitzero" yaml:"remote_port,omitempty"`
 	Hosts       []string `toml:"hosts,omitempty" yaml:"hosts,omitempty"`
-	BandwidthKB int      `toml:"bandwidth_kb,omitempty" yaml:"bandwidth_kb,omitempty"`
-	QuotaMB     int64    `toml:"quota_mb,omitempty" yaml:"quota_mb,omitempty"`
+	BandwidthKB int      `toml:"bandwidth_kb,omitempty,omitzero" yaml:"bandwidth_kb,omitempty"`
+	QuotaMB     int64    `toml:"quota_mb,omitempty,omitzero" yaml:"quota_mb,omitempty"`
 }
 
 // EffectiveLocal resolves either "local" or "local_ip" + "local_port" into host:port.
