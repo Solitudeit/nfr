@@ -24,6 +24,8 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useThemeStore } from '@/stores/theme'
+import { useUpdateStore } from '@/stores/update'
+import UpdateModal from '@/components/UpdateModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +33,7 @@ const message = useMessage()
 const authStore = useAuthStore()
 const dashStore = useDashboardStore()
 const themeStore = useThemeStore()
+const updateStore = useUpdateStore()
 
 const collapsed = ref(false)
 const winWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
@@ -43,6 +46,7 @@ function onResize() {
 onMounted(() => {
   window.addEventListener('resize', onResize, { passive: true })
   dashStore.startRealtime()
+  void updateStore.fetchStatus(true)
 })
 
 onBeforeUnmount(() => {
@@ -54,12 +58,20 @@ function renderIcon(comp: unknown) {
   return () => h(NIcon, null, { default: () => h(comp as never) })
 }
 
-const menuOptions: MenuOption[] = [
+const menuOptions = computed<MenuOption[]>(() => [
   { label: '仪表盘', key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
   { label: '创建隧道', key: 'create', icon: renderIcon(AddCircleOutline) },
   { label: '隧道管理', key: 'tunnels', icon: renderIcon(SwapHorizontalOutline) },
-  { label: '系统设置', key: 'settings', icon: renderIcon(SettingsOutline) },
-]
+  {
+    label: () =>
+      h('span', { class: 'menu-label-wrap' }, [
+        h('span', null, '系统设置'),
+        updateStore.hasUpdate ? h('span', { class: 'nav-update-dot', title: '发现新版本' }) : null,
+      ]),
+    key: 'settings',
+    icon: renderIcon(SettingsOutline),
+  },
+])
 
 const bottomNavItems = [
   { key: 'dashboard', label: '仪表盘', icon: SpeedometerOutline },
@@ -191,10 +203,17 @@ async function handleLogout() {
           <NIcon :size="20">
             <component :is="item.icon" />
           </NIcon>
+          <span
+            v-if="item.key === 'settings' && updateStore.hasUpdate"
+            class="bottom-update-dot"
+            aria-label="发现新版本"
+          />
         </span>
         <span class="bottom-tab-label">{{ item.label }}</span>
       </button>
     </nav>
+
+    <UpdateModal />
   </NLayout>
 </template>
 
@@ -388,11 +407,33 @@ async function handleLogout() {
 }
 
 .bottom-tab-icon {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
   transition: transform 260ms var(--nfr-ease-spring);
+}
+
+.menu-label-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-update-dot,
+.bottom-update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--nfr-online-text);
+  display: inline-block;
+}
+
+.bottom-update-dot {
+  position: absolute;
+  top: -2px;
+  right: -5px;
 }
 
 .bottom-tab.active .bottom-tab-icon {

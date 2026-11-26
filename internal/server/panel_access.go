@@ -10,22 +10,26 @@ import (
 
 // Settings is a read-only view of instance behaviour for the console.
 type Settings struct {
-	Domain     string
-	APIEnabled bool
-	PortRange  [2]int
-	HTTPSEmail string
-	PublicHost string
+	Domain                 string
+	APIEnabled             bool
+	PortRange              [2]int
+	HTTPSEmail             string
+	PublicHost             string
+	DisableAutoUpdateCheck bool
+	UpdateChannel          string
 }
 
 // Settings returns the current settings.
 func (s *Server) Settings() Settings {
 	st := s.st.Snapshot()
 	return Settings{
-		Domain:     st.Settings.Domain,
-		APIEnabled: st.Settings.APIEnabled,
-		PortRange:  st.Settings.PortRange,
-		HTTPSEmail: st.Settings.HTTPSEmail,
-		PublicHost: st.Settings.PublicHost,
+		Domain:                 st.Settings.Domain,
+		APIEnabled:             st.Settings.APIEnabled,
+		PortRange:              st.Settings.PortRange,
+		HTTPSEmail:             st.Settings.HTTPSEmail,
+		PublicHost:             st.Settings.PublicHost,
+		DisableAutoUpdateCheck: st.Settings.DisableAutoUpdateCheck,
+		UpdateChannel:          st.Settings.UpdateChannel,
 	}
 }
 

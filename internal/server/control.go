@@ -466,7 +466,12 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 	}
 
 	st := s.st.Snapshot()
-	if err := proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeWelcome, NodeID: node.ID, Revision: st.Revision}); err != nil {
+	if err := proto.WriteFrame(ctrl, &proto.Frame{
+		Type:          proto.TypeWelcome,
+		NodeID:        node.ID,
+		Revision:      st.Revision,
+		LatestVersion: s.LatestClientVersion(),
+	}); err != nil {
 		sess.Close()
 		return
 	}

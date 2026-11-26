@@ -89,12 +89,14 @@ async function main() {
 
   const procs = []
   let localSrv = null
+  let manifestSrv = null
   let browser = null
 
   try {
     const ctlPort = await freePort()
     const httpPort = await freePort()
     const localPort = await freePort()
+    const manifestPort = await freePort()
     const dataDir = path.join(tmp, 'data')
     const cfgPath = path.join(tmp, 'server.toml')
 
@@ -115,11 +117,30 @@ async function main() {
     })
     await new Promise((r) => localSrv.listen(localPort, '127.0.0.1', r))
 
+    manifestSrv = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        preview: {
+          version: 'v9.9.9-preview.1',
+          published_at: '2026-11-26T00:00:00Z',
+          notes: '### 更新内容\n- 支持面板一键自动升级与镜像测速\n- 客户端启动日志末尾新增版本提示',
+          url: 'https://github.com/Solitudeit/nfr/releases/tag/v9.9.9-preview.1',
+        },
+      }))
+    })
+    await new Promise((r) => manifestSrv.listen(manifestPort, '127.0.0.1', r))
+
     const logPath = path.join(tmp, 'server.log')
     const logFd = fs.openSync(logPath, 'w')
     const nfrsProc = spawn(NFRS, ['--foreground', '-c', cfgPath], {
       stdio: ['ignore', logFd, logFd],
-      env: { ...process.env, NFR_CLIENTS_DIR: clientsDir },
+      env: {
+        ...process.env,
+        NFR_CLIENTS_DIR: clientsDir,
+        NFR_UPDATE_CURRENT_VERSION: 'v0.13.0-preview.2',
+        NFR_UPDATE_MANIFEST_URL: `http://127.0.0.1:${manifestPort}/version.json`,
+        NFR_DISABLE_UPDATE_CHECK: '1',
+      },
     })
     procs.push(nfrsProc)
 
@@ -262,7 +283,9 @@ async function main() {
     // Switch download source to 镜像下载 and verify browser auto-selects fastest mirror
     await page.locator('.dl-controls .n-select').first().click()
     const hasGiteeOpt = (await page.locator('.n-base-select-option:has-text("Gitee")').count()) > 0
+    const hasLocalOpt = (await page.locator('.n-base-select-option:has-text("本机直下")').count()) > 0
     check('Gitee option is completely removed', !hasGiteeOpt)
+    check('local dev direct download option is completely removed', !hasLocalOpt)
     await page.click('.n-base-select-option:has-text("镜像下载")')
     await page.waitForSelector('.dl-mirror-status:has-text("ghfast.top")', { timeout: 5000 })
     const dlHrefMirror = await page.locator('a:has-text("下载客户端")').getAttribute('href')
@@ -396,6 +419,26 @@ async function main() {
       await assertTrueZeroOverflow(`settings tab ${tabLabel} @360px`)
     }
 
+    // 5b. Settings "检查更新" opens closable UpdateModal with GitHub/Mirror source selector & notes
+    await page.click('.n-tabs-tab:has-text("基础配置")')
+    await page.waitForSelector('button:has-text("检查更新")', { timeout: 5000 })
+    await page.click('button:has-text("检查更新")')
+    await page.waitForSelector('.update-modal', { timeout: 10000 })
+    await page.waitForTimeout(250)
+    const modalText = await page.locator('.update-modal').innerText()
+    check(
+      'update modal displays version diff, notes, and GitHub/Mirror source selector',
+      modalText.includes('v9.9.9-preview.1') &&
+        modalText.includes('支持面板一键自动升级') &&
+        modalText.includes('GitHub') &&
+        modalText.includes('镜像下载'),
+      modalText.slice(0, 200),
+    )
+    await assertTrueZeroOverflow('update modal @360px')
+    await page.click('.update-modal button:has-text("稍后提醒")')
+    await page.waitForSelector('.update-modal', { state: 'detached', timeout: 5000 })
+    check('update modal closes cleanly via 稍后提醒', true)
+
     // 6. Dark mode persistence + Force offline kick
     await page.setViewportSize({ width: 375, height: 812 })
     await page.goto(`${baseUrl}/nfr/tunnels`, { waitUntil: 'networkidle' })
@@ -436,6 +479,7 @@ async function main() {
   } finally {
     if (browser) await browser.close()
     if (localSrv) localSrv.close()
+    if (manifestSrv) manifestSrv.close()
     for (const p of procs) {
       try { p.kill('SIGTERM') } catch {}
     }

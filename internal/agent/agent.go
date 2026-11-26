@@ -245,6 +245,8 @@ func (a *Agent) session(ctx context.Context) error {
 	}
 	_ = ctrl.SetReadDeadline(time.Time{})
 	a.lg.Info(fmt.Sprintf("登录节点成功\nRunId: %s", f.NodeID))
+	pendingUpdateVer := strings.TrimSpace(f.LatestVersion)
+	updateHintShown := false
 
 	a.mu.Lock()
 	a.nodeID = f.NodeID
@@ -288,6 +290,10 @@ func (a *Agent) session(ctx context.Context) error {
 		switch f.Type {
 		case proto.TypeConfig:
 			a.applyConfig(f)
+			if !updateHintShown && pendingUpdateVer != "" && version.IsNewer(pendingUpdateVer, version.Version) {
+				updateHintShown = true
+				a.lg.Warn(fmt.Sprintf("发现新版本\n最新: %s", pendingUpdateVer))
+			}
 		case proto.TypePing:
 			if err := a.sendFrame(&proto.Frame{Type: proto.TypePong, TS: time.Now().Unix()}); err != nil {
 				return err

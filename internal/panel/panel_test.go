@@ -503,7 +503,7 @@ func TestClientDownloadsAPIAndTraversalBlocked(t *testing.T) {
 	cookies, _ := signIn(t, p, password)
 
 	// Catalog always returns all 8 platforms with GitHub & Mirror archive URLs
-	// (no Gitee), plus mirror probe nodes and local source when local archives exist.
+	// only (no Gitee and no local dev direct download).
 	rec := doJSON(p, http.MethodGet, "/nfr/api/downloads", nil, cookies, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("downloads catalog = %d %s", rec.Code, rec.Body.String())
@@ -521,13 +521,11 @@ func TestClientDownloadsAPIAndTraversalBlocked(t *testing.T) {
 			ProbeURL string `json:"probe_url"`
 		} `json:"mirrors"`
 		Items []struct {
-			OS             string            `json:"os"`
-			Arch           string            `json:"arch"`
-			Filename       string            `json:"filename"`
-			BinaryName     string            `json:"binary_name"`
-			LocalAvailable bool              `json:"local_available"`
-			Size           int64             `json:"size_bytes"`
-			URLs           map[string]string `json:"urls"`
+			OS         string            `json:"os"`
+			Arch       string            `json:"arch"`
+			Filename   string            `json:"filename"`
+			BinaryName string            `json:"binary_name"`
+			URLs       map[string]string `json:"urls"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &cat); err != nil {
@@ -543,8 +541,8 @@ func TestClientDownloadsAPIAndTraversalBlocked(t *testing.T) {
 	for _, s := range cat.Sources {
 		srcKeys[s.Key] = true
 	}
-	if !srcKeys["github"] || !srcKeys["mirror"] || !srcKeys["local"] || srcKeys["gitee"] {
-		t.Fatalf("expected github, mirror and local sources (no gitee), got %+v", cat.Sources)
+	if len(cat.Sources) != 2 || !srcKeys["github"] || !srcKeys["mirror"] || srcKeys["local"] || srcKeys["gitee"] {
+		t.Fatalf("expected ONLY github and mirror sources (no local/gitee), got %+v", cat.Sources)
 	}
 	for _, it := range cat.Items {
 		if !strings.HasPrefix(it.URLs["github"], "https://github.com/Solitudeit/nfr/releases/download/") ||
@@ -558,6 +556,9 @@ func TestClientDownloadsAPIAndTraversalBlocked(t *testing.T) {
 		if _, hasGitee := it.URLs["gitee"]; hasGitee {
 			t.Fatalf("unexpected gitee url still present: %+v", it)
 		}
+		if _, hasLocal := it.URLs["local"]; hasLocal {
+			t.Fatalf("unexpected local dev url still present: %+v", it)
+		}
 		if it.OS == "windows" && it.BinaryName != "nfrc.exe" {
 			t.Fatalf("windows binary_name = %q, want nfrc.exe", it.BinaryName)
 		}
@@ -566,29 +567,64 @@ func TestClientDownloadsAPIAndTraversalBlocked(t *testing.T) {
 		}
 	}
 
-	// Direct local download streams exact archive bytes with attachment header.
-	req := httptest.NewRequest(http.MethodGet, "/nfr/api/downloads/nfrc_linux_amd64.tar.gz", nil)
-	for _, c := range cookies {
-		req.AddCookie(c)
-	}
-	dlRec := httptest.NewRecorder()
-	p.ServeHTTP(dlRec, req)
-	if dlRec.Code != http.StatusOK || dlRec.Body.String() != "TGZ-LINUX-ARCHIVE" ||
-		!strings.Contains(dlRec.Header().Get("Content-Disposition"), "nfrc_linux_amd64.tar.gz") {
-		t.Fatalf("download file = %d hdr=%q body=%q", dlRec.Code, dlRec.Header().Get("Content-Disposition"), dlRec.Body.String())
-	}
-
-	// Path traversal and unknown filenames must be blocked.
-	for _, bad := range []string{"../secret.txt", "..%2fsecret.txt", "unknown.bin", "nfrc_linux_amd64.tar.gz/../../etc/passwd"} {
-		badReq := httptest.NewRequest(http.MethodGet, "/nfr/api/downloads/"+bad, nil)
+	// Local file download endpoint is closed in production; all requests must not serve local files.
+	for _, pathName := range []string{"nfrc_linux_amd64.tar.gz", "../secret.txt", "..%2fsecret.txt", "unknown.bin"} {
+		badReq := httptest.NewRequest(http.MethodGet, "/nfr/api/downloads/"+pathName, nil)
 		for _, c := range cookies {
 			badReq.AddCookie(c)
 		}
 		badRec := httptest.NewRecorder()
 		p.ServeHTTP(badRec, badReq)
-		if badRec.Code == http.StatusOK || strings.Contains(badRec.Body.String(), "TOP-SECRET") {
-			t.Fatalf("traversal %q was NOT blocked: status=%d body=%q", bad, badRec.Code, badRec.Body.String())
+		if badRec.Code == http.StatusOK || strings.Contains(badRec.Body.String(), "TOP-SECRET") || strings.Contains(badRec.Body.String(), "TGZ-LINUX-ARCHIVE") {
+			t.Fatalf("local download %q should be closed: status=%d body=%q", pathName, badRec.Code, badRec.Body.String())
 		}
+	}
+}
+
+func TestUpdateAPIStatusCheckAndSettings(t *testing.T) {
+	manifestSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"preview": {
+				"version": "v9.9.9-preview.1",
+				"published_at": "2026-11-26T00:00:00Z",
+				"notes": "### 更新内容\n- 测试自动检测更新",
+				"url": "https://github.com/Solitudeit/nfr/releases/tag/v9.9.9-preview.1"
+			}
+		}`))
+	}))
+	defer manifestSrv.Close()
+
+	t.Setenv("NFR_UPDATE_CURRENT_VERSION", "v0.13.0-preview.2")
+	t.Setenv("NFR_UPDATE_MANIFEST_URL", manifestSrv.URL)
+	t.Setenv("NFR_DISABLE_UPDATE_CHECK", "1")
+
+	p, _, password := newTestPanel(t)
+	cookies, csrf := signIn(t, p, password)
+
+	// Toggle auto_check off and back on.
+	rec := doJSON(p, http.MethodPatch, "/nfr/api/update/settings", map[string]any{
+		"auto_check": false,
+		"channel":    "preview",
+	}, cookies, csrf)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"auto_check":false`) {
+		t.Fatalf("patch update settings = %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Trigger manual update check via GitHub source.
+	rec = doJSON(p, http.MethodPost, "/nfr/api/update/check", map[string]any{
+		"source":  "github",
+		"channel": "preview",
+	}, cookies, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("check update = %d %s", rec.Code, rec.Body.String())
+	}
+	var st api.UpdateStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+		t.Fatalf("decode update status: %v", err)
+	}
+	if !st.HasUpdate || st.LatestVersion != "v9.9.9-preview.1" || !strings.Contains(st.Notes, "测试自动检测更新") {
+		t.Fatalf("unexpected update status: %+v", st)
 	}
 }
 

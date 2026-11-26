@@ -77,11 +77,12 @@ type Frame struct {
 	Proxies     []ProxySpec `json:"proxies,omitempty"`
 	SyncProxies bool        `json:"sync_proxies,omitempty"`
 
-	Code     string `json:"code,omitempty"`
-	Message  string `json:"msg,omitempty"`
-	TS       int64  `json:"ts,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-	Status   string `json:"status,omitempty"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"msg,omitempty"`
+	TS            int64  `json:"ts,omitempty"`
+	Protocol      string `json:"protocol,omitempty"`
+	Status        string `json:"status,omitempty"`
+	LatestVersion string `json:"latest_version,omitempty"`
 }
 
 // ProxySpec is a tunnel declared in a client config file and synced to the

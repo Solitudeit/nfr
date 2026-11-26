@@ -29,7 +29,13 @@ func (p *Panel) buildAPIMux() *http.ServeMux {
 	mux.HandleFunc("POST /nfr/api/tunnels/{id}/probe", p.apiProbeTunnel)
 
 	mux.HandleFunc("GET /nfr/api/downloads", p.apiListDownloads)
-	mux.HandleFunc("GET /nfr/api/downloads/{filename}", p.apiDownloadClient)
+
+	mux.HandleFunc("GET /nfr/api/update", p.apiGetUpdate)
+	mux.HandleFunc("POST /nfr/api/update/check", p.apiCheckUpdate)
+	mux.HandleFunc("POST /nfr/api/update/mirrors", p.apiProbeUpdateMirrors)
+	mux.HandleFunc("PATCH /nfr/api/update/settings", p.apiPatchUpdateSettings)
+	mux.HandleFunc("POST /nfr/api/update/apply", p.apiApplyUpdate)
+	mux.HandleFunc("GET /nfr/api/update/progress", p.apiUpgradeProgress)
 
 	mux.HandleFunc("POST /nfr/api/ports/allocate", p.apiAllocatePort)
 
@@ -513,6 +519,85 @@ func (p *Panel) apiDeleteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (p *Panel) apiGetUpdate(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, p.srv.UpdateStatus())
+}
+
+func (p *Panel) apiCheckUpdate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+	var req struct {
+		Source  string `json:"source"`
+		Channel string `json:"channel"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求 JSON 格式无效"})
+		return
+	}
+	status, err := p.srv.CheckForUpdates(r.Context(), req.Source, req.Channel)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":  "检查更新失败: " + err.Error(),
+			"status": status,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (p *Panel) apiProbeUpdateMirrors(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+	var req struct {
+		Force bool `json:"force"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	writeJSON(w, http.StatusOK, p.srv.ProbeUpdateMirrors(r.Context(), req.Force))
+}
+
+func (p *Panel) apiPatchUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AutoCheck *bool  `json:"auto_check"`
+		Channel   string `json:"channel"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	cur := p.srv.UpdateStatus()
+	autoCheck := cur.AutoCheck
+	if req.AutoCheck != nil {
+		autoCheck = *req.AutoCheck
+	}
+	channel := cur.Channel
+	if strings.TrimSpace(req.Channel) != "" {
+		channel = req.Channel
+	}
+	if err := p.srv.SetUpdateSettings(autoCheck, channel); err != nil {
+		writeSrvErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p.srv.UpdateStatus())
+}
+
+func (p *Panel) apiApplyUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source        string `json:"source"`
+		MirrorPrefix  string `json:"mirror_prefix"`
+		TargetVersion string `json:"target_version"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	prog, err := p.srv.StartSelfUpgrade(req.Source, req.MirrorPrefix, req.TargetVersion)
+	if err != nil {
+		writeSrvErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, prog)
+}
+
+func (p *Panel) apiUpgradeProgress(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, p.srv.UpgradeProgress())
 }
 
 func writeSrvErr(w http.ResponseWriter, err error) {

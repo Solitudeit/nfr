@@ -4,7 +4,6 @@ import { NButton, NIcon, NSelect, NSkeleton } from 'naive-ui'
 import { DownloadOutline, RefreshOutline } from '@vicons/ionicons5'
 import { apiRequest } from '@/api/client'
 import type { DownloadItem, DownloadSource, DownloadsPayload, MirrorNode } from '@/types/api'
-import { formatBytes } from '@/utils/format'
 
 const SOURCE_PREF_KEY = 'nfr_download_source'
 const PROBE_TIMEOUT_MS = 3500
@@ -31,8 +30,9 @@ let probeSeq = 0
 function readSavedSource(): string {
   try {
     const raw = window.localStorage.getItem(SOURCE_PREF_KEY) || ''
-    // Migrate retired Gitee preference cleanly to Mirror download.
+    // Migrate retired Gitee / local-dev preferences cleanly.
     if (raw === 'gitee') return 'mirror'
+    if (raw === 'local') return 'github'
     return raw
   } catch {
     return ''
@@ -137,12 +137,7 @@ const sourceOptions = computed(() =>
   sources.value.map((s) => ({ label: s.label, value: s.key }))
 )
 
-const availableItems = computed(() => {
-  if (selectedSource.value === 'local') {
-    return items.value.filter((it) => it.local_available)
-  }
-  return items.value
-})
+const availableItems = computed(() => items.value)
 
 const osOptions = computed(() => {
   const seen = new Set<string>()
@@ -182,8 +177,6 @@ const downloadURL = computed(() => {
   }
   return currentItem.value.urls[selectedSource.value] || ''
 })
-
-const isExternalSource = computed(() => selectedSource.value !== 'local')
 
 watch(selectedSource, (val) => {
   if (val) saveSource(val)
@@ -249,9 +242,6 @@ onBeforeUnmount(() => {
       <h2 class="dl-title">客户端下载</h2>
       <span v-if="currentItem" class="dl-meta nfr-mono">
         {{ currentItem.filename }}
-        <template v-if="currentItem.size_bytes && selectedSource === 'local'">
-          · {{ formatBytes(currentItem.size_bytes) }}
-        </template>
       </span>
     </div>
 
@@ -290,9 +280,8 @@ onBeforeUnmount(() => {
         type="primary"
         tag="a"
         :href="downloadURL"
-        :download="isExternalSource ? undefined : currentItem.filename"
-        :target="isExternalSource ? '_blank' : undefined"
-        :rel="isExternalSource ? 'noopener noreferrer' : undefined"
+        target="_blank"
+        rel="noopener noreferrer"
         class="nfr-touch-btn dl-btn"
       >
         <template #icon>

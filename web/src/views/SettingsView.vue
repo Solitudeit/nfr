@@ -9,6 +9,8 @@ import {
   NIcon,
   NInput,
   NInputNumber,
+  NRadioButton,
+  NRadioGroup,
   NSelect,
   NSkeleton,
   NSwitch,
@@ -19,6 +21,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import {
+  CloudDownloadOutline,
   CopyOutline,
   KeyOutline,
   LogOutOutline,
@@ -29,6 +32,7 @@ import { apiRequest } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useDashboardStore } from '@/stores/dashboard'
 import { PRIMARY_PRESETS, useThemeStore } from '@/stores/theme'
+import { useUpdateStore } from '@/stores/update'
 import type { SettingsPayload } from '@/types/api'
 import { copyToClipboard, formatRelativeTime } from '@/utils/format'
 
@@ -38,6 +42,7 @@ const dialog = useDialog()
 const authStore = useAuthStore()
 const dashStore = useDashboardStore()
 const themeStore = useThemeStore()
+const updateStore = useUpdateStore()
 
 const loading = ref(true)
 const savingBasic = ref(false)
@@ -96,7 +101,32 @@ async function fetchSettings() {
   }
 }
 
-onMounted(fetchSettings)
+onMounted(() => {
+  void fetchSettings()
+  void updateStore.fetchStatus(false)
+})
+
+async function handleCheckUpdate() {
+  try {
+    const res = await updateStore.checkNow(true)
+    if (res.has_update && res.latest_version) {
+      message.success(`发现新版本 ${res.latest_version}`)
+    } else {
+      message.success(`当前已是最新版本（${res.current_version}）`)
+    }
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '检查更新失败')
+  }
+}
+
+async function handleToggleAutoCheck(val: boolean) {
+  try {
+    await updateStore.savePreferences(val)
+    message.success(val ? '已开启自动检查更新' : '已关闭自动检查更新')
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '保存更新偏好失败')
+  }
+}
 
 async function saveBasic() {
   savingBasic.value = true
@@ -321,6 +351,98 @@ async function handleLogout() {
                 </NButton>
               </div>
             </div>
+
+            <div class="divider" />
+
+            <div class="sub-block update-block">
+              <div class="api-head">
+                <div>
+                  <div class="sub-title">版本与系统更新</div>
+                  <div class="sub-desc">
+                    当前版本
+                    <span class="nfr-mono">{{ updateStore.status?.current_version || authStore.version || 'dev' }}</span>
+                    <template v-if="updateStore.hasUpdate && updateStore.status?.latest_version">
+                      · 可升级至 <strong class="nfr-mono">{{ updateStore.status.latest_version }}</strong>
+                    </template>
+                    <template v-else-if="updateStore.status?.checked_at">
+                      · 已是最新
+                    </template>
+                  </div>
+                </div>
+                <NTag
+                  v-if="updateStore.hasUpdate"
+                  size="small"
+                  type="success"
+                  :bordered="false"
+                >
+                  有新版本
+                </NTag>
+              </div>
+
+              <div class="upd-row">
+                <div class="upd-source-wrap">
+                  <span class="sub-desc">更新下载源</span>
+                  <NRadioGroup
+                    :value="updateStore.selectedSource"
+                    size="small"
+                    @update:value="(v) => updateStore.setSource(v as 'github' | 'mirror')"
+                  >
+                    <NRadioButton value="github">GitHub</NRadioButton>
+                    <NRadioButton value="mirror">镜像下载</NRadioButton>
+                  </NRadioGroup>
+                </div>
+
+                <div class="upd-auto-wrap">
+                  <span class="sub-desc">自动检查更新</span>
+                  <NSwitch
+                    :value="updateStore.status?.auto_check ?? true"
+                    :loading="updateStore.savingPrefs"
+                    @update:value="handleToggleAutoCheck"
+                  />
+                </div>
+              </div>
+
+              <div v-if="updateStore.selectedSource === 'mirror'" class="upd-mirror-hint">
+                <template v-if="updateStore.probingMirrors">正在测速优选镜像节点…</template>
+                <template v-else-if="updateStore.mirrorProbe?.ok && updateStore.mirrorProbe.mirror">
+                  已优选 <span class="nfr-mono">{{ updateStore.mirrorProbe.mirror.name }}</span>
+                  <span class="upd-rtt nfr-mono">{{ updateStore.mirrorProbe.rtt_ms }}ms</span>
+                </template>
+                <template v-else>
+                  {{ updateStore.mirrorProbe?.message || '切换后将由服务端自动优选最快加速镜像' }}
+                </template>
+                <NButton
+                  v-if="!updateStore.probingMirrors"
+                  text
+                  size="tiny"
+                  @click="updateStore.probeMirrors(true)"
+                >
+                  <template #icon><NIcon :size="13"><RefreshOutline /></NIcon></template>
+                  重测
+                </NButton>
+              </div>
+
+              <div class="upd-btn-row">
+                <NButton
+                  secondary
+                  :loading="updateStore.checking"
+                  class="nfr-touch-btn"
+                  @click="handleCheckUpdate"
+                >
+                  <template #icon><NIcon><RefreshOutline /></NIcon></template>
+                  检查更新
+                </NButton>
+                <NButton
+                  v-if="updateStore.hasUpdate"
+                  type="primary"
+                  class="nfr-touch-btn"
+                  @click="updateStore.openModal()"
+                >
+                  <template #icon><NIcon><CloudDownloadOutline /></NIcon></template>
+                  查看更新与一键升级
+                </NButton>
+              </div>
+            </div>
           </div>
         </NTabPane>
 
@@ -517,6 +639,47 @@ async function handleLogout() {
 
 .token-input {
   flex: 1 1 220px;
+}
+
+.upd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.upd-source-wrap,
+.upd-auto-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.upd-mirror-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--nfr-text-secondary);
+}
+
+.upd-rtt {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--nfr-online-bg);
+  color: var(--nfr-online-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.upd-btn-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .api-head,

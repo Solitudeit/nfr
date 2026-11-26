@@ -197,3 +197,50 @@ type Event struct {
 	At      time.Time `json:"at"`
 	Message string    `json:"message,omitempty"`
 }
+
+// MirrorNode describes one GitHub Release acceleration mirror.
+type MirrorNode struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Prefix   string `json:"prefix"`
+	ProbeURL string `json:"probe_url"`
+}
+
+// UpdateMirrorProbe reports the fastest reachable mirror measured from the server host.
+type UpdateMirrorProbe struct {
+	OK      bool       `json:"ok"`
+	Mirror  MirrorNode `json:"mirror,omitempty"`
+	RTTMs   int64      `json:"rtt_ms,omitempty"`
+	Message string     `json:"message,omitempty"`
+}
+
+// UpgradeProgress reports live progress of an in-place nfrs self-upgrade.
+type UpgradeProgress struct {
+	State         string `json:"state"` // idle | downloading | verifying | installing | restarting | done | error
+	Percent       int    `json:"percent"`
+	TargetVersion string `json:"target_version,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Message       string `json:"message,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// UpdateStatus is returned by /nfr/api/update and /nfr/api/update/check.
+type UpdateStatus struct {
+	CurrentVersion     string             `json:"current_version"`
+	LatestVersion      string             `json:"latest_version,omitempty"`
+	HasUpdate          bool               `json:"has_update"`
+	IsPrerelease       bool               `json:"is_prerelease,omitempty"`
+	PublishedAt        string             `json:"published_at,omitempty"`
+	Notes              string             `json:"notes,omitempty"`
+	ReleaseURL         string             `json:"release_url,omitempty"`
+	CheckedAt          *time.Time         `json:"checked_at,omitempty"`
+	LastError          string             `json:"last_error,omitempty"`
+	AutoCheck          bool               `json:"auto_check"`
+	Channel            string             `json:"channel"` // auto | preview | stable
+	CanSelfUpdate      bool               `json:"can_self_update"`
+	CannotUpdateReason string             `json:"cannot_update_reason,omitempty"`
+	SourceUsed         string             `json:"source_used,omitempty"`
+	MirrorUsed         string             `json:"mirror_used,omitempty"`
+	Mirrors            []MirrorNode       `json:"mirrors"`
+	Upgrade            UpgradeProgress    `json:"upgrade"`
+}

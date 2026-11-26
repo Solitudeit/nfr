@@ -74,6 +74,7 @@ type Server struct {
 	ctlLn      net.Listener
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+	updater    *updater
 }
 
 type portListener struct {
@@ -141,6 +142,7 @@ func New(opts Options) (*Server, string, error) {
 	}
 	s.api = s.buildAPI()
 	s.metrics = s.buildMetrics()
+	s.updater = newUpdater(s)
 
 	var generated string
 	var need bool
@@ -293,6 +295,9 @@ func (s *Server) Run(ctx context.Context) error {
 
 	s.wg.Add(1)
 	go s.loop(ctx)
+	if s.updater != nil {
+		s.updater.startBackground(ctx)
+	}
 
 	<-ctx.Done()
 	return s.shutdown()

@@ -201,8 +201,6 @@ export interface DownloadItem {
   arch_label: string
   filename: string
   binary_name: string
-  local_available: boolean
-  size_bytes?: number
   urls: Record<string, string>
 }
 
@@ -218,4 +216,40 @@ export interface DownloadsPayload {
   sources: DownloadSource[]
   mirrors?: MirrorNode[]
   items: DownloadItem[]
+}
+
+export interface UpdateMirrorProbe {
+  ok: boolean
+  mirror?: MirrorNode
+  rtt_ms?: number
+  message?: string
+}
+
+export interface UpgradeProgress {
+  state: 'idle' | 'downloading' | 'verifying' | 'installing' | 'restarting' | 'done' | 'error' | string
+  percent: number
+  target_version?: string
+  source?: string
+  message?: string
+  error?: string
+}
+
+export interface UpdateStatus {
+  current_version: string
+  latest_version?: string
+  has_update: boolean
+  is_prerelease?: boolean
+  published_at?: string
+  notes?: string
+  release_url?: string
+  checked_at?: string
+  last_error?: string
+  auto_check: boolean
+  channel: 'auto' | 'preview' | 'stable' | string
+  can_self_update: boolean
+  cannot_update_reason?: string
+  source_used?: string
+  mirror_used?: string
+  mirrors: MirrorNode[]
+  upgrade: UpgradeProgress
 }

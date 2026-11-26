@@ -136,6 +136,59 @@ jobs:
               page += 1
           print(f"done: updated {updated} release(s) to prerelease")
           PY
+      - name: Publish version.json to version-manifest branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, pathlib, urllib.request
+
+          repo = os.environ["REPO"]
+          tag = os.environ["TAG"]
+          token = os.environ["GH_TOKEN"]
+          is_pre = "-" in tag
+
+          notes_path = pathlib.Path(f".github/release-notes/{tag}.md")
+          notes = notes_path.read_text(encoding="utf-8").strip() if notes_path.exists() else ""
+
+          # Preserve existing stable/preview entries when updating manifest.
+          manifest = {}
+          try:
+              req = urllib.request.Request(
+                  f"https://raw.githubusercontent.com/{repo}/version-manifest/version.json",
+                  headers={"User-Agent": "nfr-release-manifest"},
+              )
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  manifest = json.loads(r.read().decode())
+          except Exception:
+              manifest = {}
+
+          entry = {
+              "version": tag,
+              "published_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "notes": notes,
+              "url": f"https://github.com/{repo}/releases/tag/{tag}",
+          }
+          if is_pre:
+              manifest["preview"] = entry
+          else:
+              manifest["stable"] = entry
+              manifest["preview"] = entry
+
+          out = pathlib.Path("/tmp/nfr-version-manifest")
+          out.mkdir(parents=True, exist_ok=True)
+          (out / "version.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cd /tmp/nfr-version-manifest
+          git init -b version-manifest
+          git add version.json
+          git commit -m "chore(manifest): update version.json for ${TAG}"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" version-manifest:version-manifest
 
   image:
     runs-on: ubuntu-latest

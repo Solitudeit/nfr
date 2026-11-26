@@ -79,6 +79,10 @@ type Settings struct {
 	// AuthToken is the shared secret clients can put in client.toml / client.yaml
 	// to connect directly without minting an expiring join code. Encrypted at rest.
 	AuthToken string `json:"auth_token,omitempty"`
+	// DisableAutoUpdateCheck stops background update checks when true.
+	DisableAutoUpdateCheck bool `json:"disable_auto_update_check,omitempty"`
+	// UpdateChannel selects "auto" (default), "preview", or "stable".
+	UpdateChannel string `json:"update_channel,omitempty"`
 }
 
 // Tunnel is one published service.
