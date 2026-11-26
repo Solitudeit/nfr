@@ -408,7 +408,7 @@ func discover(ctx context.Context, base string) (wellKnown, string, error) {
 	client := &http.Client{
 		Timeout: 12 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: transport.WebClientConfig(host, ""),
+			TLSClientConfig: transport.DiscoveryWebClientConfig(host),
 		},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/.well-known/nfr", nil)

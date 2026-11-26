@@ -2,7 +2,6 @@ package panel
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -43,14 +42,7 @@ func newTestPanel(t *testing.T) (*Panel, *server.Server, string) {
 		t.Fatalf("seed initial password file: %v", err)
 	}
 	p := New(srv, log.New("error", ""))
-	p.geo = stubLocator{}
 	return p, srv, password
-}
-
-type stubLocator struct{}
-
-func (stubLocator) locate(context.Context, geoQuery) region {
-	return region{Country: "香港", Code: "HK"}
 }
 
 func doJSON(p *Panel, method, path string, body any, cookies []*http.Cookie, csrf string) *httptest.ResponseRecorder {

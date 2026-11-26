@@ -80,10 +80,11 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 	go func() { _ = srv.Run(ctx) }()
 	waitListen(t, loadedSrv.ControlListen)
 
-	// Write client.yaml declaring auth_token + one TCP proxy.
+	// Write client.yaml declaring auth_token + pin + one TCP proxy.
 	cliYAML := filepath.Join(dir, "client.yaml")
 	rawClient := "server_addr: \"" + loadedSrv.ControlListen + "\"\n" +
 		"auth_token: \"yaml-shared-secret\"\n" +
+		"pin: \"" + srv.Pin() + "\"\n" +
 		"name: \"nas-box\"\n" +
 		"proxies:\n" +
 		"  - name: echo-tcp\n" +
@@ -115,6 +116,7 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 	agReject := agent.New(agent.Options{
 		Addr:      target.Addr,
 		AuthToken: target.AuthToken,
+		Pin:       target.Pin,
 		Name:      target.Name,
 		Proxies:   specs,
 		Logger:    log.New("error", ""),
@@ -150,6 +152,7 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 	ag1 := agent.New(agent.Options{
 		Addr:      target.Addr,
 		AuthToken: target.AuthToken,
+		Pin:       target.Pin,
 		Name:      target.Name,
 		Proxies:   specs,
 		Logger:    log.New("error", ""),
@@ -200,6 +203,7 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 	ag2 := agent.New(agent.Options{
 		Addr:      target.Addr,
 		AuthToken: target.AuthToken,
+		Pin:       target.Pin,
 		Name:      target.Name,
 		Proxies:   specs,
 		Logger:    log.New("error", ""),
@@ -227,6 +231,7 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 	ag3 := agent.New(agent.Options{
 		Addr:      target.Addr,
 		AuthToken: target.AuthToken,
+		Pin:       target.Pin,
 		Name:      target.Name,
 		Proxies:   nil,
 		Logger:    log.New("error", ""),

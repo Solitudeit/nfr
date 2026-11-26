@@ -69,7 +69,6 @@ func (p *Panel) apiDashboard(w http.ResponseWriter, r *http.Request) {
 	if nodes == nil {
 		nodes = []api.Node{}
 	}
-	p.labelNodes(r.Context(), nodes)
 	events := p.srv.RecentEvents()
 	if events == nil {
 		events = []api.Event{}
@@ -312,7 +311,6 @@ func (p *Panel) apiAllocatePort(w http.ResponseWriter, r *http.Request) {
 
 func (p *Panel) apiListNodes(w http.ResponseWriter, r *http.Request) {
 	nodes := p.srv.Nodes()
-	p.labelNodes(r.Context(), nodes)
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
 }
 
@@ -329,7 +327,6 @@ func (p *Panel) apiRenameNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes := p.srv.Nodes()
-	p.labelNodes(r.Context(), nodes)
 	for _, n := range nodes {
 		if n.ID == id {
 			writeJSON(w, http.StatusOK, map[string]any{"node": n})

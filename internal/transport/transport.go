@@ -173,15 +173,36 @@ func ServerConfig(cert tls.Certificate) *tls.Config {
 }
 
 // ClientConfig is the tunnel (data plane) TLS config. It offers the tunnel
-// ALPN so the control port routes the connection to the agent handler.
+// ALPN so the control port routes the connection to the agent handler, and
+// fails closed unless a non-empty certificate fingerprint pin matches.
 func ClientConfig(serverName, pin string) *tls.Config {
 	return clientConfig(serverName, pin, proto.ALPN)
 }
 
-// WebClientConfig is the plain HTTPS config used for discovery and for
-// calling another node's REST API. It must not offer the tunnel ALPN.
+// WebClientConfig is the plain HTTPS config used for calling another node's
+// REST API with a pinned certificate fingerprint. It fails closed when pin is
+// empty and never offers the tunnel ALPN.
 func WebClientConfig(serverName, pin string) *tls.Config {
 	return clientConfig(serverName, pin, "http/1.1")
+}
+
+// DiscoveryWebClientConfig is an explicit, discovery-only HTTPS config used
+// strictly for one-time TOFU fingerprint inspection (e.g. `nfrc join` or
+// federation node onboarding via /.well-known/nfr) before pinning a server.
+func DiscoveryWebClientConfig(serverName string) *tls.Config {
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		NextProtos:         []string{"http/1.1"},
+		InsecureSkipVerify: true,
+		ServerName:         serverName,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return errors.New("server presented no certificate")
+			}
+			_, err := x509.ParseCertificate(rawCerts[0])
+			return err
+		},
+	}
 }
 
 func clientConfig(serverName, pin, alpn string) *tls.Config {
@@ -200,7 +221,7 @@ func clientConfig(serverName, pin, alpn string) *tls.Config {
 				return err
 			}
 			if pin == "" {
-				return nil
+				return errors.New("server certificate pin is required (configure pin or enable ca = true)")
 			}
 			if got := CertFingerprint(cert); got != pin {
 				return fmt.Errorf("certificate fingerprint mismatch: got %s want %s", got, pin)

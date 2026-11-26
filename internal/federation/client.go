@@ -209,7 +209,7 @@ func (c *Client) Probe(ctx context.Context) (api.Info, error) {
 // certificates, or "ca" with an empty pin when the instance uses ACME.
 func VerifyMode(ctx context.Context, baseURL string) (string, string, error) {
 	baseURL = NormalizeBaseURL(baseURL)
-	tr := &http.Transport{TLSClientConfig: transport.WebClientConfig(hostOf(baseURL), "")}
+	tr := &http.Transport{TLSClientConfig: transport.DiscoveryWebClientConfig(hostOf(baseURL))}
 	client := &http.Client{Timeout: 10 * time.Second, Transport: tr}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/.well-known/nfr", nil)
 	if err != nil {
@@ -246,7 +246,7 @@ func PinFor(ctx context.Context, baseURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	tr := &http.Transport{TLSClientConfig: transport.WebClientConfig("", "")}
+	tr := &http.Transport{TLSClientConfig: transport.DiscoveryWebClientConfig("")}
 	client := &http.Client{Timeout: 10 * time.Second, Transport: tr}
 	resp, err := client.Do(req)
 	if err != nil {

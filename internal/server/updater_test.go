@@ -250,3 +250,128 @@ func TestAgentLogsTailUpdateHintWhenOutdated(t *testing.T) {
 		t.Fatalf("expected update hint at tail of startup logs, got:\n%s", content)
 	}
 }
+
+func TestUpdaterDisableSelfUpdateEnv(t *testing.T) {
+	t.Setenv("NFR_DISABLE_SELF_UPDATE", "1")
+	t.Setenv("NFR_DISABLE_UPDATE_CHECK", "1")
+	t.Setenv("NFR_UPDATE_CURRENT_VERSION", "v0.13.0-preview.5")
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultServer()
+	cfg.ControlListen = "127.0.0.1:0"
+	cfg.HTTPListen = "off"
+	cfg.HTTPSListen = "off"
+	cfg.DataDir = t.TempDir()
+	srv, _, err := New(Options{Config: cfg, Store: st, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status := srv.UpdateStatus()
+	if status.CanSelfUpdate {
+		t.Fatalf("expected CanSelfUpdate=false when NFR_DISABLE_SELF_UPDATE=1")
+	}
+	if !strings.Contains(status.CannotUpdateReason, "NFR_DISABLE_SELF_UPDATE") {
+		t.Fatalf("unexpected CannotUpdateReason: %q", status.CannotUpdateReason)
+	}
+	if _, err := srv.StartSelfUpgrade("github", "", "v0.13.0-preview.6"); err == nil {
+		t.Fatalf("expected StartSelfUpgrade to fail when NFR_DISABLE_SELF_UPDATE=1")
+	}
+}
+
+func TestUpdaterMirrorPrefersOfficialSHA256(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script smoke test runs on Unix")
+	}
+
+	targetVer := "v9.9.9-preview.2"
+	archiveName, err := releaseArchiveName(targetVer, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	realArchive := buildTestTarGz(t, map[string][]byte{
+		"nfr/nfrs": []byte("#!/bin/sh\necho 'real-nfrs v9.9.9-preview.2'\n"),
+	})
+	tamperedArchive := buildTestTarGz(t, map[string][]byte{
+		"nfr/nfrs": []byte("#!/bin/sh\necho 'tampered-nfrs'\n"),
+	})
+	realSum := sha256.Sum256(realArchive)
+	tamperedSum := sha256.Sum256(tamperedArchive)
+	realSumsTxt := hex.EncodeToString(realSum[:]) + "  " + archiveName + "\n"
+	tamperedSumsTxt := hex.EncodeToString(tamperedSum[:]) + "  " + archiveName + "\n"
+
+	// Mirror serves tampered archive + matching tampered SHA256SUMS.
+	mirrorSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch filepath.Base(r.URL.Path) {
+		case "SHA256SUMS":
+			_, _ = w.Write([]byte(tamperedSumsTxt))
+		case archiveName:
+			_, _ = w.Write(tamperedArchive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mirrorSrv.Close()
+
+	// Official GitHub serves the real SHA256SUMS.
+	officialFail := false
+	officialSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if officialFail {
+			http.Error(w, "upstream unreachable", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(realSumsTxt))
+	}))
+	defer officialSrv.Close()
+
+	t.Setenv("NFR_UPDATE_CURRENT_VERSION", "v0.13.0-preview.5")
+	t.Setenv("NFR_UPDATE_DOWNLOAD_BASE", mirrorSrv.URL)
+	t.Setenv("NFR_UPDATE_OFFICIAL_SUMS_URL", officialSrv.URL+"/SHA256SUMS")
+	t.Setenv("NFR_MIRROR_PREFIXES", mirrorSrv.URL+"/")
+	t.Setenv("NFR_DISABLE_UPDATE_CHECK", "1")
+	t.Setenv("NFR_ALLOW_SELF_UPDATE_IN_CONTAINER", "1")
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultServer()
+	cfg.ControlListen = "127.0.0.1:0"
+	cfg.HTTPListen = "off"
+	cfg.HTTPSListen = "off"
+	cfg.DataDir = t.TempDir()
+	srv, _, err := New(Options{Config: cfg, Store: st, Logger: log.New("error", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	fakeExe := filepath.Join(binDir, "nfrs")
+	if err := os.WriteFile(fakeExe, []byte("#!/bin/sh\necho old-nfrs\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Official SHA256SUMS reachable -> tampered mirror archive MUST be rejected!
+	srv.updater.runUpgrade(fakeExe, targetVer, "mirror", mirrorSrv.URL+"/")
+	if p := srv.UpgradeProgress(); p.State != "error" || !strings.Contains(p.Message, "SHA-256") {
+		t.Fatalf("expected official SHA-256 mismatch error, got %+v", p)
+	}
+	if got, _ := os.ReadFile(fakeExe); !strings.Contains(string(got), "old-nfrs") {
+		t.Fatalf("binary modified despite official checksum mismatch: %s", got)
+	}
+
+	// 2. Official SHA256SUMS unreachable -> falls back cleanly to mirror SHA256SUMS.
+	officialFail = true
+	restarted := make(chan string, 1)
+	srv.updater.restartHook = func(p string) { restarted <- p }
+	srv.updater.runUpgrade(fakeExe, targetVer, "mirror", mirrorSrv.URL+"/")
+	select {
+	case <-restarted:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("mirror fallback upgrade did not complete: %+v", srv.UpgradeProgress())
+	}
+}

@@ -153,6 +153,9 @@ func (a *Agent) session(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bad server address %q: %w", a.opt.Addr, err)
 	}
+	if !a.opt.CA && strings.TrimSpace(a.opt.Pin) == "" {
+		return fmt.Errorf("%w: 未配置服务端证书指纹 pin 且未启用 ca = true，拒绝建立未验证的 TLS 连接", errRejected)
+	}
 	a.lg.Info(fmt.Sprintf("连接节点\n地址: %s", a.opt.Addr))
 	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 	raw, err := dialer.DialContext(ctx, "tcp", a.opt.Addr)
@@ -173,9 +176,7 @@ func (a *Agent) session(ctx context.Context) error {
 	}
 	if !a.opt.CA {
 		pin := transport.PinOf(tc.ConnectionState())
-		if a.opt.Pin == "" {
-			a.lg.Debug(fmt.Sprintf("首次信任证书指纹: %s", transport.FormatPin(pin)))
-		} else if transport.FormatPin(pin) != transport.FormatPin(a.opt.Pin) {
+		if transport.FormatPin(pin) != transport.FormatPin(a.opt.Pin) {
 			raw.Close()
 			return errors.New("服务端证书指纹已变更，拒绝连接")
 		}

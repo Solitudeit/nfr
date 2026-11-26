@@ -193,6 +193,9 @@ func (u *updater) maybeBackgroundCheck(ctx context.Context) {
 }
 
 func (u *updater) canSelfUpdate() (bool, string, string) {
+	if os.Getenv("NFR_DISABLE_SELF_UPDATE") == "1" {
+		return false, "服务端已通过 NFR_DISABLE_SELF_UPDATE 禁用一键自升级", ""
+	}
 	if os.Getenv("NFR_ALLOW_SELF_UPDATE_IN_CONTAINER") != "1" {
 		if _, err := os.Stat("/.dockerenv"); err == nil {
 			return false, "当前运行在 Docker 容器中，请通过拉取新镜像更新", ""
@@ -767,7 +770,11 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// 1. Download SHA256SUMS
+	// 1. Download SHA256SUMS.
+	// When downloading the binary from a third-party acceleration mirror, try
+	// fetching SHA256SUMS from the official GitHub source first so a mirror
+	// cannot forge both the archive and its checksum; fall back to the mirror's
+	// SHA256SUMS only if the official endpoint is unreachable from this host.
 	u.setProgress(api.UpgradeProgress{
 		State:         "downloading",
 		Percent:       12,
@@ -775,10 +782,28 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 		Source:        source,
 		Message:       "正在获取校验清单 SHA256SUMS…",
 	})
-	expectedHash, err := downloadExpectedSHA256(ctx, sumsURL, archiveName)
-	if err != nil {
-		fail("获取 SHA256SUMS 校验清单失败", err)
-		return
+	var expectedHash string
+	officialSumsURL := strings.TrimSpace(os.Getenv("NFR_UPDATE_OFFICIAL_SUMS_URL"))
+	if officialSumsURL == "" {
+		officialSumsURL = rawSumsURL
+	}
+	if source == "mirror" && officialSumsURL != sumsURL {
+		officialCtx, officialCancel := context.WithTimeout(ctx, 8*time.Second)
+		h, oerr := downloadExpectedSHA256(officialCtx, officialSumsURL, archiveName)
+		officialCancel()
+		if oerr == nil {
+			expectedHash = h
+			u.srv.lg.Info("verified SHA256SUMS from official source for mirror upgrade", "target", ver)
+		} else {
+			u.srv.lg.Warn("official SHA256SUMS unreachable, falling back to mirror", "target", ver, "err", oerr)
+		}
+	}
+	if expectedHash == "" {
+		expectedHash, err = downloadExpectedSHA256(ctx, sumsURL, archiveName)
+		if err != nil {
+			fail("获取 SHA256SUMS 校验清单失败", err)
+			return
+		}
 	}
 
 	// 2. Download archive with progress reporting

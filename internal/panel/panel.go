@@ -7,7 +7,6 @@ package panel
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -26,7 +25,6 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/auth"
 	"github.com/solitudeit/nfr/internal/server"
 	"github.com/solitudeit/nfr/internal/store"
@@ -59,7 +57,6 @@ type failState struct {
 type Panel struct {
 	srv    *server.Server
 	lg     *slog.Logger
-	geo    locator
 	distFS fs.FS
 	apiMux *http.ServeMux
 
@@ -84,7 +81,6 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 	p := &Panel{
 		srv:      srv,
 		lg:       lg,
-		geo:      newGeoResolver(),
 		distFS:   sub,
 		sessions: map[string]*session{},
 		fails:    map[string]*failState{},
@@ -475,20 +471,6 @@ func (p *Panel) failed(ip string) {
 	}
 	f.count++
 	f.until = now.Add(lockFor)
-}
-
-func (p *Panel) labelNodes(parent context.Context, nodes []api.Node) {
-	if len(nodes) == 0 || p.geo == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(parent, geoBudget)
-	defer cancel()
-	for i := range nodes {
-		if nodes[i].RemoteAddr == "" {
-			continue
-		}
-		nodes[i].Region = p.geo.locate(ctx, geoQuery{Host: nodes[i].RemoteAddr}).Country
-	}
 }
 
 // ---------------------------------------------------------------------------
