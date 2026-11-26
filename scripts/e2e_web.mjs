@@ -377,9 +377,23 @@ async function main() {
     await editDrawer.locator('button:has-text("保存修改")').click()
     await page.waitForSelector('.n-drawer', { state: 'detached', timeout: 5000 })
 
+    let configFetchCount = 0
+    const countConfigReq = (req) => {
+      if (req.url().includes('/config')) configFetchCount += 1
+    }
+    page.on('request', countConfigReq)
+
     await page.click('.tunnel-card button:has-text("更多")')
     await page.click('.n-dropdown-option:has-text("生成启动配置")')
     await page.waitForSelector('.cfg-code', { timeout: 10000 })
+    // Hold modal open across a full 4s background dashboard poll cycle to ensure zero flicker / re-fetching
+    await page.waitForTimeout(4500)
+    page.off('request', countConfigReq)
+    check(
+      'config modal does not flicker or re-fetch during 4s dashboard polling',
+      configFetchCount === 1,
+      `fetches=${configFetchCount}`,
+    )
     const editedTitle = await page.locator('.n-modal .n-card-header__main').innerText()
     const editedToml = await page.locator('.cfg-code').innerText()
     check(

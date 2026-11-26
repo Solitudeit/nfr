@@ -68,11 +68,13 @@ function joinLocalAddr(hostRaw: string, port: number): string {
   return host.includes(':') ? `[${host}]:${port}` : `${host}:${port}`
 }
 
+const drawerSessionKey = computed(() => (props.show && props.tunnel?.id ? props.tunnel.id : ''))
+
 watch(
-  () => [props.show, props.tunnel?.id] as const,
-  ([open]) => {
+  drawerSessionKey,
+  (id) => {
     const t = props.tunnel
-    if (!open || !t) return
+    if (!id || !t) return
     form.name = t.name
     form.type = t.type
     const parsed = splitLocalAddr(t.local)

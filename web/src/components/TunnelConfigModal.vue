@@ -64,44 +64,53 @@ const activeFilename = computed(() => {
 
 const runCommand = computed(() => `nfrc -c ${activeFilename.value}`)
 
-watch(
-  () => [
-    props.show,
-    liveTunnel.value?.id,
-    liveTunnel.value?.updated_at,
-    liveTunnel.value?.name,
-    liveTunnel.value?.local,
-    liveTunnel.value?.remote_port,
-  ] as const,
-  async ([open, id]) => {
-    if (!open || !id) {
-      fetchSeq++
-      loading.value = false
-      errMsg.value = ''
-      data.value = null
-      return
-    }
-    const seq = ++fetchSeq
-    loading.value = true
+const configWatchKey = computed(() => {
+  if (!props.show || !liveTunnel.value?.id) return ''
+  const t = liveTunnel.value
+  return [
+    t.id,
+    t.updated_at || '',
+    t.name,
+    t.type,
+    t.local,
+    t.remote_port || 0,
+    (t.hosts || []).join(','),
+    t.bandwidth_kb || 0,
+    t.quota_mb || 0,
+  ].join('|')
+})
+
+watch(configWatchKey, async (key) => {
+  if (!key || !liveTunnel.value?.id) {
+    fetchSeq++
+    loading.value = false
     errMsg.value = ''
     data.value = null
-    try {
-      const res = await apiRequest<TunnelConfigResponse>(
-        `/tunnels/${encodeURIComponent(String(id))}/config?_t=${Date.now()}`
-      )
-      if (seq !== fetchSeq) return
-      data.value = res
-      configRev.value += 1
-    } catch (err) {
-      if (seq !== fetchSeq) return
-      errMsg.value = err instanceof Error ? err.message : '生成配置失败'
-    } finally {
-      if (seq === fetchSeq) {
-        loading.value = false
-      }
+    return
+  }
+  const id = liveTunnel.value.id
+  const seq = ++fetchSeq
+  const hadData = Boolean(data.value && data.value.tunnel_id === id)
+  if (!hadData) {
+    loading.value = true
+  }
+  errMsg.value = ''
+  try {
+    const res = await apiRequest<TunnelConfigResponse>(
+      `/tunnels/${encodeURIComponent(String(id))}/config?_t=${Date.now()}`
+    )
+    if (seq !== fetchSeq) return
+    data.value = res
+    configRev.value += 1
+  } catch (err) {
+    if (seq !== fetchSeq) return
+    errMsg.value = err instanceof Error ? err.message : '生成配置失败'
+  } finally {
+    if (seq === fetchSeq) {
+      loading.value = false
     }
   }
-)
+})
 
 async function handleCopyConfig() {
   if (!activeText.value) return
