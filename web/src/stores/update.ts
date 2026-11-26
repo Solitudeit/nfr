@@ -5,6 +5,41 @@ import type { UpdateMirrorProbe, UpdateStatus, UpgradeProgress } from '@/types/a
 
 const DISMISSED_VER_KEY = 'nfr_dismissed_update_version'
 const UPDATE_SOURCE_KEY = 'nfr_update_source'
+const UPGRADED_NOTICE_KEY = 'nfr_upgraded_to_version'
+
+function saveUpgradedNotice(ver: string) {
+  try {
+    window.sessionStorage.setItem(UPGRADED_NOTICE_KEY, ver)
+  } catch {
+    try {
+      window.localStorage.setItem(UPGRADED_NOTICE_KEY, ver)
+    } catch {
+      // Ignore storage errors
+    }
+  }
+}
+
+function consumeUpgradedNotice(): string {
+  try {
+    const val = window.sessionStorage.getItem(UPGRADED_NOTICE_KEY)
+    if (val) {
+      window.sessionStorage.removeItem(UPGRADED_NOTICE_KEY)
+      return val
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  try {
+    const val = window.localStorage.getItem(UPGRADED_NOTICE_KEY)
+    if (val) {
+      window.localStorage.removeItem(UPGRADED_NOTICE_KEY)
+      return val
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return ''
+}
 
 function readSavedSource(): 'github' | 'mirror' {
   try {
@@ -229,13 +264,15 @@ export const useUpdateStore = defineStore('update', () => {
             skipAuthRedirect: true,
           })
           if (me.version === targetVersion || Date.now() - restartStartedAt > 12000) {
+            const finalVer = me.version || targetVersion
             upgrading.value = false
             upgradeProgress.value = {
               state: 'done',
               percent: 100,
-              target_version: targetVersion,
-              message: `升级完成（${me.version || targetVersion}），正在刷新页面…`,
+              target_version: finalVer,
+              message: `升级完成（${finalVer}），正在刷新页面…`,
             }
+            saveUpgradedNotice(finalVer)
             window.setTimeout(() => window.location.reload(), 600)
             return
           }
@@ -308,5 +345,6 @@ export const useUpdateStore = defineStore('update', () => {
     dismissModal,
     startUpgrade,
     resetUpgradeError,
+    consumeUpgradedNotice,
   }
 })

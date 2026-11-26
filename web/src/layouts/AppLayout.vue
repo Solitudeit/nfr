@@ -47,6 +47,10 @@ onMounted(() => {
   window.addEventListener('resize', onResize, { passive: true })
   dashStore.startRealtime()
   void updateStore.fetchStatus(true)
+  const upgradedVer = updateStore.consumeUpgradedNotice()
+  if (upgradedVer) {
+    message.success(`更新完毕，当前版本 ${upgradedVer}`, { duration: 4000 })
+  }
 })
 
 onBeforeUnmount(() => {

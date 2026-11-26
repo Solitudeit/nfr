@@ -453,6 +453,13 @@ async function main() {
     await page.waitForSelector('.update-modal', { state: 'detached', timeout: 5000 })
     check('update modal closes cleanly via 稍后提醒', true)
 
+    // Verify post-upgrade reload top toast ("更新完毕，当前版本 ...") fires once and clears
+    await page.evaluate(() => window.sessionStorage.setItem('nfr_upgraded_to_version', 'v9.9.9-preview.1'))
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.waitForSelector('text=更新完毕，当前版本 v9.9.9-preview.1', { timeout: 5000 })
+    const leftNotice = await page.evaluate(() => window.sessionStorage.getItem('nfr_upgraded_to_version'))
+    check('post-upgrade reload shows top toast and clears one-shot flag', leftNotice === null, String(leftNotice))
+
     // 6. Dark mode persistence + Force offline kick
     await page.setViewportSize({ width: 375, height: 812 })
     await page.goto(`${baseUrl}/nfr/tunnels`, { waitUntil: 'networkidle' })

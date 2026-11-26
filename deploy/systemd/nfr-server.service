@@ -25,6 +25,10 @@ StateDirectory=nfr
 StateDirectoryMode=0700
 ConfigurationDirectory=nfr
 ConfigurationDirectoryMode=0755
+# Allow in-place self-upgrade of nfrs/nfrc in /usr/local/bin while keeping the
+# rest of the filesystem read-only under ProtectSystem=strict. The leading "-"
+# tells systemd to ignore the path if it does not exist yet.
+ReadWritePaths=-/usr/local/bin
 # If you move data_dir in server.toml / server.yaml, add it here:
 # ReadWritePaths=/srv/nfr
 # Uncomment to run as an unprivileged user:
