@@ -12,7 +12,7 @@ import (
 
 const (
 	defaultGitHubRepoURL = "https://github.com/Solitudeit/nfr"
-	defaultReleaseTag    = "v0.13.0-preview.7"
+	defaultReleaseTag    = "v0.13.0-preview.8"
 )
 
 // defaultGitHubDownloadBase resolves the GitHub Releases download base URL.

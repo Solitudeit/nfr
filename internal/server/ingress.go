@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/solitudeit/nfr/internal/metrics"
@@ -218,20 +219,32 @@ func (s *Server) handleTCP(c net.Conn, port int) {
 	proxyCount(c, stream, ctr)
 }
 
-// proxyCount copies both directions and records traffic.
+type countingWriter struct {
+	w   io.Writer
+	ctr *atomic.Int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	if n > 0 {
+		cw.ctr.Add(int64(n))
+	}
+	return n, err
+}
+
+// proxyCount copies both directions and records traffic continuously per chunk
+// so live dashboard rates and quotas update during long-lived / large transfers.
 func proxyCount(a, b net.Conn, ctr *metrics.Counter) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(b, a)
-		ctr.In.Add(n)
+		_, _ = io.Copy(&countingWriter{w: b, ctr: &ctr.In}, a)
 		halfClose(b)
 	}()
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(a, b)
-		ctr.Out.Add(n)
+		_, _ = io.Copy(&countingWriter{w: a, ctr: &ctr.Out}, b)
 		halfClose(a)
 	}()
 	wg.Wait()

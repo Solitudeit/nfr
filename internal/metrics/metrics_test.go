@@ -52,8 +52,8 @@ func TestRecentRatesClampsNegativeDelta(t *testing.T) {
 	r.AddBytes("t1", 500, 300)
 	r.Sample()
 	// Simulate counter reset below last sampled total.
-	r.total.In.Store(100)
-	r.total.Out.Store(50)
+	r.For("t1").In.Store(100)
+	r.For("t1").Out.Store(50)
 	r.Sample()
 
 	got := r.RecentRates()
@@ -62,5 +62,28 @@ func TestRecentRatesClampsNegativeDelta(t *testing.T) {
 	}
 	if got[1].InRate != 0 || got[1].OutRate != 0 {
 		t.Fatalf("negative delta not clamped: %+v", got[1])
+	}
+}
+
+func TestRecentRatesTracksDirectCounterIncrements(t *testing.T) {
+	r := New()
+	c1 := r.For("tcp-1")
+	c2 := r.For("http-1")
+	c1.In.Add(4096)
+	c1.Out.Add(8192)
+	c2.In.Add(1024)
+	c2.Out.Add(2048)
+	r.Sample()
+
+	got := r.RecentRates()
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].InRate != 5120 || got[0].OutRate != 10240 {
+		t.Fatalf("RecentRates[0] = (%v, %v), want (5120, 10240)", got[0].InRate, got[0].OutRate)
+	}
+	tot := r.Totals()
+	if tot.In != 5120 || tot.Out != 10240 {
+		t.Fatalf("Totals = (%d, %d), want (5120, 10240)", tot.In, tot.Out)
 	}
 }

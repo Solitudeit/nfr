@@ -68,16 +68,15 @@ type hist struct {
 
 // Registry owns every counter.
 type Registry struct {
-	mu           sync.Mutex
-	m            map[string]*Counter
-	hist         map[string]*hist
-	total        Counter
-	start        time.Time
-	rateRing     [rateWindow]RatePoint
-	rateIdx      int
-	rateCount    int
-	lastTotalIn  int64
-	lastTotalOut int64
+	mu         sync.Mutex
+	m          map[string]*Counter
+	hist       map[string]*hist
+	droppedIn  int64
+	droppedOut int64
+	start      time.Time
+	rateRing   [rateWindow]RatePoint
+	rateIdx    int
+	rateCount  int
 }
 
 // New returns an empty registry.
@@ -106,6 +105,10 @@ func (r *Registry) For(tunnelID string) *Counter {
 func (r *Registry) Drop(tunnelID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if c, ok := r.m[tunnelID]; ok {
+		r.droppedIn += c.In.Load()
+		r.droppedOut += c.Out.Load()
+	}
 	delete(r.m, tunnelID)
 	delete(r.hist, tunnelID)
 }
@@ -115,11 +118,9 @@ func (r *Registry) AddBytes(tunnelID string, in, out int64) {
 	c := r.For(tunnelID)
 	if in != 0 {
 		c.In.Add(in)
-		r.total.In.Add(in)
 	}
 	if out != 0 {
 		c.Out.Add(out)
-		r.total.Out.Add(out)
 	}
 }
 
@@ -128,26 +129,7 @@ func (r *Registry) Sample() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	nowTS := time.Now().Unix()
-	totIn := r.total.In.Load()
-	totOut := r.total.Out.Load()
-	din := totIn - r.lastTotalIn
-	dout := totOut - r.lastTotalOut
-	r.lastTotalIn, r.lastTotalOut = totIn, totOut
-	if din < 0 {
-		din = 0
-	}
-	if dout < 0 {
-		dout = 0
-	}
-	r.rateRing[r.rateIdx] = RatePoint{
-		TS:      nowTS,
-		InRate:  float64(din),
-		OutRate: float64(dout),
-	}
-	r.rateIdx = (r.rateIdx + 1) % rateWindow
-	if r.rateCount < rateWindow {
-		r.rateCount++
-	}
+	var totalInRate, totalOutRate float64
 	for id, c := range r.m {
 		h := r.hist[id]
 		if h == nil {
@@ -165,6 +147,8 @@ func (r *Registry) Sample() {
 		if do < 0 {
 			do = 0
 		}
+		totalInRate += di
+		totalOutRate += do
 		h.sec[h.secI] = Point{In: di, Out: do}
 		h.secI = (h.secI + 1) % secWindow
 		h.accIn += di
@@ -175,6 +159,15 @@ func (r *Registry) Sample() {
 			h.minI = (h.minI + 1) % minWindow
 			h.accIn, h.accOut = 0, 0
 		}
+	}
+	r.rateRing[r.rateIdx] = RatePoint{
+		TS:      nowTS,
+		InRate:  totalInRate,
+		OutRate: totalOutRate,
+	}
+	r.rateIdx = (r.rateIdx + 1) % rateWindow
+	if r.rateCount < rateWindow {
+		r.rateCount++
 	}
 }
 
@@ -236,7 +229,12 @@ func (r *Registry) Snapshot() []Snapshot {
 func (r *Registry) Totals() Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return Snapshot{In: r.total.In.Load(), Out: r.total.Out.Load()}
+	in, out := r.droppedIn, r.droppedOut
+	for _, c := range r.m {
+		in += c.In.Load()
+		out += c.Out.Load()
+	}
+	return Snapshot{In: in, Out: out}
 }
 
 // RecentRates returns the collected global per-second rate points (at most 60)
