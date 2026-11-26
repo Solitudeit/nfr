@@ -357,7 +357,7 @@ func TestUpdaterMirrorPrefersOfficialSHA256(t *testing.T) {
 
 	// 1. Official SHA256SUMS reachable -> tampered mirror archive MUST be rejected!
 	srv.updater.runUpgrade(fakeExe, targetVer, "mirror", mirrorSrv.URL+"/")
-	if p := srv.UpgradeProgress(); p.State != "error" || !strings.Contains(p.Message, "SHA-256") {
+	if p := srv.UpgradeProgress(); p.State != "error" || !strings.Contains(p.Message, "SHA-256") || p.ChecksumSource != "official" {
 		t.Fatalf("expected official SHA-256 mismatch error, got %+v", p)
 	}
 	if got, _ := os.ReadFile(fakeExe); !strings.Contains(string(got), "old-nfrs") {
@@ -373,5 +373,8 @@ func TestUpdaterMirrorPrefersOfficialSHA256(t *testing.T) {
 	case <-restarted:
 	case <-time.After(3 * time.Second):
 		t.Fatalf("mirror fallback upgrade did not complete: %+v", srv.UpgradeProgress())
+	}
+	if p := srv.UpgradeProgress(); p.ChecksumSource != "mirror" {
+		t.Fatalf("expected ChecksumSource=mirror on fallback, got %+v", p)
 	}
 }

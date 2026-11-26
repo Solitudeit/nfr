@@ -109,6 +109,9 @@ nfrc -c client.toml
 server_addr = "203.0.113.10:8443"
 auth_token  = "my-shared-token"
 name        = "nas-home"
+# 必填（与 ca = true 二选一）：从面板复制或由 `nfrc join` 自动写入的服务端证书指纹
+pin         = "change-me-to-server-cert-sha256-pin"
+# 若服务端使用 ACME / 公共 CA 证书，请删除 pin 并改为：ca = true
 
 # 可选：直接声明隧道；也可以不写，连上后在 Web 面板里可视化创建与管理
 [[proxies]]
@@ -130,6 +133,8 @@ hosts = ["blog.example.com"]
 server_addr: "203.0.113.10:8443"
 auth_token: "my-shared-token"
 name: "nas-home"
+# 必填（与 ca: true 二选一）：服务端自签证书指纹（ACME / 公共 CA 请改设 ca: true）
+pin: "change-me-to-server-cert-sha256-pin"
 
 proxies:
   - name: ssh
@@ -156,8 +161,8 @@ proxies:
 NFR_PASSWORD='change-me-now' NFR_AUTH_TOKEN='my-shared-token' \
   docker compose -f deploy/docker/compose.yml up -d nfrs
 
-# 客户端（零文件环境变量启动）
-NFR_SERVER='203.0.113.10:8443' NFR_AUTH_TOKEN='my-shared-token' NFR_NAME='homelab' \
+# 客户端（零文件环境变量启动；自签证书需传 NFR_PIN，ACME / 公共 CA 传 NFR_CA=true）
+NFR_SERVER='203.0.113.10:8443' NFR_AUTH_TOKEN='my-shared-token' NFR_PIN='<server-sha256-pin>' NFR_NAME='homelab' \
   docker compose -f deploy/docker/compose.yml --profile client up -d nfrc
 ```
 

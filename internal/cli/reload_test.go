@@ -16,7 +16,7 @@ import (
 func TestRunAgentsWithReloadDoesNotDuplicateOnBadConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "client.toml")
-	valid := "server_addr = \"127.0.0.1:18443\"\nauth_token = \"tok-1\"\nname = \"n1\"\n"
+	valid := "server_addr = \"127.0.0.1:18443\"\nauth_token = \"tok-1\"\npin = \"0123456789abcdef\"\nname = \"n1\"\n"
 	if err := os.WriteFile(cfgPath, []byte(valid), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestRunAgentsWithReloadDoesNotDuplicateOnBadConfig(t *testing.T) {
 	}
 
 	// Fix config and send SIGHUP -> MUST reload cleanly once (starts=2, maxActive still 1).
-	valid2 := "server_addr = \"127.0.0.1:18444\"\nauth_token = \"tok-2\"\nname = \"n1\"\n"
+	valid2 := "server_addr = \"127.0.0.1:18444\"\nauth_token = \"tok-2\"\npin = \"0123456789abcdef\"\nname = \"n1\"\n"
 	if err := os.WriteFile(cfgPath, []byte(valid2), 0o600); err != nil {
 		t.Fatal(err)
 	}

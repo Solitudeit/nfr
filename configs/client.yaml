@@ -6,9 +6,11 @@ server_addr: "203.0.113.10:8443"
 auth_token: "change-me-to-a-strong-token"
 name: "my-node"
 
-# 可选：服务端自签证书指纹或公共 CA 校验
-# pin: ""
-# ca: false
+# 必填（与 ca: true 二选一）：服务端自签证书 SHA-256 指纹
+# 推荐直接从 Web 面板复制配置，或执行 `nfrc join <服务端地址> <接入码>` 自动写入真实指纹；
+# 若服务端使用公共 CA / ACME 证书，可删除 pin 并设置 ca: true
+pin: "change-me-to-server-cert-sha256-pin"
+# ca: true
 
 log_level: "info"
 

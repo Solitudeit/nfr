@@ -704,6 +704,7 @@ func (u *updater) startUpgrade(source, mirrorPrefix, targetVersion string) (api.
 }
 
 func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
+	var checksumSource string
 	fail := func(msg string, err error) {
 		detail := msg
 		if err != nil {
@@ -711,12 +712,13 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 		}
 		u.srv.lg.Warn("self-upgrade failed", "target", ver, "err", detail)
 		u.setProgress(api.UpgradeProgress{
-			State:         "error",
-			Percent:       0,
-			TargetVersion: ver,
-			Source:        source,
-			Message:       detail,
-			Error:         detail,
+			State:          "error",
+			Percent:        0,
+			TargetVersion:  ver,
+			Source:         source,
+			ChecksumSource: checksumSource,
+			Message:        detail,
+			Error:          detail,
 		})
 	}
 
@@ -793,6 +795,7 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 		officialCancel()
 		if oerr == nil {
 			expectedHash = h
+			checksumSource = "official"
 			u.srv.lg.Info("verified SHA256SUMS from official source for mirror upgrade", "target", ver)
 		} else {
 			u.srv.lg.Warn("official SHA256SUMS unreachable, falling back to mirror", "target", ver, "err", oerr)
@@ -804,6 +807,11 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 			fail("获取 SHA256SUMS 校验清单失败", err)
 			return
 		}
+		if source == "mirror" {
+			checksumSource = "mirror"
+		} else {
+			checksumSource = "official"
+		}
 	}
 
 	// 2. Download archive with progress reporting
@@ -812,11 +820,12 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 		// Map download 0..100% into overall 15..70%
 		overall := 15 + (pct*55)/100
 		u.setProgress(api.UpgradeProgress{
-			State:         "downloading",
-			Percent:       overall,
-			TargetVersion: ver,
-			Source:        source,
-			Message:       fmt.Sprintf("正在下载 %s (%d%%)…", archiveName, pct),
+			State:          "downloading",
+			Percent:        overall,
+			TargetVersion:  ver,
+			Source:         source,
+			ChecksumSource: checksumSource,
+			Message:        fmt.Sprintf("正在下载 %s (%d%%)…", archiveName, pct),
 		})
 	}); err != nil {
 		fail("下载更新包失败", err)
@@ -824,12 +833,17 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 	}
 
 	// 3. Verify SHA-256
+	verifyMsg := "正在校验安装包完整性（GitHub 官方 SHA256SUMS）…"
+	if checksumSource == "mirror" {
+		verifyMsg = "正在校验安装包完整性（官方不可达，已回退镜像 SHA256SUMS）…"
+	}
 	u.setProgress(api.UpgradeProgress{
-		State:         "verifying",
-		Percent:       75,
-		TargetVersion: ver,
-		Source:        source,
-		Message:       "正在校验安装包完整性 (SHA-256)…",
+		State:          "verifying",
+		Percent:        75,
+		TargetVersion:  ver,
+		Source:         source,
+		ChecksumSource: checksumSource,
+		Message:        verifyMsg,
 	})
 	actualHash, err := fileSHA256(archivePath)
 	if err != nil {
@@ -843,11 +857,12 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 
 	// 4. Extract binaries
 	u.setProgress(api.UpgradeProgress{
-		State:         "installing",
-		Percent:       82,
-		TargetVersion: ver,
-		Source:        source,
-		Message:       "正在解压并验证新版本程序…",
+		State:          "installing",
+		Percent:        82,
+		TargetVersion:  ver,
+		Source:         source,
+		ChecksumSource: checksumSource,
+		Message:        "正在解压并验证新版本程序…",
 	})
 	nfrsBinName := "nfrs"
 	nfrcBinName := "nfrc"
@@ -874,11 +889,12 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 
 	// 6. Backup current binary and atomically replace
 	u.setProgress(api.UpgradeProgress{
-		State:         "installing",
-		Percent:       92,
-		TargetVersion: ver,
-		Source:        source,
-		Message:       "正在原子替换服务端程序…",
+		State:          "installing",
+		Percent:        92,
+		TargetVersion:  ver,
+		Source:         source,
+		ChecksumSource: checksumSource,
+		Message:        "正在原子替换服务端程序…",
 	})
 	if err := atomicReplaceBinary(exePath, newNfrsPath); err != nil {
 		fail("替换 nfrs 二进制失败", err)
@@ -896,11 +912,12 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 
 	// 7. Signal restarting so frontend shows smooth reload state, then restart.
 	u.setProgress(api.UpgradeProgress{
-		State:         "restarting",
-		Percent:       100,
-		TargetVersion: ver,
-		Source:        source,
-		Message:       fmt.Sprintf("已更新至 %s，正在平滑重启服务…", ver),
+		State:          "restarting",
+		Percent:        100,
+		TargetVersion:  ver,
+		Source:         source,
+		ChecksumSource: checksumSource,
+		Message:        fmt.Sprintf("已更新至 %s，正在平滑重启服务…", ver),
 	})
 	u.srv.lg.Info("self-upgrade applied, restarting", "version", ver, "path", exePath)
 

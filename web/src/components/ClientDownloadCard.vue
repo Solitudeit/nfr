@@ -14,6 +14,7 @@ const props = defineProps<{
 
 const sources = ref<DownloadSource[]>([])
 const mirrors = ref<MirrorNode[]>([])
+const checksumURLs = ref<Record<string, string>>({})
 const items = ref<DownloadItem[]>([])
 const loading = ref(true)
 const selectedSource = ref('')
@@ -178,6 +179,18 @@ const downloadURL = computed(() => {
   return currentItem.value.urls[selectedSource.value] || ''
 })
 
+const officialChecksumURL = computed(() => checksumURLs.value.github || '')
+
+const mirrorChecksumURL = computed(() => {
+  const gh = checksumURLs.value.github || ''
+  const chosen = bestMirror.value?.node ?? mirrors.value[0]
+  if (chosen && gh) {
+    const prefix = chosen.prefix.endsWith('/') ? chosen.prefix : `${chosen.prefix}/`
+    return `${prefix}${gh}`
+  }
+  return checksumURLs.value.mirror || ''
+})
+
 watch(selectedSource, (val) => {
   if (val) saveSource(val)
   if (osOptions.value.length > 0 && !osOptions.value.some((o) => o.value === selectedOS.value)) {
@@ -203,6 +216,7 @@ onMounted(async () => {
     const res = await apiRequest<DownloadsPayload>('/downloads')
     sources.value = res.sources || []
     mirrors.value = res.mirrors || []
+    checksumURLs.value = res.checksum_urls || {}
     items.value = res.items || []
 
     const saved = readSavedSource()
@@ -294,6 +308,28 @@ onBeforeUnmount(() => {
     <div v-if="currentItem" class="dl-hint-row">
       <span class="dl-hint">
         压缩包内为 <code class="nfr-mono">{{ currentItem.binary_name }}</code>，解压后直接运行即可
+        <template v-if="officialChecksumURL">
+          ·
+          <a
+            :href="officialChecksumURL"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="dl-checksum-link nfr-mono"
+          >
+            官方 SHA256SUMS
+          </a>
+        </template>
+        <template v-if="selectedSource === 'mirror' && mirrorChecksumURL">
+          /
+          <a
+            :href="mirrorChecksumURL"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="dl-checksum-link nfr-mono"
+          >
+            镜像清单
+          </a>
+        </template>
       </span>
 
       <span v-if="selectedSource === 'mirror'" class="dl-mirror-status">
@@ -384,6 +420,15 @@ onBeforeUnmount(() => {
 .dl-hint {
   font-size: 12px;
   color: var(--nfr-text-secondary);
+}
+
+.dl-checksum-link {
+  color: var(--nfr-accent, #18a058);
+  text-decoration: none;
+}
+
+.dl-checksum-link:hover {
+  text-decoration: underline;
 }
 
 .dl-mirror-status {

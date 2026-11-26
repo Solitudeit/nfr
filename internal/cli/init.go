@@ -34,9 +34,11 @@ func cmdClientInit(args []string) {
 	srvAddr := fs.String("server", "203.0.113.10:8443", "server control address")
 	token := fs.String("token", "change-me-to-server-auth-token", "shared auth_token from server")
 	name := fs.String("name", defaultNodeName(), "node display name")
+	pin := fs.String("pin", "", "server certificate SHA-256 fingerprint")
+	ca := fs.Bool("ca", false, "verify server using system CA roots (ACME / public cert)")
 	_ = fs.Parse(args)
 
-	if err := writeClientTemplate(*cfgPath, *srvAddr, *token, *name, *force); err != nil {
+	if err := writeClientTemplate(*cfgPath, *srvAddr, *token, *name, *pin, *ca, *force); err != nil {
 		fatal("init: %v", err)
 	}
 	fmt.Printf("  已生成客户端配置: %s\n  校验配置: %s verify -c %s\n  启动连接: %s -c %s\n",
@@ -109,7 +111,7 @@ log_level      = "info"
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
-func writeClientTemplate(path, serverAddr, token, name string, force bool) error {
+func writeClientTemplate(path, serverAddr, token, name, pin string, ca, force bool) error {
 	if !force {
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("%s already exists (use --force to overwrite)", path)
@@ -119,16 +121,23 @@ func writeClientTemplate(path, serverAddr, token, name string, force bool) error
 	if addr == "" {
 		addr = "203.0.113.10:8443"
 	}
+	pin = strings.TrimSpace(pin)
+	if !ca && pin == "" {
+		pin = "change-me-to-server-cert-sha256-pin"
+	}
 	var body string
 	if config.IsYAMLPath(path) {
+		tlsLines := fmt.Sprintf("# 必填（与 ca: true 二选一）：服务端自签证书 SHA-256 指纹（推荐从面板复制或用 nfrc join 自动写入）\npin: %q\n# ca: true", pin)
+		if ca {
+			tlsLines = "# 公共 CA / ACME 证书校验\nca: true"
+		}
 		body = fmt.Sprintf(`# NFR 客户端配置文件（YAML 格式）
 # 启动命令：nfrc -c %s
 
 server_addr: %q
 auth_token: %q
 name: %q
-# pin: ""
-# ca: false
+%s
 log_level: "info"
 
 # 可选：直接声明隧道（不写也可在 Web 面板中可视化创建）
@@ -142,16 +151,19 @@ log_level: "info"
 #     local: "127.0.0.1:8080"
 #     hosts:
 #       - app.example.com
-`, filepath.Base(path), addr, token, name)
+`, filepath.Base(path), addr, token, name, tlsLines)
 	} else {
+		tlsLines := fmt.Sprintf("# 必填（与 ca = true 二选一）：服务端自签证书 SHA-256 指纹（推荐从面板复制或用 nfrc join 自动写入）\npin         = %q\n# ca          = true", pin)
+		if ca {
+			tlsLines = "# 公共 CA / ACME 证书校验\nca          = true"
+		}
 		body = fmt.Sprintf(`# NFR 客户端配置文件（TOML 格式）
 # 启动命令：nfrc -c %s
 
 server_addr = %q
 auth_token  = %q
 name        = %q
-# pin         = ""
-# ca          = false
+%s
 log_level   = "info"
 
 # 可选：直接声明隧道（不写也可在 Web 面板中可视化创建）
@@ -166,7 +178,7 @@ log_level   = "info"
 # type  = "http"
 # local = "127.0.0.1:8080"
 # hosts = ["app.example.com"]
-`, filepath.Base(path), addr, token, name)
+`, filepath.Base(path), addr, token, name, tlsLines)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err

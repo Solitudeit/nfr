@@ -33,4 +33,6 @@ jobs:
           go build -o bin/nfrs ./cmd/nfrs
           go build -o bin/nfrc ./cmd/nfrc
           python3 scripts/e2e.py
+          python3 scripts/e2e_udp.py
+          python3 scripts/e2e_quota.py
           python3 scripts/e2e_federation.py

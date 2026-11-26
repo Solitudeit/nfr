@@ -23,7 +23,6 @@ import tempfile
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,24 +82,32 @@ class Panel:
         )
         self.csrf = ""
 
-    def request(self, path, form=None, headers=None, method=None):
-        data = urllib.parse.urlencode(form).encode() if form is not None else None
-        req = urllib.request.Request(
-            self.base + path, data=data, headers=headers or {}, method=method
-        )
+    def json(self, path, method="GET", payload=None, headers=None):
+        hdrs = dict(headers or {})
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json")
+        if method in ("POST", "PATCH", "PUT", "DELETE") and self.csrf:
+            hdrs.setdefault("X-CSRF", self.csrf)
+        req = urllib.request.Request(self.base + path, data=data, headers=hdrs, method=method)
         try:
-            with self.opener.open(req, timeout=10) as resp:
-                return resp.status, resp.read().decode("utf-8", "replace")
+            with self.opener.open(req, timeout=15) as resp:
+                raw = resp.read().decode("utf-8", "replace")
+                return resp.status, (json.loads(raw) if raw.strip() else {})
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode("utf-8", "replace")
+            raw = e.read().decode("utf-8", "replace")
+            try:
+                parsed = json.loads(raw) if raw.strip() else {}
+            except ValueError:
+                parsed = {"_raw": raw}
+            return e.code, parsed
 
     def login(self, password):
-        self.request("/nfr/login")
-        status, html = self.request("/nfr/login", {"password": password})
-        _, page = self.request("/nfr/nodes")
-        m = re.search(r'name="csrf" value="([^"]+)"', page)
-        self.csrf = m.group(1) if m else ""
-        return status, html
+        st, data = self.json("/nfr/api/auth/login", method="POST", payload={"password": password})
+        if st == 200 and data.get("csrf"):
+            self.csrf = data["csrf"]
+        return st, data
 
 
 def main():
@@ -115,7 +122,7 @@ def main():
     missing = [p for p in (nfrs, nfrc) if not os.path.exists(p)]
     if missing:
         print("missing binary: " + ", ".join(missing) +
-              " (run: make build, or: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)")
+              " (run: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)")
         return 2
 
     tmp = tempfile.mkdtemp(prefix="nfr-e2e-udp-")
@@ -155,12 +162,15 @@ def main():
                 'https_listen = "off"\n'
                 'data_dir = "%s"\n'
                 'port_range = [20000, 29999]\n'
-                'log_level = "debug"\n' % (control, data_dir)
+                'log_level = "debug"\n'
+                '[panel]\n'
+                'https = true\n' % (control, data_dir)
             )
 
         server_log = open(os.path.join(tmp, "server.log"), "wb")
+        env = dict(os.environ, NFR_DISABLE_UPDATE_CHECK="1")
         server = subprocess.Popen(
-            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
+            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT, env=env
         )
         procs.append(server)
         if not wait_port(control):
@@ -178,12 +188,10 @@ def main():
         status, _ = panel.login(password)
         check("panel login", status == 200)
 
-        status, html = panel.request("/nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
-        m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
-        if not m:
-            check("join code issued", False, "status %d" % status)
+        status, jc = panel.json("/nfr/api/nodes/join-codes", method="POST", payload={"name": "testnode"})
+        code = jc.get("code", "")
+        if not check("join code issued", status in (200, 201) and bool(code), "status %d %s" % (status, jc)):
             return 1
-        code = m.group(1)
 
         agent_cfg = os.path.join(tmp, "agent.toml")
         p = subprocess.run(
@@ -201,9 +209,8 @@ def main():
         node = None
         end = time.time() + 20
         while time.time() < end:
-            _, body = panel.request("/nfr/api/state")
-            state = json.loads(body)
-            online = [n for n in state["nodes"] if n.get("online")]
+            _, state = panel.json("/nfr/api/dashboard")
+            online = [n for n in state.get("nodes", []) if n.get("online")]
             if online:
                 node = online[0]
                 break
@@ -233,23 +240,27 @@ def main():
         threading.Thread(target=echo_loop, daemon=True).start()
 
         # A UDP lease must come from the UDP space.
-        status, body = panel.request(
-            "/nfr/api/allocate", {"tunnel_id": "", "type": "udp"}, {"X-CSRF": panel.csrf}
+        status, alloc = panel.json(
+            "/nfr/api/ports/allocate",
+            method="POST",
+            payload={"tunnel_id": "", "type": "udp"},
         )
-        alloc = json.loads(body)
-        check("udp port allocated", bool(alloc.get("port")), str(alloc))
+        check("udp port allocated", status == 200 and bool(alloc.get("port")), str(alloc))
 
-        status, html = panel.request(
-            "/nfr/tunnels/save",
-            {
-                "csrf": panel.csrf, "server": "local", "name": "dns",
-                "node_id": node["id"], "type": "udp",
+        status, res = panel.json(
+            "/nfr/api/tunnels",
+            method="POST",
+            payload={
+                "name": "dns",
+                "node_id": node["id"],
+                "type": "udp",
                 "local": "127.0.0.1:%d" % echo_port,
-                "remote_port": str(alloc.get("port", "")),
-                "lease_id": alloc.get("lease_id", ""), "enabled": "1",
+                "remote_port": alloc.get("port", 0),
+                "lease_id": alloc.get("lease_id", ""),
+                "enabled": True,
             },
         )
-        check("create udp tunnel", "隧道已保存" in html, "status %d" % status)
+        check("create udp tunnel", status in (200, 201), "status %d %s" % (status, res))
 
         pub = alloc.get("port")
 
@@ -282,7 +293,7 @@ def main():
         check("udp session reused", ok)
 
         # A different visitor address gets its own session.
-        ok = visit(b"other-visitor", src_port=free_udp_port() + 1) == b"other-visitor"
+        ok = visit(b"other-visitor", src_port=free_udp_port()) == b"other-visitor"
         check("second visitor session works", ok)
 
         # A large-ish payload (still a single datagram).
@@ -291,15 +302,16 @@ def main():
         check("large datagram round trips", ok)
 
         # Metrics see the traffic.
-        _, body = panel.request("/nfr/api/state")
-        tun = next((t for t in json.loads(body)["tunnels"] if t["name"] == "dns"), {})
+        _, state = panel.json("/nfr/api/dashboard")
+        tun = next((t for t in state.get("tunnels", []) if t["name"] == "dns"), {})
         check("traffic counted", tun.get("in", 0) > 0 and tun.get("out", 0) > 0, str(tun)[:120])
 
         # Toggling stops and restores the datagram path.
         if tun:
-            panel.request(
-                "/nfr/tunnels/toggle",
-                {"csrf": panel.csrf, "server": "local", "id": tun["id"], "enabled": "false"},
+            panel.json(
+                "/nfr/api/tunnels/%s/toggle" % tun["id"],
+                method="POST",
+                payload={"enabled": False},
             )
             ok = False
             end = time.time() + 6
@@ -310,9 +322,10 @@ def main():
                 time.sleep(0.2)
             check("disabled udp tunnel stops traffic", ok)
 
-            panel.request(
-                "/nfr/tunnels/toggle",
-                {"csrf": panel.csrf, "server": "local", "id": tun["id"], "enabled": "true"},
+            panel.json(
+                "/nfr/api/tunnels/%s/toggle" % tun["id"],
+                method="POST",
+                payload={"enabled": True},
             )
             ok = False
             end = time.time() + 10
@@ -335,7 +348,7 @@ def main():
     if failures:
         print("E2E FAILED: " + ", ".join(failures))
         return 1
-    print("E2E OK")
+    print("UDP E2E OK")
     return 0
 
 

@@ -33,7 +33,7 @@
 - **全协议与治理**：支持 TCP / UDP / HTTP(S)（WebSocket 透明转发）、空闲端口自动分配、单隧道一键测通、强制下线、上下行独立限速与自然月流量配额。
 - **蓝色移动端友好日志**：`nfrc` 采用 `HH:MM:SS [I]` 紧凑多行排版与 ANSI 蓝色终端配色，Termux 窄屏零折行，清晰呈现配置文件、`RunId` 与公网地址。
 - **严格服务端隧道权限**：禁止客户端以任何旧配置私自创建服务端不存在的隧道，未在面板登记的隧道一律直接拒绝。
-- **传输与凭据安全**：控制与数据通道全程 **TLS 1.3 + yamux**（支持自签指纹钉住或 ACME 自动证书），`HttpOnly + SameSite=Strict` 会话持久化哈希与 CSRF 校验。
+- **传输与凭据安全**：控制与数据通道全程 **TLS 1.3 + yamux**（客户端强制校验服务端证书：自签证书必填 `pin` 指纹，ACME / 公共 CA 证书设 `ca = true`），`HttpOnly + SameSite=Strict` 会话持久化哈希与 CSRF 校验。
 
 ## 界面预览
 
@@ -129,6 +129,9 @@ nfrc verify -c client.toml            # 校验客户端配置
 | `NFR_AUTH_TOKEN` | 客户端共享连接密钥（留空自动生成） |
 | `NFR_PANEL_HTTPS` | 设为 `true` 强制面板走 HTTPS（默认 `false`） |
 | `NFR_MIRROR_PREFIXES` | 自定义客户端下载镜像节点列表（逗号分隔） |
+| `NFR_DISABLE_SELF_UPDATE` | 设为 `1` 完全禁用服务端面板一键自升级 |
+
+> **客户端 TLS 校验说明**：手写 `client.toml` / `client.yaml` 时，`pin`（服务端自签证书 SHA-256 指纹）与 `ca = true`（公共 CA / ACME 证书）**二选一必填**；通过面板生成配置或执行 `nfrc join` 会自动写入 `pin`。
 
 完整配置示例见 [configs/](configs/)，进阶部署见 [docs/deploy.md](docs/deploy.md)。
 

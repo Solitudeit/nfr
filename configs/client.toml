@@ -11,9 +11,11 @@ auth_token = "change-me-to-a-strong-token"
 # 节点显示名称（留空默认取本机主机名；同名重连自动复用原节点）
 name = "my-node"
 
-# 可选：服务端自签证书 SHA-256 指纹（留空首次信任）；若服务端使用公共 CA / ACME 证书则设 ca = true
-# pin = ""
-# ca  = false
+# 必填（与 ca = true 二选一）：服务端自签证书 SHA-256 指纹
+# 推荐直接从 Web 面板复制配置，或执行 `nfrc join <服务端地址> <接入码>` 自动写入真实指纹；
+# 若服务端使用公共 CA / ACME 证书，可删除 pin 并设置 ca = true
+pin = "change-me-to-server-cert-sha256-pin"
+# ca  = true
 
 log_level = "info"
 

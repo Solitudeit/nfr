@@ -12,7 +12,7 @@ import (
 
 const (
 	defaultGitHubRepoURL = "https://github.com/Solitudeit/nfr"
-	defaultReleaseTag    = "v0.13.0-preview.6"
+	defaultReleaseTag    = "v0.13.0-preview.7"
 )
 
 // defaultGitHubDownloadBase resolves the GitHub Releases download base URL.
@@ -107,10 +107,16 @@ func (p *Panel) apiListDownloads(w http.ResponseWriter, r *http.Request) {
 		{Key: "mirror", Label: "镜像下载", BaseURL: fallbackMirrorBase},
 	}
 
+	checksumURLs := map[string]string{
+		"github": githubBase + "/SHA256SUMS",
+		"mirror": mirrors[0].Prefix + githubBase + "/SHA256SUMS",
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_source": "github",
 		"sources":        sources,
 		"mirrors":        mirrors,
+		"checksum_urls":  checksumURLs,
 		"items":          items,
 	})
 }

@@ -24,7 +24,6 @@ import tempfile
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -76,22 +75,32 @@ class Panel:
         )
         self.csrf = ""
 
-    def request(self, path, form=None, headers=None):
-        data = urllib.parse.urlencode(form).encode() if form is not None else None
-        req = urllib.request.Request(self.base + path, data=data, headers=headers or {})
+    def json(self, path, method="GET", payload=None, headers=None):
+        hdrs = dict(headers or {})
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json")
+        if method in ("POST", "PATCH", "PUT", "DELETE") and self.csrf:
+            hdrs.setdefault("X-CSRF", self.csrf)
+        req = urllib.request.Request(self.base + path, data=data, headers=hdrs, method=method)
         try:
             with self.opener.open(req, timeout=15) as resp:
-                return resp.status, resp.read().decode("utf-8", "replace")
+                raw = resp.read().decode("utf-8", "replace")
+                return resp.status, (json.loads(raw) if raw.strip() else {})
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode("utf-8", "replace")
+            raw = e.read().decode("utf-8", "replace")
+            try:
+                parsed = json.loads(raw) if raw.strip() else {}
+            except ValueError:
+                parsed = {"_raw": raw}
+            return e.code, parsed
 
     def login(self, password):
-        self.request("/nfr/login")
-        status, _ = self.request("/nfr/login", {"password": password})
-        _, page = self.request("/nfr/nodes")
-        m = re.search(r'name="csrf" value="([^"]+)"', page)
-        self.csrf = m.group(1) if m else ""
-        return status
+        st, data = self.json("/nfr/api/auth/login", method="POST", payload={"password": password})
+        if st == 200 and data.get("csrf"):
+            self.csrf = data["csrf"]
+        return st, data
 
 
 def echo_server(port):
@@ -110,14 +119,12 @@ def echo_server(port):
 
     def pipe(conn):
         try:
-            total = 0
             conn.settimeout(10)
             while True:
                 chunk = conn.recv(65536)
                 if not chunk:
                     break
                 conn.sendall(chunk)
-                total += len(chunk)
         except OSError:
             pass
         finally:
@@ -131,7 +138,7 @@ def echo_server(port):
 
 
 def fetch(port, size):
-    """Pull `size` bytes through the tunnel, return elapsed seconds."""
+    """Pull `size` bytes through the tunnel, return (bytes_received, elapsed_seconds)."""
     s = socket.create_connection(("127.0.0.1", port), timeout=5)
     s.settimeout(60)
     start = time.time()
@@ -164,7 +171,7 @@ def main():
     missing = [p for p in (nfrs, nfrc) if not os.path.exists(p)]
     if missing:
         print("missing binary: " + ", ".join(missing) +
-              " (run: make build, or: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)")
+              " (run: go build -o bin/nfrs ./cmd/nfrs && go build -o bin/nfrc ./cmd/nfrc)")
         return 2
 
     tmp = tempfile.mkdtemp(prefix="nfr-e2e-quota-")
@@ -200,12 +207,15 @@ def main():
                 'https_listen = "off"\n'
                 'data_dir = "%s"\n'
                 'port_range = [20000, 29999]\n'
-                'log_level = "debug"\n' % (control, data_dir)
+                'log_level = "debug"\n'
+                '[panel]\n'
+                'https = true\n' % (control, data_dir)
             )
 
         server_log = open(os.path.join(tmp, "server.log"), "wb")
+        env = dict(os.environ, NFR_DISABLE_UPDATE_CHECK="1")
         server = subprocess.Popen(
-            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
+            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT, env=env
         )
         procs.append(server)
         if not wait_port(control):
@@ -220,15 +230,13 @@ def main():
         password = m.group(1)
 
         panel = Panel("https://127.0.0.1:%d" % control)
-        status = panel.login(password)
+        status, _ = panel.login(password)
         check("panel login", status == 200)
 
-        status, html = panel.request("/nfr/nodes", {"csrf": panel.csrf, "name": "testnode"})
-        m = re.search(r'class="join-code">([0-9A-Z]+)<', html)
-        if not m:
-            check("join code issued", False, "status %d" % status)
+        status, jc = panel.json("/nfr/api/nodes/join-codes", method="POST", payload={"name": "testnode"})
+        code = jc.get("code", "")
+        if not check("join code issued", status in (200, 201) and bool(code), "status %d %s" % (status, jc)):
             return 1
-        code = m.group(1)
 
         agent_cfg = os.path.join(tmp, "agent.toml")
         p = subprocess.run(
@@ -246,9 +254,8 @@ def main():
         node = None
         end = time.time() + 20
         while time.time() < end:
-            _, body = panel.request("/nfr/api/state")
-            state = json.loads(body)
-            online = [n for n in state["nodes"] if n.get("online")]
+            _, state = panel.json("/nfr/api/dashboard")
+            online = [n for n in state.get("nodes", []) if n.get("online")]
             if online:
                 node = online[0]
                 break
@@ -259,23 +266,25 @@ def main():
 
         echo_srv = echo_server(echo_port)
 
-        def save_tunnel(name, **extra):
-            form = {
-                "csrf": panel.csrf, "server": "local", "name": name,
-                "node_id": node["id"], "type": "tcp",
-                "local": "127.0.0.1:%d" % echo_port, "enabled": "1",
+        def create_tunnel(name, **extra):
+            payload = {
+                "name": name,
+                "node_id": node["id"],
+                "type": "tcp",
+                "local": "127.0.0.1:%d" % echo_port,
+                "enabled": True,
             }
-            form.update(extra)
-            return panel.request("/nfr/tunnels/save", form)
+            payload.update(extra)
+            return panel.json("/nfr/api/tunnels", method="POST", payload=payload)
 
         def find_tunnel(name):
-            _, body = panel.request("/nfr/api/state")
-            return next((t for t in json.loads(body)["tunnels"] if t["name"] == name), None)
+            _, state = panel.json("/nfr/api/dashboard")
+            return next((t for t in state.get("tunnels", []) if t["name"] == name), None)
 
         # ------------------------------------------------------------------
         # Part 1: bandwidth limit paces the data plane.
-        status, _ = save_tunnel("throttled", bandwidth_kb="512")
-        check("create throttled tunnel", status == 200, "status %d" % status)
+        status, res = create_tunnel("throttled", bandwidth_kb=512)
+        check("create throttled tunnel", status in (200, 201), "status %d %s" % (status, res))
         tun = find_tunnel("throttled")
         if not tun:
             check("find throttled tunnel", False)
@@ -287,8 +296,8 @@ def main():
         check("throttled transfer complete", got == 2 << 20, "got %d" % got)
 
         # Unlimited control tunnel on the same echo: same transfer, no pacing.
-        status, _ = save_tunnel("fastlane")
-        check("create unlimited control tunnel", status == 200, "status %d" % status)
+        status, res = create_tunnel("fastlane")
+        check("create unlimited control tunnel", status in (200, 201), "status %d %s" % (status, res))
         ctl = find_tunnel("fastlane")
         time.sleep(1.5)
         got, fast = fetch(ctl["remote_port"], 2 << 20)
@@ -300,9 +309,9 @@ def main():
               "throttled %.2fs vs control %.2fs" % (elapsed, fast))
 
         # ------------------------------------------------------------------
-        # Part 2: quota guard pauses, month rollover resumes.
-        status, _ = save_tunnel("metered", quota_mb="3")
-        check("create metered tunnel", status == 200, "status %d" % status)
+        # Part 2: quota guard pauses, clearing quota and re-enabling resumes.
+        status, res = create_tunnel("metered", quota_mb=3)
+        check("create metered tunnel", status in (200, 201), "status %d %s" % (status, res))
         tun = find_tunnel("metered")
         if not tun:
             check("find metered tunnel", False)
@@ -337,17 +346,30 @@ def main():
             refused = True
         check("paused tunnel refuses traffic", refused)
 
-        # The panel marks the pause.
-        _, html = panel.request("/nfr/tunnels?server=local")
-        check("panel shows quota pause", "配额停用" in html)
+        # Dashboard status reports quota pause cleanly.
+        check("panel shows quota pause", tun.get("status") == "配额停用", str(tun.get("status")))
 
         # Clearing the quota and re-enabling restores service.
-        status, _ = save_tunnel(
-            "metered", id=tun["id"], remote_port=str(tun["remote_port"]), quota_mb="0"
+        status, res = panel.json(
+            "/nfr/api/tunnels/%s" % tun["id"],
+            method="PATCH",
+            payload={
+                "name": "metered",
+                "node_id": node["id"],
+                "type": "tcp",
+                "local": "127.0.0.1:%d" % echo_port,
+                "remote_port": tun["remote_port"],
+                "quota_mb": 0,
+            },
         )
-        check("edit tunnel clears quota", status == 200, "status %d" % status)
-        panel.request("/nfr/tunnels/toggle",
-                      {"csrf": panel.csrf, "server": "local", "id": tun["id"], "enabled": "true"})
+        check("edit tunnel clears quota", status == 200, "status %d %s" % (status, res))
+        status, res = panel.json(
+            "/nfr/api/tunnels/%s/toggle" % tun["id"],
+            method="POST",
+            payload={"enabled": True},
+        )
+        check("re-enable tunnel", status == 200, "status %d %s" % (status, res))
+
         ok = False
         end = time.time() + 10
         while time.time() < end:
@@ -371,7 +393,7 @@ def main():
     if failures:
         print("E2E FAILED: " + ", ".join(failures))
         return 1
-    print("E2E OK")
+    print("QUOTA E2E OK")
     return 0
 
 

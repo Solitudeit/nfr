@@ -77,6 +77,7 @@ func TestAgentSaveLoadTOMLAndYAML(t *testing.T) {
 		raw := `
 server_addr = "203.0.113.10"
 auth_token = "tok-xyz"
+pin = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 name = "nas"
 
 [[proxies]]
@@ -116,6 +117,7 @@ hosts = ["blog.example.com"]
 		raw := `
 server_addr: "203.0.113.10:8443"
 auth_token: "tok-yaml"
+pin: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 name: "office-pc"
 proxies:
   - name: rdp
@@ -140,6 +142,24 @@ proxies:
 		srvs := got.EffectiveServers()
 		if len(srvs) != 1 || srvs[0].Name != "office-pc" || srvs[0].Proxies[1].EffectiveLocal() != "127.0.0.1:53" {
 			t.Fatalf("unexpected yaml servers: %+v", srvs)
+		}
+	})
+
+	t.Run("requires pin or ca", func(t *testing.T) {
+		noPin := Agent{
+			ServerAddr: "203.0.113.10:8443",
+			AuthToken:  "tok-1",
+		}
+		if err := noPin.Validate(); err == nil {
+			t.Fatal("expected Validate to reject empty pin when ca=false")
+		}
+		withCA := Agent{
+			ServerAddr: "203.0.113.10:8443",
+			AuthToken:  "tok-1",
+			CA:         true,
+		}
+		if err := withCA.Validate(); err != nil {
+			t.Fatalf("expected Validate to allow empty pin when ca=true, got %v", err)
 		}
 	})
 }

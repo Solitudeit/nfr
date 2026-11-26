@@ -216,12 +216,13 @@ type UpdateMirrorProbe struct {
 
 // UpgradeProgress reports live progress of an in-place nfrs self-upgrade.
 type UpgradeProgress struct {
-	State         string `json:"state"` // idle | downloading | verifying | installing | restarting | done | error
-	Percent       int    `json:"percent"`
-	TargetVersion string `json:"target_version,omitempty"`
-	Source        string `json:"source,omitempty"`
-	Message       string `json:"message,omitempty"`
-	Error         string `json:"error,omitempty"`
+	State          string `json:"state"` // idle | downloading | verifying | installing | restarting | done | error
+	Percent        int    `json:"percent"`
+	TargetVersion  string `json:"target_version,omitempty"`
+	Source         string `json:"source,omitempty"`
+	ChecksumSource string `json:"checksum_source,omitempty"` // official | mirror
+	Message        string `json:"message,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 // UpdateStatus is returned by /nfr/api/update and /nfr/api/update/check.

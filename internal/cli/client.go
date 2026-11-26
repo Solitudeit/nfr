@@ -50,7 +50,7 @@ Environment variables (Docker / zero-file startup):
   NFR_SERVER      server control address, e.g. 203.0.113.10:8443
   NFR_AUTH_TOKEN  shared auth_token matching server config
   NFR_NAME        node display name (default: hostname)
-  NFR_PIN         optional server certificate SHA-256 fingerprint
+  NFR_PIN         server certificate SHA-256 fingerprint (required unless NFR_CA=true)
   NFR_CA          set "true" if server uses ACME / public CA cert
 
 Typical use:

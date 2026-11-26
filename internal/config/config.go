@@ -523,6 +523,9 @@ func (a Agent) Validate() error {
 		if !hasAuthToken && !hasNodeCred {
 			return fmt.Errorf("server[%d]: auth_token (or node_id + token) is required", i)
 		}
+		if !s.CA && strings.TrimSpace(s.Pin) == "" {
+			return fmt.Errorf("server[%d]: pin is required (set server certificate SHA-256 fingerprint or enable ca = true)", i)
+		}
 		for j, p := range s.Proxies {
 			if strings.TrimSpace(p.Name) == "" {
 				return fmt.Errorf("server[%d].proxies[%d].name is required", i, j)

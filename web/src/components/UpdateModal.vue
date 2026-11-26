@@ -131,6 +131,19 @@ async function handleApply() {
           :status="prog.state === 'error' ? 'error' : prog.state === 'done' ? 'success' : 'default'"
           :processing="updateStore.upgrading"
         />
+        <div v-if="prog.checksum_source" class="upd-checksum-row">
+          <NTag
+            size="small"
+            :type="prog.checksum_source === 'mirror' ? 'warning' : 'success'"
+            :bordered="false"
+          >
+            {{
+              prog.checksum_source === 'mirror'
+                ? '校验清单：已回退镜像 SHA256SUMS（官方不可达）'
+                : '校验清单：GitHub 官方 SHA256SUMS'
+            }}
+          </NTag>
+        </div>
         <div class="upd-progress-msg" :class="{ err: prog.state === 'error' }">
           {{ prog.message }}
         </div>
@@ -276,6 +289,13 @@ async function handleApply() {
 .upd-progress-box {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+.upd-checksum-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

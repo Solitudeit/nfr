@@ -215,6 +215,7 @@ export interface DownloadsPayload {
   default_source: string
   sources: DownloadSource[]
   mirrors?: MirrorNode[]
+  checksum_urls?: Record<string, string>
   items: DownloadItem[]
 }
 
@@ -230,6 +231,7 @@ export interface UpgradeProgress {
   percent: number
   target_version?: string
   source?: string
+  checksum_source?: 'official' | 'mirror' | string
   message?: string
   error?: string
 }

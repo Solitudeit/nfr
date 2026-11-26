@@ -4,8 +4,8 @@
 #   NFR_PASSWORD='change-me-now' NFR_AUTH_TOKEN='my-shared-token' \
 #     docker compose -f deploy/docker/compose.yml up -d nfrs
 #
-# Private client (inside your LAN):
-#   NFR_SERVER='203.0.113.10:8443' NFR_AUTH_TOKEN='my-shared-token' NFR_NAME='homelab' \
+# Private client (inside your LAN; pass NFR_PIN for self-signed cert or NFR_CA=true for ACME):
+#   NFR_SERVER='203.0.113.10:8443' NFR_AUTH_TOKEN='my-shared-token' NFR_PIN='<server-sha256-pin>' NFR_NAME='homelab' \
 #     docker compose -f deploy/docker/compose.yml --profile client up -d nfrc
 #
 # You can also mount a TOML or YAML config file directly, e.g.:
