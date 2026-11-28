@@ -193,8 +193,15 @@ func TestAgentLogsTailUpdateHintWhenOutdated(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = srv.Run(ctx) }()
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = srv.Run(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-runDone
+	}()
 
 	// Wait for control listener address
 	var ctlAddr string

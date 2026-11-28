@@ -35,9 +35,16 @@ func newStandaloneTestServer(t *testing.T) (*server.Server, string, context.Canc
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = srv.Run(ctx) }()
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = srv.Run(ctx)
+	}()
 	waitListen(t, cfg.ControlListen)
-	return srv, cfg.ControlListen, cancel
+	return srv, cfg.ControlListen, func() {
+		cancel()
+		<-runDone
+	}
 }
 
 func startEchoServer(t *testing.T, reply string) (string, func()) {
