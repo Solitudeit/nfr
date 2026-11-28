@@ -38,7 +38,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           python3 - <<'PY'
-          import json, os, urllib.request
+          import json, os, re, urllib.request
           token = os.environ["GH_TOKEN"]
           repo = os.environ["REPO"]
           tag = os.environ["TAG"]
@@ -48,19 +48,28 @@ jobs:
               "X-GitHub-Api-Version": "2022-11-28",
               "User-Agent": "nfr-release-cleanup",
           }
-          req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases?per_page=100", headers=headers)
-          with urllib.request.urlopen(req, timeout=30) as r:
-              rels = json.loads(r.read().decode())
-          for rel in rels:
-              if rel.get("draft") and (rel.get("name") == tag or str(rel.get("tag_name", "")).startswith("untagged-")):
-                  dreq = urllib.request.Request(
-                      f"https://api.github.com/repos/{repo}/releases/{rel['id']}",
-                      headers=headers,
-                      method="DELETE",
-                  )
-                  with urllib.request.urlopen(dreq, timeout=30) as dr:
-                      dr.read()
-                  print(f"deleted stale draft release id={rel['id']} name={rel.get('name')}")
+          legacy_re = re.compile(r"^v0\.([1-9]|10|11)\.")
+          page = 1
+          while True:
+              req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}", headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  rels = json.loads(r.read().decode())
+              if not rels:
+                  break
+              for rel in rels:
+                  rtag = str(rel.get("tag_name", ""))
+                  is_stale_draft = rel.get("draft") and (rel.get("name") == tag or rtag.startswith("untagged-"))
+                  is_legacy = bool(legacy_re.match(rtag))
+                  if is_stale_draft or is_legacy:
+                      dreq = urllib.request.Request(
+                          f"https://api.github.com/repos/{repo}/releases/{rel['id']}",
+                          headers=headers,
+                          method="DELETE",
+                      )
+                      with urllib.request.urlopen(dreq, timeout=30) as dr:
+                          dr.read()
+                      print(f"deleted release id={rel['id']} tag={rtag} name={rel.get('name')}")
+              page += 1
           PY
 
           PRE_FLAG=""

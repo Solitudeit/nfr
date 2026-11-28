@@ -5,7 +5,7 @@
 
   <p>
     <a href="https://github.com/Solitudeit/nfr/releases">
-      <img src="https://img.shields.io/github/v/release/Solitudeit/nfr?include_prereleases&label=preview&color=18181b" alt="Preview Release" />
+      <img src="https://img.shields.io/github/v/release/Solitudeit/nfr?include_prereleases&label=beta&color=18181b" alt="Beta Release" />
     </a>
     <a href="https://github.com/Solitudeit/nfr/actions/workflows/ci.yml">
       <img src="https://img.shields.io/github/actions/workflow/status/Solitudeit/nfr/ci.yml?branch=main&label=CI" alt="CI" />
