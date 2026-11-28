@@ -277,7 +277,7 @@ async function main() {
       const u = route.request().url()
       const delay = u.startsWith('https://ghfast.top/') ? 15 : 450
       await new Promise((r) => setTimeout(r, delay))
-      await route.fulfill({ status: 200, contentType: 'text/plain', body: 'ok' })
+      await route.fulfill({ status: 200, contentType: 'text/plain', body: 'ok' }).catch(() => {})
     })
 
     // Switch download source to 镜像下载 and verify browser auto-selects fastest mirror
@@ -440,12 +440,16 @@ async function main() {
     await page.waitForSelector('.update-modal', { timeout: 10000 })
     await page.waitForTimeout(250)
     const modalText = await page.locator('.update-modal').innerText()
+    const notesHTML = await page.locator('.update-modal .upd-notes-md').innerHTML()
     check(
-      'update modal displays version diff, notes, and GitHub/Mirror source selector',
+      'update modal displays version diff, formatted notes, and GitHub/Mirror source selector',
       modalText.includes('v9.9.9-preview.1') &&
         modalText.includes('支持面板一键自动升级') &&
         modalText.includes('GitHub') &&
-        modalText.includes('镜像下载'),
+        modalText.includes('镜像下载') &&
+        !modalText.includes('### ') &&
+        !modalText.includes('**') &&
+        notesHTML.includes('<'),
       modalText.slice(0, 200),
     )
     await assertTrueZeroOverflow('update modal @360px')

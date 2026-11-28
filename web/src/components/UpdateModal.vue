@@ -18,6 +18,7 @@ import {
   RefreshOutline,
 } from '@vicons/ionicons5'
 import { useUpdateStore } from '@/stores/update'
+import { renderReleaseNotesMarkdown } from '@/utils/markdown'
 
 const message = useMessage()
 const updateStore = useUpdateStore()
@@ -25,10 +26,10 @@ const updateStore = useUpdateStore()
 const st = computed(() => updateStore.status)
 const prog = computed(() => updateStore.upgradeProgress)
 
-const formattedNotes = computed(() => {
+const renderedNotes = computed(() => {
   const raw = (st.value?.notes || '').trim()
-  if (!raw) return '本次发布包含功能优化与问题修复，详见 GitHub Release 说明。'
-  return raw
+  const md = raw || '本次发布包含功能优化与问题修复，详见 GitHub Release 说明。'
+  return renderReleaseNotesMarkdown(md)
 })
 
 const publishedDate = computed(() => {
@@ -77,7 +78,8 @@ async function handleApply() {
       </div>
 
       <div class="upd-notes-box">
-        <pre class="upd-notes-pre">{{ formattedNotes }}</pre>
+        <!-- eslint-disable-next-line vue/no-v-html -->
+        <div class="upd-notes-md" v-html="renderedNotes" />
       </div>
 
       <div class="upd-source-block">
@@ -226,22 +228,98 @@ async function handleApply() {
 }
 
 .upd-notes-box {
-  max-height: 220px;
+  max-height: 240px;
   overflow-y: auto;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--nfr-border);
   background: var(--nfr-subtle);
 }
 
-.upd-notes-pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: inherit;
+.upd-notes-md {
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.65;
   color: var(--nfr-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.upd-notes-md :deep(blockquote) {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--nfr-accent, #18a058);
+  border-radius: 0 6px 6px 0;
+  background: var(--nfr-surface);
+  color: var(--nfr-text-secondary);
+  font-size: 12.5px;
+}
+
+.upd-notes-md :deep(blockquote p) {
+  margin: 0;
+}
+
+.upd-notes-md :deep(h4) {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nfr-text);
+}
+
+.upd-notes-md :deep(h4:first-child) {
+  margin-top: 0;
+}
+
+.upd-notes-md :deep(ul) {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upd-notes-md :deep(li) {
+  margin: 0;
+}
+
+.upd-notes-md :deep(li.sub-item) {
+  margin-left: 14px;
+  list-style-type: circle;
+  color: var(--nfr-text-secondary);
+  font-size: 12.5px;
+}
+
+.upd-notes-md :deep(p) {
+  margin: 0 0 8px;
+}
+
+.upd-notes-md :deep(p:last-child),
+.upd-notes-md :deep(ul:last-child) {
+  margin-bottom: 0;
+}
+
+.upd-notes-md :deep(code) {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--nfr-id-bg);
+  color: var(--nfr-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.upd-notes-md :deep(a) {
+  color: var(--nfr-accent, #18a058);
+  text-decoration: none;
+}
+
+.upd-notes-md :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.upd-notes-md :deep(.md-changelog) {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--nfr-border);
+  font-size: 12px;
 }
 
 .upd-source-block {
