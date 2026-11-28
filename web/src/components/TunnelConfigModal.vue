@@ -200,7 +200,7 @@ async function handleCopyCmd() {
           </div>
           <div class="cfg-quick-controls">
             <NRadioGroup v-model:value="quickOS" size="small">
-              <NRadioButton value="unix">Linux / macOS</NRadioButton>
+              <NRadioButton value="unix">Linux / macOS / Termux</NRadioButton>
               <NRadioButton value="win">Windows</NRadioButton>
             </NRadioGroup>
             <NButton size="small" type="primary" @click="handleCopyQuick">

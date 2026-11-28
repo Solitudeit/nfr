@@ -31,9 +31,9 @@ func TestNewClientWriterFormat(t *testing.T) {
 
 	var cbuf bytes.Buffer
 	clg := NewClientColorWriter("info", &cbuf, true)
-	clg.Info("登录成功  RunId: abc12345")
+	clg.Info("登录节点成功, RunId: abc12345")
 	out := cbuf.String()
-	if !strings.HasPrefix(out, ansiBlue) || !strings.Contains(out, ansiReset+"\n") {
-		t.Fatalf("expected ANSI blue info line, got %q", out)
+	if !strings.HasPrefix(out, ansiDim) || !strings.Contains(out, ansiBlue+"[I]"+ansiReset) || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("expected layered ANSI info line, got %q", out)
 	}
 }

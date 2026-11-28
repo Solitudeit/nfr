@@ -168,7 +168,7 @@ func cmdUp(args []string) {
 		fatal("无效的启动参数: %v", err)
 	}
 	lg := log.NewClient(cfg.LogLevel, cfg.LogFile)
-	lg.Info(fmt.Sprintf("启动 NFR 客户端\n模式: 一键启动 (隧道 %s)", spec.TunnelID))
+	lg.Info(fmt.Sprintf("启动 NFR 客户端, 模式: 一键启动 (隧道 %s)", spec.TunnelID))
 	runAgents(cfg, lg)
 }
 
@@ -206,7 +206,7 @@ func cmdAgent(args []string) {
 	if cfgLabel == "" || cfgLabel == "." {
 		cfgLabel = *cfgPath
 	}
-	lg.Info(fmt.Sprintf("启动 NFR 客户端\n配置: %s", cfgLabel))
+	lg.Info(fmt.Sprintf("启动 NFR 客户端, 配置: %s", cfgLabel))
 	runAgentsWithReload(*cfgPath, cfg, lg)
 }
 

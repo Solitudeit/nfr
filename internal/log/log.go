@@ -103,7 +103,8 @@ func (h *clientHandler) Enabled(_ context.Context, lv slog.Level) bool {
 
 const (
 	ansiReset = "\x1b[0m"
-	ansiBlue  = "\x1b[94m"
+	ansiDim   = "\x1b[90m"
+	ansiBlue  = "\x1b[36m"
 	ansiWarn  = "\x1b[33m"
 	ansiErr   = "\x1b[91m"
 	ansiDebug = "\x1b[90m"
@@ -164,16 +165,29 @@ func (h *clientHandler) Handle(_ context.Context, r slog.Record) error {
 		_, _ = io.WriteString(h.fileW, plainStr)
 	}
 	if h.color {
-		// Color each line individually so wrapped mobile lines stay cleanly tinted
-		// and terminal state always resets before the newline.
+		// Layer ANSI colors: dimmed timestamp, level-tinted tag, and crisp text
+		// (warning/error lines stay highlighted in full for quick scanning).
+		ts := r.Time.Format("15:04:05")
+		body := strings.TrimPrefix(strings.TrimSuffix(plainStr, "\n"), prefix)
 		var colored strings.Builder
-		rawLines := strings.Split(strings.TrimSuffix(plainStr, "\n"), "\n")
-		for _, ln := range rawLines {
-			colored.WriteString(clr)
-			colored.WriteString(ln)
+		colored.WriteString(ansiDim)
+		colored.WriteString(ts)
+		colored.WriteString(ansiReset)
+		colored.WriteByte(' ')
+		colored.WriteString(clr)
+		colored.WriteByte('[')
+		colored.WriteString(tag)
+		colored.WriteString("]")
+		if r.Level >= slog.LevelWarn || r.Level < slog.LevelInfo {
+			colored.WriteByte(' ')
+			colored.WriteString(body)
 			colored.WriteString(ansiReset)
-			colored.WriteByte('\n')
+		} else {
+			colored.WriteString(ansiReset)
+			colored.WriteByte(' ')
+			colored.WriteString(body)
 		}
+		colored.WriteByte('\n')
 		_, err := io.WriteString(h.w, colored.String())
 		return err
 	}

@@ -111,7 +111,7 @@ func (a *Agent) Run(ctx context.Context) {
 			nid := a.nodeID
 			a.mu.Unlock()
 			if nid != "" {
-				a.lg.Info(fmt.Sprintf("收到强制下线指令, 客户端已停止\nRunId: %s", nid))
+				a.lg.Info(fmt.Sprintf("收到强制下线指令, 客户端已停止, RunId: %s", nid))
 			} else {
 				a.lg.Info("收到强制下线指令, 客户端已停止")
 			}
@@ -119,13 +119,13 @@ func (a *Agent) Run(ctx context.Context) {
 		}
 		if errors.Is(err, errRejected) {
 			reason := strings.TrimPrefix(err.Error(), errRejected.Error()+": ")
-			a.lg.Error(fmt.Sprintf("启动失败, 客户端已停止\n原因: %s", reason))
+			a.lg.Error(fmt.Sprintf("启动失败, 客户端已停止, 原因: %s", reason))
 			return
 		}
 		if time.Since(start) > 20*time.Second {
 			backoff = time.Second
 		}
-		a.lg.Warn(fmt.Sprintf("连接断开, %s 后重连...\n原因: %v", backoff, err))
+		a.lg.Warn(fmt.Sprintf("连接断开, %s 后重连..., 原因: %v", backoff, err))
 		select {
 		case <-ctx.Done():
 			return
@@ -156,7 +156,7 @@ func (a *Agent) session(ctx context.Context) error {
 	if !a.opt.CA && strings.TrimSpace(a.opt.Pin) == "" {
 		return fmt.Errorf("%w: 未配置服务端证书指纹 pin 且未启用 ca = true，拒绝建立未验证的 TLS 连接", errRejected)
 	}
-	a.lg.Info(fmt.Sprintf("连接节点\n地址: %s", a.opt.Addr))
+	a.lg.Info(fmt.Sprintf("连接节点: %s", a.opt.Addr))
 	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 	raw, err := dialer.DialContext(ctx, "tcp", a.opt.Addr)
 	if err != nil {
@@ -245,7 +245,7 @@ func (a *Agent) session(ctx context.Context) error {
 		return fmt.Errorf("unexpected frame %q after auth", f.Type)
 	}
 	_ = ctrl.SetReadDeadline(time.Time{})
-	a.lg.Info(fmt.Sprintf("登录节点成功\nRunId: %s", f.NodeID))
+	a.lg.Info(fmt.Sprintf("登录节点成功, RunId: %s", f.NodeID))
 	pendingUpdateVer := strings.TrimSpace(f.LatestVersion)
 	updateHintShown := false
 
@@ -293,7 +293,7 @@ func (a *Agent) session(ctx context.Context) error {
 			a.applyConfig(f)
 			if !updateHintShown && pendingUpdateVer != "" && version.IsNewer(pendingUpdateVer, version.Version) {
 				updateHintShown = true
-				a.lg.Warn(fmt.Sprintf("发现新版本\n最新: %s", pendingUpdateVer))
+				a.lg.Warn(fmt.Sprintf("发现新版本: %s，请前往面板或 GitHub Releases 更新", pendingUpdateVer))
 			}
 		case proto.TypePing:
 			if err := a.sendFrame(&proto.Frame{Type: proto.TypePong, TS: time.Now().Unix()}); err != nil {
@@ -358,17 +358,17 @@ func (a *Agent) applyConfig(f *proto.Frame) {
 	for _, t := range f.Tunnels {
 		if _, existed := old[t.ID]; !existed {
 			tag := t.ID + "." + t.Name
-			a.lg.Info(fmt.Sprintf("隧道登记成功\n隧道: %s", tag))
+			a.lg.Info(fmt.Sprintf("隧道登记成功, 隧道: %s", tag))
 			if t.PublicAddr != "" {
-				a.lg.Info(fmt.Sprintf("启动 [%s] 隧道成功\n公网: %s\n本地: %s", t.Type, t.PublicAddr, t.Local))
+				a.lg.Info(fmt.Sprintf("启动 [%s] 隧道成功, 公网: %s -> 本地: %s", t.Type, t.PublicAddr, t.Local))
 			} else {
-				a.lg.Info(fmt.Sprintf("启动 [%s] 隧道成功\n本地: %s", t.Type, t.Local))
+				a.lg.Info(fmt.Sprintf("启动 [%s] 隧道成功, 本地: %s", t.Type, t.Local))
 			}
 		}
 	}
 	for id := range old {
 		if _, ok := next[id]; !ok {
-			a.lg.Info(fmt.Sprintf("隧道已停止\n隧道: %s", id))
+			a.lg.Info(fmt.Sprintf("隧道已停止, 隧道: %s", id))
 		}
 	}
 }
