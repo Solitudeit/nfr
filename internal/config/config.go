@@ -65,6 +65,13 @@ type Panel struct {
 	// (false) the console is served over plain HTTP so browsers do not hit a
 	// self-signed certificate warning; agents still connect over TLS 1.3.
 	HTTPS bool `toml:"https,omitempty" yaml:"https,omitempty"`
+	// LocalOnly restricts HTTP/HTTPS console access on control_listen strictly
+	// to loopback clients (127.0.0.1 / ::1), such as a local nginx/Caddy reverse
+	// proxy, while keeping public ALPN agent connections working on control_listen.
+	LocalOnly bool `toml:"local_only,omitempty" yaml:"local_only,omitempty"`
+	// AllowedHosts optionally restricts the HTTP Host header accepted by the
+	// console listener to defend against DNS rebinding attacks.
+	AllowedHosts []string `toml:"allowed_hosts,omitempty" yaml:"allowed_hosts,omitempty"`
 }
 
 // ACME configures automatic certificate issuance for the HTTPS ingress.
@@ -400,6 +407,23 @@ func (c *Server) ApplyEnv() {
 		case "0", "false", "no", "off":
 			c.Panel.HTTPS = false
 		}
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_PANEL_LOCAL_ONLY")); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			c.Panel.LocalOnly = true
+		case "0", "false", "no", "off":
+			c.Panel.LocalOnly = false
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_PANEL_ALLOWED_HOSTS")); v != "" {
+		var hosts []string
+		for _, part := range strings.Split(v, ",") {
+			if h := strings.ToLower(strings.TrimSpace(part)); h != "" {
+				hosts = append(hosts, h)
+			}
+		}
+		c.Panel.AllowedHosts = hosts
 	}
 	if v := strings.TrimSpace(os.Getenv("NFR_TLS_CERT")); v != "" {
 		c.TLSCert = v

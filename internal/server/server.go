@@ -580,7 +580,15 @@ func (s *Server) newIngress() *http.Server {
 
 // serveConsole handles everything that lives on the control port.
 func (s *Server) serveConsole(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Panel.HTTPS && r.TLS == nil && !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if s.cfg.Panel.LocalOnly && !isLoopbackRemote(r.RemoteAddr) {
+		http.NotFound(w, r)
+		return
+	}
+	if len(s.cfg.Panel.AllowedHosts) > 0 && !s.isAllowedConsoleHost(r.Host) {
+		http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
+		return
+	}
+	if s.cfg.Panel.HTTPS && r.TLS == nil && !(isLoopbackRemote(r.RemoteAddr) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")) {
 		target := "https://" + r.Host + r.URL.RequestURI()
 		http.Redirect(w, r, target, http.StatusPermanentRedirect)
 		return
@@ -599,6 +607,28 @@ func (s *Server) serveConsole(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func isLoopbackRemote(remoteAddr string) bool {
+	host := strings.TrimSpace(remoteAddr)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+func (s *Server) isAllowedConsoleHost(rawHost string) bool {
+	host := stripPort(rawHost)
+	if host == "" {
+		return false
+	}
+	for _, allowed := range s.cfg.Panel.AllowedHosts {
+		if strings.EqualFold(stripPort(allowed), host) {
+			return true
+		}
+	}
+	return false
 }
 
 // serveIngress handles tunnelled traffic and discovery only.

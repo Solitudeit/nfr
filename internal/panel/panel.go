@@ -18,6 +18,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -41,7 +42,10 @@ const (
 	sessionTTL         = 12 * time.Hour
 	rememberSessionTTL = 30 * 24 * time.Hour
 	maxFails           = 5
-	lockFor            = 15 * time.Minute
+	longLockFails      = 10
+	shortLockFor       = 2 * time.Minute
+	longLockFor        = 10 * time.Minute
+	failWindow         = 15 * time.Minute
 	maxJSONBody        = 1 << 20 // 1 MiB cap for panel JSON API payloads
 )
 
@@ -57,8 +61,9 @@ type session struct {
 }
 
 type failState struct {
-	count int
-	until time.Time
+	count    int
+	lastFail time.Time
+	until    time.Time
 }
 
 // Panel is the single-host console handler mounted at /nfr/.
@@ -156,6 +161,7 @@ func (p *Panel) RevokeUserSessions(userID string) {
 // ServeHTTP routes /nfr/api/* to the JSON API and all other /nfr/* paths to
 // the embedded Vue 3 SPA without requiring a session cookie on static assets.
 func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	setSecurityHeaders(w, r)
 	if r.URL.Path == "/nfr" {
 		http.Redirect(w, r, "/nfr/", http.StatusMovedPermanently)
 		return
@@ -167,7 +173,34 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.serveSPA(w, r)
 }
 
+func setSecurityHeaders(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "same-origin")
+	if isHTTPS(r) {
+		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
+}
+
+func checkSameOrigin(r *http.Request) bool {
+	orig := strings.TrimSpace(r.Header.Get("Origin"))
+	if orig == "" {
+		return true
+	}
+	u, err := url.Parse(orig)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
+
 func (p *Panel) serveAPI(w http.ResponseWriter, r *http.Request) {
+	if isStateChanging(r.Method) && !checkSameOrigin(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid origin"})
+		return
+	}
 	// Only two endpoints are reachable without a valid session cookie:
 	// GET /nfr/api/auth/me and POST /nfr/api/auth/login.
 	if r.URL.Path == "/nfr/api/auth/me" && r.Method == http.MethodGet {
@@ -392,7 +425,9 @@ func (p *Panel) pruneLocked(now time.Time) {
 		}
 	}
 	for ip, f := range p.fails {
-		if !f.until.IsZero() && now.After(f.until) {
+		expiredLock := f.until.IsZero() || now.After(f.until)
+		staleFail := f.lastFail.IsZero() || now.Sub(f.lastFail) > failWindow
+		if expiredLock && staleFail {
 			delete(p.fails, ip)
 		}
 	}
@@ -501,7 +536,7 @@ func (p *Panel) apiAuthLogin(w http.ResponseWriter, r *http.Request) {
 	s := &session{userID: user.ID, role: user.Role, csrf: randomToken(), exp: exp}
 	p.mu.Lock()
 	p.sessions[key] = s
-	p.fails[ip] = &failState{}
+	delete(p.fails, ip)
 	p.mu.Unlock()
 	if req.Remember {
 		if err := p.srv.SavePanelSession(store.PanelSession{
@@ -577,8 +612,24 @@ func (p *Panel) revokeOtherSessions(r *http.Request) {
 	_ = p.srv.RevokeUserPanelSessions(userID, keep)
 }
 
+func isLoopbackIP(host string) bool {
+	ip := net.ParseIP(strings.Trim(strings.TrimSpace(host), "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+func remoteHostOf(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 func isHTTPS(r *http.Request) bool {
-	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	if r.TLS != nil {
+		return true
+	}
+	return isLoopbackIP(remoteHostOf(r)) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func (p *Panel) allowedWithRetry(ip string) (bool, int) {
@@ -589,14 +640,14 @@ func (p *Panel) allowedWithRetry(ip string) (bool, int) {
 	if f == nil {
 		return true, 0
 	}
-	if f.count >= maxFails && now.Before(f.until) {
+	if !f.until.IsZero() && now.Before(f.until) {
 		sec := int(time.Until(f.until).Seconds())
 		if sec < 1 {
 			sec = 1
 		}
 		return false, sec
 	}
-	if !f.until.IsZero() && now.After(f.until) {
+	if !f.lastFail.IsZero() && now.Sub(f.lastFail) > failWindow {
 		delete(p.fails, ip)
 	}
 	return true, 0
@@ -608,12 +659,18 @@ func (p *Panel) failed(ip string) {
 	defer p.mu.Unlock()
 	p.pruneLocked(now)
 	f := p.fails[ip]
-	if f == nil || (!f.until.IsZero() && now.After(f.until)) {
+	if f == nil || (!f.lastFail.IsZero() && now.Sub(f.lastFail) > failWindow) {
 		f = &failState{}
 		p.fails[ip] = f
 	}
 	f.count++
-	f.until = now.Add(lockFor)
+	f.lastFail = now
+	switch {
+	case f.count >= longLockFails:
+		f.until = now.Add(longLockFor)
+	case f.count >= maxFails:
+		f.until = now.Add(shortLockFor)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -638,12 +695,31 @@ func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
+// clientIP resolves the caller IP for login rate limiting. When the TCP peer is
+// a trusted local reverse proxy (127.0.0.1 / ::1), it honours X-Real-IP or the
+// rightmost non-loopback X-Forwarded-For entry so one bad actor behind nginx
+// never locks out 127.0.0.1 for everyone else. Direct public connections always
+// ignore proxy headers to prevent IP spoofing.
 func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
+	remote := remoteHostOf(r)
+	if !isLoopbackIP(remote) {
+		return remote
 	}
-	return r.RemoteAddr
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		if ip := net.ParseIP(strings.Trim(xri, "[]")); ip != nil {
+			return ip.String()
+		}
+	}
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			cand := strings.Trim(strings.TrimSpace(parts[i]), "[]")
+			if ip := net.ParseIP(cand); ip != nil && !ip.IsLoopback() {
+				return ip.String()
+			}
+		}
+	}
+	return remote
 }
 
 func checkPassword(hash, plain string) bool {
