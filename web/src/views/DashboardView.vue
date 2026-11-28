@@ -1,17 +1,26 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NAlert, NButton, NSkeleton } from 'naive-ui'
+import { NAlert, NButton, NIcon, NSkeleton, NTag } from 'naive-ui'
+import { ArrowDownOutline, ArrowUpOutline, SwapVerticalOutline } from '@vicons/ionicons5'
+import { useAuthStore } from '@/stores/auth'
 import { useDashboardStore } from '@/stores/dashboard'
-import { formatRate } from '@/utils/format'
+import { formatBytes, formatRate } from '@/utils/format'
 import ClientDownloadCard from '@/components/ClientDownloadCard.vue'
 import RateChart from '@/components/RateChart.vue'
 
+const authStore = useAuthStore()
 const dashStore = useDashboardStore()
 
 const nodeDisplayName = computed(() => dashStore.info?.name || '本机节点')
 const nodeHost = computed(
   () => dashStore.settings?.public_host || dashStore.settings?.domain || dashStore.settings?.join_addr || '运行中'
 )
+const accountName = computed(() => dashStore.user?.username || authStore.user?.username || '')
+const monthlyQuotaLabel = computed(() => {
+  const u = dashStore.user
+  if (!u || !u.monthly_quota_mb) return ''
+  return `本月已用 ${formatBytes(u.used_bytes)} / ${u.monthly_quota_mb} MB`
+})
 </script>
 
 <template>
@@ -62,10 +71,59 @@ const nodeHost = computed(
       </template>
     </section>
 
-    <!-- 2. Direct Panel Client Downloader -->
+    <!-- 2. Per-Account Cumulative Inbound / Outbound Traffic Record -->
+    <section class="nfr-card traffic-card" aria-label="账号累计出入站流量">
+      <template v-if="dashStore.loading && !dashStore.initialized">
+        <NSkeleton text :repeat="2" />
+      </template>
+      <template v-else>
+        <div class="traffic-head">
+          <div class="traffic-title-wrap">
+            <span class="traffic-title">出入站总流量记录</span>
+            <NTag v-if="accountName" size="tiny" :bordered="false" type="info">{{ accountName }}</NTag>
+          </div>
+          <span v-if="monthlyQuotaLabel" class="traffic-quota nfr-mono">{{ monthlyQuotaLabel }}</span>
+          <span v-else class="traffic-hint">各账号独立统计 · 持久记录</span>
+        </div>
+
+        <div class="traffic-grid">
+          <div class="traffic-cell">
+            <div class="traffic-cell-label">
+              <NIcon :size="14" class="traffic-icon in"><ArrowDownOutline /></NIcon>
+              <span>累计入站流量</span>
+            </div>
+            <div class="traffic-cell-val nfr-num" data-metric="total-in">
+              {{ formatBytes(dashStore.totalInBytes) }}
+            </div>
+          </div>
+
+          <div class="traffic-cell">
+            <div class="traffic-cell-label">
+              <NIcon :size="14" class="traffic-icon out"><ArrowUpOutline /></NIcon>
+              <span>累计出站流量</span>
+            </div>
+            <div class="traffic-cell-val nfr-num" data-metric="total-out">
+              {{ formatBytes(dashStore.totalOutBytes) }}
+            </div>
+          </div>
+
+          <div class="traffic-cell total">
+            <div class="traffic-cell-label">
+              <NIcon :size="14" class="traffic-icon sum"><SwapVerticalOutline /></NIcon>
+              <span>累计总流量</span>
+            </div>
+            <div class="traffic-cell-val nfr-num" data-metric="total-sum">
+              {{ formatBytes(dashStore.totalTrafficBytes) }}
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- 3. Direct Panel Client Downloader -->
     <ClientDownloadCard />
 
-    <!-- 3. 60s Global Rate Chart -->
+    <!-- 4. 60s Per-Account Rate Chart -->
     <RateChart :rates="dashStore.rates" />
   </div>
 </template>
@@ -166,6 +224,89 @@ const nodeHost = computed(
   color: var(--nfr-text-secondary);
 }
 
+.traffic-card {
+  padding: 15px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.traffic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.traffic-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.traffic-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--nfr-text);
+}
+
+.traffic-hint,
+.traffic-quota {
+  font-size: 12px;
+  color: var(--nfr-text-secondary);
+}
+
+.traffic-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.traffic-cell {
+  padding: 11px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--nfr-border);
+  background: var(--nfr-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.traffic-cell.total {
+  background: var(--nfr-primary-soft);
+  border-color: transparent;
+}
+
+.traffic-cell-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--nfr-text-secondary);
+}
+
+.traffic-icon.in {
+  color: #16a34a;
+}
+
+.traffic-icon.out {
+  color: #2563eb;
+}
+
+.traffic-icon.sum {
+  color: var(--nfr-primary);
+}
+
+.traffic-cell-val {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--nfr-text);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 900px) {
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -178,6 +319,25 @@ const nodeHost = computed(
 
   .kpi-value {
     font-size: 19px;
+  }
+}
+
+@media (max-width: 600px) {
+  .traffic-card {
+    padding: 14px;
+  }
+
+  .traffic-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .traffic-cell.total {
+    grid-column: span 2;
+  }
+
+  .traffic-cell-val {
+    font-size: 17px;
   }
 }
 </style>

@@ -262,6 +262,8 @@ type User struct {
 	MonthlyQuotaMB int64     `json:"monthly_quota_mb"`
 	UsedBytes      int64     `json:"used_bytes"`
 	UsageMonth     string    `json:"usage_month,omitempty"`
+	TotalInBytes   int64     `json:"total_in_bytes"`
+	TotalOutBytes  int64     `json:"total_out_bytes"`
 	TunnelCount    int       `json:"tunnel_count"`
 	OnlineTunnels  int       `json:"online_tunnels"`
 	HasAvatar      bool      `json:"has_avatar"`

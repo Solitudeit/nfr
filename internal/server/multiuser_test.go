@@ -97,9 +97,15 @@ func dialTestAgent(t *testing.T, addr, authToken, nodeName string, proxies []pro
 func TestMultiUserControlPlaneRejectsCrossUserHijack(t *testing.T) {
 	srv, adminID, _ := newTestMultiUserServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go func() { _ = srv.Run(ctx) }()
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = srv.Run(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-runDone
+	}()
 	deadline := time.Now().Add(5 * time.Second)
 	var ctlAddr string
 	for time.Now().Before(deadline) {
@@ -347,5 +353,66 @@ func TestMultiUserQuotasNonBypassable(t *testing.T) {
 	afterDel, _ := srv.UserByID(alice.ID)
 	if afterDel.UsedBytes-beforeDel.UsedBytes < 1<<20 {
 		t.Fatalf("unflushed traffic lost on delete: before=%d after=%d", beforeDel.UsedBytes, afterDel.UsedBytes)
+	}
+}
+
+func TestPerUserTotalInOutTrafficIsolationAndPersistence(t *testing.T) {
+	srv, adminID, _ := newTestMultiUserServer(t)
+
+	alice, err := srv.CreateUser(api.CreateUserRequest{Username: "alice", Password: "password123"})
+	if err != nil {
+		t.Fatalf("CreateUser alice: %v", err)
+	}
+	bob, err := srv.CreateUser(api.CreateUserRequest{Username: "bob", Password: "password123"})
+	if err != nil {
+		t.Fatalf("CreateUser bob: %v", err)
+	}
+
+	tAdmin, err := srv.CreateStandaloneTunnelForOwner(adminID, api.TunnelRequest{
+		Name: "admin-svc", Type: store.TunnelTCP, Local: "127.0.0.1:22",
+	})
+	if err != nil {
+		t.Fatalf("create admin tunnel: %v", err)
+	}
+	tAlice, err := srv.CreateStandaloneTunnelForOwner(alice.ID, api.TunnelRequest{
+		Name: "alice-svc", Type: store.TunnelTCP, Local: "127.0.0.1:8080",
+	})
+	if err != nil {
+		t.Fatalf("create alice tunnel: %v", err)
+	}
+
+	// Simulate distinct in/out bytes on admin and alice tunnels (bob has none)
+	srv.met.AddBytes(tAdmin.ID, 1000, 2000)
+	srv.met.AddBytes(tAlice.ID, 5000, 9000)
+
+	// 1. Live profile reflects unflushed traffic immediately with strict isolation
+	pAdmin, _ := srv.UserProfile(adminID)
+	pAlice, _ := srv.UserProfile(alice.ID)
+	pBob, _ := srv.UserProfile(bob.ID)
+	if pAdmin.TotalInBytes != 1000 || pAdmin.TotalOutBytes != 2000 {
+		t.Fatalf("admin live totals = (%d, %d), want (1000, 2000)", pAdmin.TotalInBytes, pAdmin.TotalOutBytes)
+	}
+	if pAlice.TotalInBytes != 5000 || pAlice.TotalOutBytes != 9000 {
+		t.Fatalf("alice live totals = (%d, %d), want (5000, 9000)", pAlice.TotalInBytes, pAlice.TotalOutBytes)
+	}
+	if pBob.TotalInBytes != 0 || pBob.TotalOutBytes != 0 {
+		t.Fatalf("bob leaked traffic: (%d, %d)", pBob.TotalInBytes, pBob.TotalOutBytes)
+	}
+
+	// 2. After flushQuotas, totals stay identical (zero double counting) and persist in store
+	srv.flushQuotas()
+	pAliceFlushed, _ := srv.UserProfile(alice.ID)
+	if pAliceFlushed.TotalInBytes != 5000 || pAliceFlushed.TotalOutBytes != 9000 {
+		t.Fatalf("alice flushed totals = (%d, %d), want (5000, 9000)", pAliceFlushed.TotalInBytes, pAliceFlushed.TotalOutBytes)
+	}
+
+	// 3. Add more traffic and delete alice's tunnel -> cumulative totals persist cleanly!
+	srv.met.AddBytes(tAlice.ID, 1234, 5678)
+	if err := srv.DeleteTunnelForOwner(alice.ID, tAlice.ID); err != nil {
+		t.Fatalf("delete alice tunnel: %v", err)
+	}
+	pAliceAfterDel, _ := srv.UserProfile(alice.ID)
+	if pAliceAfterDel.TotalInBytes != 6234 || pAliceAfterDel.TotalOutBytes != 14678 {
+		t.Fatalf("alice after delete totals = (%d, %d), want (6234, 14678)", pAliceAfterDel.TotalInBytes, pAliceAfterDel.TotalOutBytes)
 	}
 }

@@ -76,8 +76,15 @@ func TestAuthTokenAndDeclarativeProxiesViaYAML(t *testing.T) {
 		t.Fatalf("server.New: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = srv.Run(ctx) }()
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = srv.Run(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-runDone
+	}()
 	waitListen(t, loadedSrv.ControlListen)
 
 	// Write client.yaml declaring auth_token + pin + one TCP proxy.

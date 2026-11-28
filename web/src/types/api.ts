@@ -84,6 +84,7 @@ export interface DashboardSettingsSummary {
 
 export interface DashboardResponse {
   info: InstanceInfo
+  user?: UserProfile
   tunnels: Tunnel[]
   nodes: NodeItem[]
   events: ActivityEvent[]
@@ -271,6 +272,8 @@ export interface UserProfile {
   monthly_quota_mb: number
   used_bytes: number
   usage_month?: string
+  total_in_bytes: number
+  total_out_bytes: number
   tunnel_count: number
   online_tunnels: number
   has_avatar: boolean

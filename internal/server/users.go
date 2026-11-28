@@ -158,6 +158,7 @@ func (s *Server) renderUser(st *store.State, u store.User, onlineNodes map[strin
 			onlineTunnels++
 		}
 	}
+	liveIn, liveOut := s.unflushedTrafficForOwner(st, u.ID)
 	out := api.User{
 		ID:             u.ID,
 		Username:       u.Username,
@@ -166,8 +167,10 @@ func (s *Server) renderUser(st *store.State, u store.User, onlineNodes map[strin
 		MaxTunnels:     u.MaxTunnels,
 		MaxBandwidthKB: u.MaxBandwidthKB,
 		MonthlyQuotaMB: u.MonthlyQuotaMB,
-		UsedBytes:      u.UsedBytes,
+		UsedBytes:      u.UsedBytes + liveIn + liveOut,
 		UsageMonth:     u.UsageMonth,
+		TotalInBytes:   u.TotalInBytes + liveIn,
+		TotalOutBytes:  u.TotalOutBytes + liveOut,
 		TunnelCount:    tunnels,
 		OnlineTunnels:  onlineTunnels,
 		HasAvatar:      len(u.AvatarData) > 0 && u.AvatarMime != "",

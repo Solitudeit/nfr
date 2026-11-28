@@ -45,6 +45,8 @@ var mysqlDDL = []string{
 		monthly_quota_mb BIGINT NOT NULL DEFAULT 0,
 		used_bytes BIGINT NOT NULL DEFAULT 0,
 		usage_month VARCHAR(16) NOT NULL DEFAULT '',
+		total_in_bytes BIGINT NOT NULL DEFAULT 0,
+		total_out_bytes BIGINT NOT NULL DEFAULT 0,
 		avatar_mime VARCHAR(64) NOT NULL DEFAULT '',
 		avatar_data MEDIUMBLOB,
 		avatar_ver BIGINT NOT NULL DEFAULT 0,
@@ -192,6 +194,32 @@ func ensureMySQLSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("初始化 MySQL 表结构失败: %w", err)
 		}
 	}
+	// Idempotent column upgrades for databases initialized on earlier v1.0.0-beta.4/5 releases.
+	if err := ensureMySQLColumn(ctx, db, "nfr_users", "total_in_bytes", "BIGINT NOT NULL DEFAULT 0 AFTER usage_month"); err != nil {
+		return err
+	}
+	if err := ensureMySQLColumn(ctx, db, "nfr_users", "total_out_bytes", "BIGINT NOT NULL DEFAULT 0 AFTER total_in_bytes"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureMySQLColumn(ctx context.Context, db *sql.DB, table, column, definition string) error {
+	var cnt int
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+		table, column,
+	).Scan(&cnt)
+	if err != nil {
+		return fmt.Errorf("检查表 %s 字段 %s 失败: %w", table, column, err)
+	}
+	if cnt > 0 {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)); err != nil {
+		return fmt.Errorf("升级表 %s 添加字段 %s 失败: %w", table, column, err)
+	}
 	return nil
 }
 
@@ -284,10 +312,12 @@ func saveStateToMySQL(ctx context.Context, db *sql.DB, key []byte, in State) err
 			INSERT INTO nfr_users (
 				id, username, role, password_hash, auth_token_enc, disabled,
 				max_tunnels, max_bandwidth_kb, monthly_quota_mb, used_bytes, usage_month,
+				total_in_bytes, total_out_bytes,
 				avatar_mime, avatar_data, avatar_ver, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			u.ID, u.Username, u.Role, u.PasswordHash, encTok, u.Disabled,
 			u.MaxTunnels, u.MaxBandwidthKB, u.MonthlyQuotaMB, u.UsedBytes, u.UsageMonth,
+			u.TotalInBytes, u.TotalOutBytes,
 			u.AvatarMime, u.AvatarData, u.AvatarVer, utcOrNow(u.CreatedAt), utcOrNow(u.UpdatedAt),
 		); err != nil {
 			return fmt.Errorf("insert user %s: %w", u.Username, err)
@@ -414,6 +444,7 @@ func loadStateFromMySQL(ctx context.Context, db *sql.DB, key []byte) (State, err
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, username, role, password_hash, auth_token_enc, disabled,
 			max_tunnels, max_bandwidth_kb, monthly_quota_mb, used_bytes, usage_month,
+			total_in_bytes, total_out_bytes,
 			avatar_mime, avatar_data, avatar_ver, created_at, updated_at
 		FROM nfr_users ORDER BY created_at ASC, id ASC`)
 	if err != nil {
@@ -425,6 +456,7 @@ func loadStateFromMySQL(ctx context.Context, db *sql.DB, key []byte) (State, err
 		if err := rows.Scan(
 			&u.ID, &u.Username, &u.Role, &u.PasswordHash, &encTok, &u.Disabled,
 			&u.MaxTunnels, &u.MaxBandwidthKB, &u.MonthlyQuotaMB, &u.UsedBytes, &u.UsageMonth,
+			&u.TotalInBytes, &u.TotalOutBytes,
 			&u.AvatarMime, &u.AvatarData, &u.AvatarVer, &u.CreatedAt, &u.UpdatedAt,
 		); err != nil {
 			rows.Close()

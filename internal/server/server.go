@@ -62,7 +62,7 @@ type Server struct {
 	attempts     map[string]*attempt
 	lastUsed     map[string]time.Time
 	limits       map[string]*tunnelLimit  // per tunnel bandwidth shaping
-	flushed      map[string]int64         // quota accounting: metrics total already folded into the store
+	flushed      map[string]flushedBytes  // quota & traffic accounting: metrics totals already folded into the store
 	targetDown   map[string]targetFailure // tunnel id -> last "cannot reach the inner address" report
 
 	httpSrv       *http.Server
@@ -132,7 +132,7 @@ func New(opts Options) (*Server, string, error) {
 		attempts:     make(map[string]*attempt),
 		lastUsed:     make(map[string]time.Time),
 		limits:       make(map[string]*tunnelLimit),
-		flushed:      make(map[string]int64),
+		flushed:      make(map[string]flushedBytes),
 	}
 
 	// The public HTTPS listener offers HTTP/1.1 as well as the tunnel
@@ -397,6 +397,8 @@ func (s *Server) shutdown() error {
 		_ = s.httpsSrv.Close()
 	}
 	s.wg.Wait()
+	// Flush final in-memory traffic counters after active connections drain.
+	s.flushQuotas()
 	return nil
 }
 

@@ -41,6 +41,8 @@ type User struct {
 	MonthlyQuotaMB int64     `json:"monthly_quota_mb,omitempty"`
 	UsedBytes      int64     `json:"used_bytes,omitempty"`
 	UsageMonth     string    `json:"usage_month,omitempty"`
+	TotalInBytes   int64     `json:"total_in_bytes,omitempty"`
+	TotalOutBytes  int64     `json:"total_out_bytes,omitempty"`
 	AvatarMime     string    `json:"avatar_mime,omitempty"`
 	AvatarData     []byte    `json:"avatar_data,omitempty"`
 	AvatarVer      int64     `json:"avatar_ver,omitempty"`

@@ -10,6 +10,7 @@ import type {
   ProbeResult,
   RatePoint,
   Tunnel,
+  UserProfile,
 } from '@/types/api'
 
 export type ConnectionState = 'live' | 'reconnecting' | 'disconnected'
@@ -18,6 +19,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 
 export const useDashboardStore = defineStore('dashboard', () => {
   const info = ref<InstanceInfo | null>(null)
+  const user = ref<UserProfile | null>(null)
   const tunnels = ref<Tunnel[]>([])
   const nodes = ref<NodeItem[]>([])
   const events = ref<ActivityEvent[]>([])
@@ -54,6 +56,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const runningTunnelCount = computed(() => tunnels.value.filter((t) => t.enabled && t.online).length)
   const totalInRate = computed(() => tunnels.value.reduce((acc, t) => acc + (t.in_rate || 0), 0))
   const totalOutRate = computed(() => tunnels.value.reduce((acc, t) => acc + (t.out_rate || 0), 0))
+  const totalInBytes = computed(() => user.value?.total_in_bytes ?? 0)
+  const totalOutBytes = computed(() => user.value?.total_out_bytes ?? 0)
+  const totalTrafficBytes = computed(() => totalInBytes.value + totalOutBytes.value)
 
   async function fetchDashboard(silent = false) {
     if (!silent && !initialized.value) {
@@ -62,6 +67,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     try {
       const data = await apiRequest<DashboardResponse>('/dashboard')
       info.value = data.info
+      user.value = data.user || null
       tunnels.value = data.tunnels || []
       nodes.value = data.nodes || []
       events.value = (data.events || []).slice().reverse()
@@ -262,6 +268,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   function reset() {
     stopRealtime()
     info.value = null
+    user.value = null
     tunnels.value = []
     nodes.value = []
     events.value = []
@@ -277,6 +284,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   return {
     info,
+    user,
     tunnels,
     nodes,
     events,
@@ -295,6 +303,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     runningTunnelCount,
     totalInRate,
     totalOutRate,
+    totalInBytes,
+    totalOutBytes,
+    totalTrafficBytes,
     fetchDashboard,
     startRealtime,
     stopRealtime,
