@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,6 +148,7 @@ func normalizeChannel(ch string) string {
 }
 
 func (u *updater) startBackground(ctx context.Context) {
+	cleanupStaleUpgradeDirs()
 	if os.Getenv("NFR_DISABLE_UPDATE_CHECK") == "1" {
 		return
 	}
@@ -489,14 +492,46 @@ func (u *updater) check(ctx context.Context, source, channel string) (api.Update
 	return st, nil
 }
 
+func cleanupStaleUpgradeDirs() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	entries, err := os.ReadDir(filepath.Dir(exe))
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(exe)
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), ".nfr-upgrade-") {
+			_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+func withCacheBuster(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set("_t", strconv.FormatInt(time.Now().Unix(), 10))
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func fetchManifest(ctx context.Context, targetURL string) (*versionManifest, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, withCacheBuster(targetURL), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "nfr-updater/"+currentAppVersion())
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Cache-Control", "no-cache")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -909,6 +944,10 @@ func (u *updater) runUpgrade(exePath, ver, source, mirrorPrefix string) {
 			}
 		}
 	}
+
+	// Clean up downloaded archive & temp dir explicitly BEFORE restarting/exec'ing
+	// so neither archives nor empty .nfr-upgrade-* folders linger after restart.
+	_ = os.RemoveAll(tmpDir)
 
 	// 7. Signal restarting so frontend shows smooth reload state, then restart.
 	u.setProgress(api.UpgradeProgress{

@@ -180,6 +180,9 @@ export interface TunnelConfigResponse {
   toml: string
   yaml: string
   run_hint: string
+  quick_token?: string
+  quick_cmd_unix?: string
+  quick_cmd_win?: string
 }
 
 export interface KickResponse {

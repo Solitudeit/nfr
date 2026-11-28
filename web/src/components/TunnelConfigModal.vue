@@ -13,7 +13,7 @@ import {
   NSkeleton,
   useMessage,
 } from 'naive-ui'
-import { CheckmarkOutline, CopyOutline, DownloadOutline } from '@vicons/ionicons5'
+import { CheckmarkOutline, CopyOutline, DownloadOutline, FlashOutline } from '@vicons/ionicons5'
 import { apiRequest } from '@/api/client'
 import { useDashboardStore } from '@/stores/dashboard'
 import type { Tunnel, TunnelConfigResponse } from '@/types/api'
@@ -32,12 +32,17 @@ const emit = defineEmits<{
 const message = useMessage()
 const dashStore = useDashboardStore()
 const format = ref<'toml' | 'yaml'>('toml')
+const quickOS = ref<'unix' | 'win'>(
+  typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('win') ? 'win' : 'unix'
+)
 const loading = ref(false)
 const errMsg = ref('')
 const data = ref<TunnelConfigResponse | null>(null)
 const configRev = ref(0)
+const copiedQuick = ref(false)
 const copiedConfig = ref(false)
 const copiedCmd = ref(false)
+let copiedQuickTimer: number | undefined
 let copiedConfigTimer: number | undefined
 let copiedCmdTimer: number | undefined
 let fetchSeq = 0
@@ -48,8 +53,16 @@ const liveTunnel = computed(() => {
 })
 
 onBeforeUnmount(() => {
+  window.clearTimeout(copiedQuickTimer)
   window.clearTimeout(copiedConfigTimer)
   window.clearTimeout(copiedCmdTimer)
+})
+
+const quickCommand = computed(() => {
+  if (!data.value) return ''
+  return quickOS.value === 'win'
+    ? data.value.quick_cmd_win || ''
+    : data.value.quick_cmd_unix || ''
 })
 
 const activeText = computed(() => {
@@ -112,6 +125,20 @@ watch(configWatchKey, async (key) => {
   }
 })
 
+async function handleCopyQuick() {
+  if (!quickCommand.value) return
+  if (await copyToClipboard(quickCommand.value)) {
+    copiedQuick.value = true
+    window.clearTimeout(copiedQuickTimer)
+    copiedQuickTimer = window.setTimeout(() => {
+      copiedQuick.value = false
+    }, 1600)
+    message.success('一键启动命令已复制，解压 nfrc 后粘贴回车即可启动')
+  } else {
+    message.warning('当前浏览器禁止自动复制，请长按下方一键启动命令手动复制')
+  }
+}
+
 async function handleCopyConfig() {
   if (!activeText.value) return
   if (await copyToClipboard(activeText.value)) {
@@ -165,6 +192,38 @@ async function handleCopyCmd() {
     </NAlert>
 
     <div v-else-if="data" class="cfg-body">
+      <div v-if="quickCommand" class="cfg-quick-block">
+        <div class="cfg-quick-head">
+          <div class="cfg-quick-title-wrap">
+            <NIcon :size="15" class="cfg-quick-icon"><FlashOutline /></NIcon>
+            <span class="cfg-quick-title">一键启动（免配置文件）</span>
+          </div>
+          <div class="cfg-quick-controls">
+            <NRadioGroup v-model:value="quickOS" size="small">
+              <NRadioButton value="unix">Linux / macOS</NRadioButton>
+              <NRadioButton value="win">Windows</NRadioButton>
+            </NRadioGroup>
+            <NButton size="small" type="primary" @click="handleCopyQuick">
+              <template #icon>
+                <Transition name="nfr-icon-swap" mode="out-in">
+                  <NIcon :key="copiedQuick ? 'ok' : 'copy'">
+                    <CheckmarkOutline v-if="copiedQuick" />
+                    <CopyOutline v-else />
+                  </NIcon>
+                </Transition>
+              </template>
+              {{ copiedQuick ? '已复制' : '复制启动命令' }}
+            </NButton>
+          </div>
+        </div>
+        <div class="cfg-quick-box">
+          <code class="nfr-mono cfg-quick-code">{{ quickCommand }}</code>
+        </div>
+        <div class="cfg-quick-hint">
+          下载解压 nfrc 后在终端粘贴回车即可上线，面板修改端口或地址后原命令自动同步、无需重拷。
+        </div>
+      </div>
+
       <div class="cfg-bar">
         <NRadioGroup v-model:value="format" size="small">
           <NRadioButton value="toml">TOML</NRadioButton>
@@ -183,7 +242,7 @@ async function handleCopyCmd() {
             </template>
             {{ copiedConfig ? '已复制' : '复制配置' }}
           </NButton>
-          <NButton size="small" type="primary" @click="handleDownloadConfig">
+          <NButton size="small" secondary @click="handleDownloadConfig">
             <template #icon><NIcon><DownloadOutline /></NIcon></template>
             下载文件
           </NButton>
@@ -224,6 +283,68 @@ async function handleCopyCmd() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.cfg-quick-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--nfr-border);
+  background: var(--nfr-subtle);
+}
+
+.cfg-quick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cfg-quick-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cfg-quick-icon {
+  color: var(--nfr-accent, #18a058);
+}
+
+.cfg-quick-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nfr-text);
+}
+
+.cfg-quick-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cfg-quick-box {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--nfr-border);
+  background: var(--nfr-surface);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cfg-quick-code {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  color: var(--nfr-text);
+}
+
+.cfg-quick-hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--nfr-text-secondary);
 }
 
 .cfg-bar {

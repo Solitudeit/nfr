@@ -647,6 +647,40 @@ def main():
             except subprocess.TimeoutExpired:
                 exited = False
             check("kicked nfrc exits cleanly without reconnecting", exited)
+
+            # 8b. Bring the exact same tunnel back online with zero-file `nfrc up <nfr1_token>`.
+            quick_tok = cfg_res.get("quick_token", "")
+            check(
+                "quick-start launch token generated",
+                quick_tok.startswith("nfr1_") and cfg_res.get("quick_cmd_unix") == ("./nfrc up " + quick_tok),
+                str(cfg_res.get("quick_cmd_unix")),
+            )
+            if quick_tok:
+                q_log = open(os.path.join(tmp, "quick-agent.log"), "wb")
+                q_agent = subprocess.Popen([nfrc, "up", quick_tok], stdout=q_log, stderr=subprocess.STDOUT)
+                q_log.close()
+                procs.append(q_agent)
+                q_online = False
+                end = time.time() + 15
+                while time.time() < end:
+                    _, dstate = panel.json("/nfr/api/dashboard")
+                    cur = next((t for t in dstate.get("tunnels", []) if t["id"] == st_id), None)
+                    if cur and cur.get("online"):
+                        q_online = True
+                        break
+                    time.sleep(0.25)
+                check("nfrc up brings tunnel online without config file", q_online)
+                check(
+                    "nfrc up tunnel proxies traffic",
+                    q_online and tcp_probe(st_tun["remote_port"]),
+                    "port %s" % st_tun.get("remote_port"),
+                )
+                panel.json("/nfr/api/tunnels/%s/kick" % st_id, method="POST")
+                try:
+                    q_agent.wait(5)
+                except subprocess.TimeoutExpired:
+                    q_agent.terminate()
+
             panel.json("/nfr/api/tunnels/%s" % st_id, method="DELETE")
 
         # 9. HTTP on dedicated port without domain.

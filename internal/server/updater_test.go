@@ -132,7 +132,12 @@ func TestUpdaterSelfUpgradeAndBadChecksumRejected(t *testing.T) {
 	// 2. Valid SHA-256 replaces nfrs and sibling nfrc atomically and keeps .bak backup.
 	serveBadSum = false
 	restarted := make(chan string, 1)
-	srv.updater.restartHook = func(p string) { restarted <- p }
+	srv.updater.restartHook = func(p string) {
+		if matches, _ := filepath.Glob(filepath.Join(binDir, ".nfr-upgrade-*")); len(matches) != 0 {
+			t.Errorf("upgrade temp dirs were not removed before restart: %v", matches)
+		}
+		restarted <- p
+	}
 	srv.updater.runUpgrade(fakeExe, targetVer, "github", "")
 
 	select {
@@ -163,6 +168,9 @@ func TestAgentLogsTailUpdateHintWhenOutdated(t *testing.T) {
 	defer func() { version.Version = origVer }()
 
 	manifestSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("_t") == "" {
+			t.Errorf("expected cache-buster _t query param on manifest request, got %s", r.URL.String())
+		}
 		_, _ = w.Write([]byte(`{"preview":{"version":"v0.13.0-preview.9","notes":"update"}}`))
 	}))
 	defer manifestSrv.Close()

@@ -34,6 +34,7 @@ import (
 const clientUsage = `%[1]s — NFR client (the side that lives inside your network)
 
   %[1]s -c <config>            connect with client.toml or client.yaml (foreground)
+  %[1]s up <nfr1_token>        quick-start one panel tunnel without a config file
   %[1]s init                   generate a starter client.toml or client.yaml
   %[1]s verify -c <config>     validate TOML / YAML config syntax
   %[1]s status -c <config>     show the local configuration
@@ -52,9 +53,11 @@ Environment variables (Docker / zero-file startup):
   NFR_NAME        node display name (default: hostname)
   NFR_PIN         server certificate SHA-256 fingerprint (required unless NFR_CA=true)
   NFR_CA          set "true" if server uses ACME / public CA cert
+  NFR_UP_TOKEN    one-click launch token (alternative to passing it on CLI)
 
 Typical use:
 
+  %[1]s up nfr1_...
   %[1]s -c client.toml
   %[1]s -c client.yaml
 
@@ -65,6 +68,9 @@ Documentation: https://github.com/Solitudeit/nfr
 func RunClient(args []string) {
 	if len(args) > 0 {
 		switch args[0] {
+		case "up":
+			cmdUp(args[1:])
+			return
 		case "init":
 			cmdClientInit(args[1:])
 			return
@@ -116,6 +122,54 @@ func cmdClientVerify(args []string) {
 		fatal("invalid config: %v", err)
 	}
 	fmt.Printf("%s: configuration %s syntax is ok (%d server(s))\n", Program, *cfgPath, len(cfg.EffectiveServers()))
+}
+
+func cmdUp(args []string) {
+	fs := flag.NewFlagSet("up", flag.ExitOnError)
+	srvAddr := fs.String("s", "", "server control address (explicit flag mode)")
+	token := fs.String("k", "", "shared auth_token (explicit flag mode)")
+	tunnelID := fs.String("t", "", "panel tunnel ID (explicit flag mode)")
+	pin := fs.String("pin", "", "server certificate SHA-256 fingerprint")
+	ca := fs.Bool("ca", false, "verify server using system CA roots (ACME / public cert)")
+	logLevel := fs.String("log-level", "info", "log level (debug|info|warn|error)")
+	logFile := fs.String("log-file", "", "optional log file path")
+	_ = fs.Parse(args)
+
+	var spec config.LaunchSpec
+	switch {
+	case fs.NArg() >= 1:
+		var err error
+		spec, err = config.DecodeLaunchToken(fs.Arg(0))
+		if err != nil {
+			fatal("解析一键启动令牌失败: %v", err)
+		}
+	case strings.TrimSpace(*srvAddr) != "" || strings.TrimSpace(*tunnelID) != "":
+		spec = config.LaunchSpec{
+			ServerAddr: strings.TrimSpace(*srvAddr),
+			AuthToken:  strings.TrimSpace(*token),
+			TunnelID:   strings.TrimSpace(*tunnelID),
+			Pin:        strings.TrimSpace(*pin),
+			CA:         *ca,
+		}
+	case strings.TrimSpace(os.Getenv("NFR_UP_TOKEN")) != "":
+		var err error
+		spec, err = config.DecodeLaunchToken(os.Getenv("NFR_UP_TOKEN"))
+		if err != nil {
+			fatal("解析 NFR_UP_TOKEN 失败: %v", err)
+		}
+	default:
+		fatal("usage: %s up <nfr1_token>\n       %s up -s <server> -k <auth_token> -t <tunnel_id> --pin <sha256>", Program, Program)
+	}
+
+	cfg := spec.AgentConfig()
+	cfg.LogLevel = *logLevel
+	cfg.LogFile = *logFile
+	if err := cfg.Validate(); err != nil {
+		fatal("无效的启动参数: %v", err)
+	}
+	lg := log.NewClient(cfg.LogLevel, cfg.LogFile)
+	lg.Info(fmt.Sprintf("启动 NFR 客户端\n模式: 一键启动 (隧道 %s)", spec.TunnelID))
+	runAgents(cfg, lg)
 }
 
 func cmdAgent(args []string) {

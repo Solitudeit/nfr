@@ -127,6 +127,9 @@ type tunnelConfigPayload struct {
 	TOML         string `json:"toml"`
 	YAML         string `json:"yaml"`
 	RunHint      string `json:"run_hint"`
+	QuickToken   string `json:"quick_token,omitempty"`
+	QuickCmdUnix string `json:"quick_cmd_unix,omitempty"`
+	QuickCmdWin  string `json:"quick_cmd_win,omitempty"`
 }
 
 func (p *Panel) buildTunnelConfigPayload(t api.Tunnel) tunnelConfigPayload {
@@ -164,6 +167,18 @@ func (p *Panel) buildTunnelConfigPayload(t api.Tunnel) tunnelConfigPayload {
 	}
 	tomlFile := "nfrc-" + safeName + ".toml"
 	yamlFile := "nfrc-" + safeName + ".yaml"
+	var quickTok, quickUnix, quickWin string
+	if tok, err := config.EncodeLaunchToken(config.LaunchSpec{
+		ServerAddr: serverAddr,
+		AuthToken:  token,
+		TunnelID:   t.ID,
+		Pin:        pin,
+		CA:         useCA,
+	}); err == nil {
+		quickTok = tok
+		quickUnix = "./nfrc up " + tok
+		quickWin = `.\nfrc.exe up ` + tok
+	}
 	return tunnelConfigPayload{
 		TunnelID:     t.ID,
 		Name:         t.Name,
@@ -172,6 +187,9 @@ func (p *Panel) buildTunnelConfigPayload(t api.Tunnel) tunnelConfigPayload {
 		TOML:         tomlStr,
 		YAML:         yamlStr,
 		RunHint:      "nfrc -c " + tomlFile,
+		QuickToken:   quickTok,
+		QuickCmdUnix: quickUnix,
+		QuickCmdWin:  quickWin,
 	}
 }
 
