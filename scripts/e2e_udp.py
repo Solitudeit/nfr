@@ -168,7 +168,7 @@ def main():
             )
 
         server_log = open(os.path.join(tmp, "server.log"), "wb")
-        env = dict(os.environ, NFR_DISABLE_UPDATE_CHECK="1")
+        env = dict(os.environ, NFR_DISABLE_UPDATE_CHECK="1", NFR_STORAGE="file")
         server = subprocess.Popen(
             [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT, env=env
         )

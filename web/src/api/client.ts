@@ -74,10 +74,47 @@ export async function apiRequest<T>(
     if (res.status === 401 && !options.skipAuthRedirect && unauthorizedHandler) {
       unauthorizedHandler()
     }
-    const msg = typeof data.error === 'string' && data.error ? data.error : `请求失败 (${res.status})`
+    const msg =
+      (typeof data.error === 'string' && data.error) ||
+      (typeof data.message === 'string' && data.message) ||
+      `请求失败 (${res.status})`
     const retry = typeof data.retry_after_seconds === 'number' ? data.retry_after_seconds : undefined
     throw new APIError(res.status, msg, retry)
   }
 
+  return data as T
+}
+
+export async function apiUpload<T>(path: string, blob: Blob): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': blob.type || 'application/octet-stream',
+  }
+  if (csrfToken) {
+    headers['X-CSRF'] = csrfToken
+  }
+  const res = await fetch(`/nfr/api${path}`, {
+    method: 'POST',
+    headers,
+    credentials: 'same-origin',
+    cache: 'no-store',
+    body: blob,
+  })
+  const text = await res.text()
+  let data: Record<string, unknown> = {}
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = { error: text }
+    }
+  }
+  if (!res.ok) {
+    if (res.status === 401 && unauthorizedHandler) {
+      unauthorizedHandler()
+    }
+    const msg = typeof data.error === 'string' && data.error ? data.error : `上传失败 (${res.status})`
+    throw new APIError(res.status, msg)
+  }
   return data as T
 }

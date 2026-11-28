@@ -75,6 +75,19 @@ func (s *Server) RecentEvents() []api.Event {
 	return s.hub.history()
 }
 
+// RecentEventsForOwner returns recent events visible to ownerID. Admins see
+// their own events plus global system events; regular users see only their own.
+func (s *Server) RecentEventsForOwner(ownerID string, isAdmin bool) []api.Event {
+	all := s.RecentEvents()
+	out := make([]api.Event, 0, len(all))
+	for _, ev := range all {
+		if ev.OwnerID == ownerID || (isAdmin && ev.OwnerID == "") {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
 // SubscribeEvents subscribes to live server activity events.
 func (s *Server) SubscribeEvents() (<-chan api.Event, func()) {
 	return s.hub.subscribe()
@@ -223,10 +236,11 @@ func (s *Server) handleJoin(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn, f 
 	}
 
 	var (
-		nodeID string
-		token  string
-		errMsg string
-		bound  string
+		nodeID  string
+		ownerID string
+		token   string
+		errMsg  string
+		bound   string
 	)
 	now := time.Now().UTC()
 	err := s.st.Update(func(st *store.State) error {
@@ -239,10 +253,16 @@ func (s *Server) handleJoin(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn, f 
 			errMsg = err.Error()
 			return err
 		}
+		ownerID = defaultOwnerID(st, jc.OwnerID)
+		if u, ok := st.UserByID(ownerID); ok && u.Disabled {
+			errMsg = "账号已被停用，请联系管理员"
+			return errors.New(errMsg)
+		}
 		token = auth.NewSecret("nfr_n_", 24)
 		nodeID = store.NewID()
 		st.Nodes = append(st.Nodes, store.Node{
 			ID:         nodeID,
+			OwnerID:    ownerID,
 			Name:       name,
 			TokenHash:  auth.Hash(token),
 			OS:         f.OS,
@@ -253,12 +273,8 @@ func (s *Server) handleJoin(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn, f 
 		})
 		t := now
 		jc.UsedAt = &t
-		// A code minted by CreateTunnelAwaiting carries the tunnel it belongs
-		// to: redeeming it activates that tunnel right here, in the same
-		// update that creates the node. A deleted tunnel or one that already
-		// has a node is skipped silently — the join itself still succeeds.
 		if jc.TunnelID != "" {
-			if t, ok := st.TunnelByID(jc.TunnelID); ok && t.NodeID == "" {
+			if t, ok := st.TunnelByID(jc.TunnelID); ok && t.NodeID == "" && (t.OwnerID == "" || t.OwnerID == ownerID) {
 				t.NodeID = nodeID
 				t.UpdatedAt = now
 				bound = t.Name
@@ -272,11 +288,9 @@ func (s *Server) handleJoin(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn, f 
 		return
 	}
 	s.lg.Info("node joined", "node", name, "id", nodeID, "remote", ip)
-	s.hub.publish(api.Event{Type: "node-joined", At: now, Message: name})
+	s.hub.publish(api.Event{Type: "node-joined", At: now, Message: name, OwnerID: ownerID})
 	if bound != "" {
-		// The store is no longer locked: the hub does not need it, and the
-		// event wants the tunnel name captured inside the update.
-		s.hub.publish(api.Event{Type: "tunnel-bound", At: now, Message: bound})
+		s.hub.publish(api.Event{Type: "tunnel-bound", At: now, Message: bound, OwnerID: ownerID})
 	}
 	_ = proto.WriteFrame(ctrl, &proto.Frame{
 		Type:    proto.TypeWelcome,
@@ -298,8 +312,28 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 			sess.Close()
 			return
 		}
-		shared := s.AuthToken()
-		if shared == "" {
+		type tokenCandidate struct {
+			userID   string
+			token    string
+			disabled bool
+		}
+		snap := s.st.Snapshot()
+		pinnedAdminTok := strings.TrimSpace(s.cfg.AuthToken)
+		candidates := make([]tokenCandidate, 0, len(snap.Users)+1)
+		for _, u := range snap.Users {
+			tok := u.AuthToken
+			if u.Role == store.RoleAdmin {
+				if pinnedAdminTok != "" {
+					tok = pinnedAdminTok
+				} else if tok == "" {
+					tok = snap.Settings.AuthToken
+				}
+			}
+			if tok != "" {
+				candidates = append(candidates, tokenCandidate{userID: u.ID, token: tok, disabled: u.Disabled})
+			}
+		}
+		if len(candidates) == 0 {
 			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "server has no auth_token configured"})
 			sess.Close()
 			return
@@ -311,13 +345,32 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		}
 		_ = ctrl.SetReadDeadline(time.Now().Add(10 * time.Second))
 		authFrame, err := proto.ReadFrame(ctrl)
-		if err != nil || authFrame.Type != proto.TypeAuth || !auth.CheckMAC(auth.Hash(shared), nonce, authFrame.MAC) {
+		if err != nil || authFrame.Type != proto.TypeAuth {
 			s.joinFailed(ip)
 			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "authentication failed: invalid auth_token"})
 			sess.Close()
 			return
 		}
+		var matched *tokenCandidate
+		for i := range candidates {
+			if auth.CheckMAC(auth.Hash(candidates[i].token), nonce, authFrame.MAC) {
+				matched = &candidates[i]
+				break
+			}
+		}
+		if matched == nil {
+			s.joinFailed(ip)
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "authentication failed: invalid auth_token"})
+			sess.Close()
+			return
+		}
+		if matched.disabled {
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "账号已被停用，请联系管理员"})
+			sess.Close()
+			return
+		}
 		_ = ctrl.SetReadDeadline(time.Time{})
+		authedUserID := matched.userID
 
 		name := strings.TrimSpace(hello.Node)
 		if name == "" {
@@ -329,11 +382,21 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		created := false
 		claimedChanged := false
 		if err := s.st.Update(func(st *store.State) error {
-			// Panel-only tunnel authority: clients may NEVER create a tunnel
-			// that does not already exist in the server panel. Validate all
-			// requested tunnels BEFORE upserting the node so rejected configs
-			// never leave orphan nodes or ghost tunnels.
-			existingNode, hasNode := st.NodeByName(name)
+			u, ok := st.UserByID(authedUserID)
+			if !ok || u.Disabled {
+				return errForbidden("user_disabled", "账号已被停用，请联系管理员")
+			}
+
+			// Panel-only tunnel authority + strict per-user isolation: clients
+			// may NEVER create tunnels or claim another user's tunnel.
+			var existingNode *store.Node
+			for i := range st.Nodes {
+				if st.Nodes[i].OwnerID == authedUserID && strings.EqualFold(st.Nodes[i].Name, name) {
+					existingNode = &st.Nodes[i]
+					break
+				}
+			}
+			hasNode := existingNode != nil
 			var candidateNodeID string
 			if hasNode {
 				candidateNodeID = existingNode.ID
@@ -343,8 +406,8 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 			var matchedProxies []*store.Tunnel
 			if isPerTunnel {
 				t, ok := st.TunnelByID(perTunnelID)
-				if !ok {
-					return errNotFound("隧道不存在或已被删除，请先在服务端面板创建隧道")
+				if !ok || t.OwnerID != authedUserID {
+					return errNotFound("隧道不存在或无权访问，请检查账号密钥与隧道配置")
 				}
 				targetTun = t
 			} else if len(hello.Proxies) > 0 {
@@ -356,7 +419,7 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 					var match *store.Tunnel
 					for i := range st.Tunnels {
 						t := &st.Tunnels[i]
-						if !strings.EqualFold(t.Name, pname) {
+						if t.OwnerID != authedUserID || !strings.EqualFold(t.Name, pname) {
 							continue
 						}
 						if t.NodeID == "" || (candidateNodeID != "" && t.NodeID == candidateNodeID) {
@@ -366,7 +429,7 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 						return errConflict("name_conflict", fmt.Sprintf("隧道 [%s] 已绑定到其他客户端节点，拒绝抢占", pname))
 					}
 					if match == nil {
-						return errNotFound(fmt.Sprintf("隧道 [%s] 未在服务端面板创建，禁止客户端私自创建隧道，请先在面板创建后再启动", pname))
+						return errNotFound(fmt.Sprintf("隧道 [%s] 未在当前账号面板中创建，禁止客户端私自创建或跨账号绑定隧道", pname))
 					}
 					matchedProxies = append(matchedProxies, match)
 				}
@@ -380,8 +443,9 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 			} else {
 				node = store.Node{
 					ID:         store.NewID(),
+					OwnerID:    authedUserID,
 					Name:       name,
-					TokenHash:  auth.Hash(shared),
+					TokenHash:  "", // shared-token nodes authenticate via user auth_token, never reusable per-node TokenHash
 					OS:         hello.OS,
 					Arch:       hello.Arch,
 					Version:    hello.Version,
@@ -413,12 +477,12 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 			return
 		}
 		if created {
-			s.lg.Info("node registered via config", "node", node.Name, "id", node.ID, "remote", ip)
-			s.hub.publish(api.Event{Type: "node-joined", At: now, Message: node.Name})
+			s.lg.Info("node registered via config", "node", node.Name, "id", node.ID, "owner", authedUserID, "remote", ip)
+			s.hub.publish(api.Event{Type: "node-joined", At: now, Message: node.Name, OwnerID: authedUserID})
 		}
 		if claimedChanged {
 			s.reconcile()
-			s.notify("tunnel claimed: " + perTunnelID)
+			s.notifyOwner(authedUserID, "tunnel claimed: "+perTunnelID)
 		}
 	} else {
 		if !s.joinAllowed(ip) {
@@ -426,14 +490,23 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 			sess.Close()
 			return
 		}
+		var ownerDisabled bool
 		_ = s.st.View(func(st *store.State) error {
 			if n, ok := st.NodeByID(hello.NodeID); ok {
 				node, found = *n, true
+				if u, uok := st.UserByID(n.OwnerID); uok && u.Disabled {
+					ownerDisabled = true
+				}
 			}
 			return nil
 		})
-		if !found {
+		if !found || node.TokenHash == "" {
 			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "unknown node; configure auth_token in client.toml / client.yaml or re-join"})
+			sess.Close()
+			return
+		}
+		if ownerDisabled {
+			_ = proto.WriteFrame(ctrl, &proto.Frame{Type: proto.TypeError, Message: "账号已被停用，请联系管理员"})
 			sess.Close()
 			return
 		}
@@ -503,9 +576,9 @@ func (s *Server) handleControl(tc *tls.Conn, sess *yamux.Session, ctrl net.Conn,
 		return nil
 	})
 	s.lg.Info("node online", "node", node.Name, "id", node.ID, "remote", ip)
-	s.hub.publish(api.Event{Type: "node-online", At: now, Message: node.Name})
+	s.hub.publish(api.Event{Type: "node-online", At: now, Message: node.Name, OwnerID: node.OwnerID})
 	defer func() {
-		s.hub.publish(api.Event{Type: "node-offline", At: time.Now().UTC(), Message: node.Name})
+		s.hub.publish(api.Event{Type: "node-offline", At: time.Now().UTC(), Message: node.Name, OwnerID: node.OwnerID})
 		s.lg.Info("node offline", "node", node.Name, "id", node.ID)
 	}()
 
@@ -589,7 +662,14 @@ func (s *Server) markTargetDown(nodeID, tunnelID, message string, ts int64) {
 	s.mu.Unlock()
 	s.lg.Warn("agent cannot reach local service", "node", nodeID, "tunnel", tunnelID, "detail", message)
 	if s.hub != nil {
-		s.hub.publish(api.Event{Type: "tunnel-target-down", At: at, Message: message})
+		var ownerID string
+		_ = s.st.View(func(st *store.State) error {
+			if t, ok := st.TunnelByID(tunnelID); ok {
+				ownerID = t.OwnerID
+			}
+			return nil
+		})
+		s.hub.publish(api.Event{Type: "tunnel-target-down", At: at, Message: message, OwnerID: ownerID})
 	}
 }
 
@@ -738,7 +818,13 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 		return nil
 	}
 	now := time.Now().UTC()
+	var nodeOwner string
 	changed, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
+		n, ok := st.NodeByID(nodeID)
+		if !ok {
+			return false, errNotFound("node not found")
+		}
+		nodeOwner = n.OwnerID
 		mutated := false
 		for _, p := range proxies {
 			name := strings.TrimSpace(p.Name)
@@ -748,7 +834,7 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 			var existing *store.Tunnel
 			for i := range st.Tunnels {
 				t := &st.Tunnels[i]
-				if !strings.EqualFold(t.Name, name) {
+				if (nodeOwner != "" && t.OwnerID != nodeOwner) || !strings.EqualFold(t.Name, name) {
 					continue
 				}
 				if t.NodeID == nodeID || t.NodeID == "" {
@@ -774,7 +860,7 @@ func (s *Server) syncDeclarativeProxies(nodeID string, proxies []proto.ProxySpec
 	}
 	if changed {
 		s.reconcile()
-		s.notify(fmt.Sprintf("bound %d panel tunnel(s) for node %s", len(proxies), nodeID))
+		s.notifyOwner(nodeOwner, fmt.Sprintf("bound %d panel tunnel(s) for node %s", len(proxies), nodeID))
 	}
 	return nil
 }

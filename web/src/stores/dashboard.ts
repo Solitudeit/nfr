@@ -259,6 +259,22 @@ export const useDashboardStore = defineStore('dashboard', () => {
     probeSummary.value = null
   }
 
+  function reset() {
+    stopRealtime()
+    info.value = null
+    tunnels.value = []
+    nodes.value = []
+    events.value = []
+    rates.value = []
+    settings.value = null
+    initialized.value = false
+    error.value = ''
+    unreadAlerts.value = 0
+    probeResults.value = {}
+    probingIds.value = {}
+    probeSummary.value = null
+  }
+
   return {
     info,
     tunnels,
@@ -282,6 +298,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     fetchDashboard,
     startRealtime,
     stopRealtime,
+    reset,
     clearUnreadAlerts,
     upsertTunnel,
     probeTunnel,

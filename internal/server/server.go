@@ -65,16 +65,18 @@ type Server struct {
 	flushed      map[string]int64         // quota accounting: metrics total already folded into the store
 	targetDown   map[string]targetFailure // tunnel id -> last "cannot reach the inner address" report
 
-	httpSrv    *http.Server
-	httpsSrv   *http.Server
-	consoleSrv *http.Server
-	consoleLn  *chanListener
-	httpLn     net.Listener
-	httpsLn    net.Listener
-	ctlLn      net.Listener
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	updater    *updater
+	httpSrv       *http.Server
+	httpsSrv      *http.Server
+	consoleSrv    *http.Server
+	consoleLn     *chanListener
+	httpLn        net.Listener
+	httpsLn       net.Listener
+	ctlLn         net.Listener
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	updater       *updater
+	onStateReload func()
+	onUserRevoke  func(userID string)
 }
 
 type portListener struct {
@@ -182,6 +184,12 @@ func New(opts Options) (*Server, string, error) {
 	if err := s.ensureAuthToken(); err != nil {
 		return nil, "", fmt.Errorf("init auth_token: %w", err)
 	}
+	// Ensure the default admin user exists and owns any legacy resources.
+	if _, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
+		return st.NormalizeLegacyUsers(), nil
+	}); err != nil {
+		return nil, "", fmt.Errorf("init admin user: %w", err)
+	}
 	return s, generated, nil
 }
 
@@ -223,12 +231,23 @@ func (s *Server) SetAuthToken(token string) error {
 	if len(token) < 6 {
 		return errBad("auth_token", "auth_token must be at least 6 characters")
 	}
+	var adminNodeIDs []string
 	if err := s.st.Update(func(st *store.State) error {
 		st.Settings.AuthToken = token
+		if admin, ok := st.AdminUser(); ok {
+			admin.AuthToken = token
+			admin.UpdatedAt = time.Now().UTC()
+			for _, n := range st.Nodes {
+				if n.OwnerID == admin.ID {
+					adminNodeIDs = append(adminNodeIDs, n.ID)
+				}
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
+	s.kickNodes(adminNodeIDs, "连接密钥已更新，请更新客户端配置")
 	s.notify("auth token updated")
 	return nil
 }
@@ -758,6 +777,15 @@ var siteIPs = sync.OnceValue(func() []string {
 
 // Tunnels renders every tunnel with live counters.
 func (s *Server) Tunnels() []api.Tunnel {
+	return s.tunnelsFiltered("")
+}
+
+// TunnelsForOwner renders tunnels owned by ownerID with live counters.
+func (s *Server) TunnelsForOwner(ownerID string) []api.Tunnel {
+	return s.tunnelsFiltered(ownerID)
+}
+
+func (s *Server) tunnelsFiltered(ownerID string) []api.Tunnel {
 	st := s.st.Snapshot()
 	stats := map[string]metrics.Snapshot{}
 	for _, m := range s.met.LiveSnapshot() {
@@ -768,8 +796,6 @@ func (s *Server) Tunnels() []api.Tunnel {
 	for id := range s.agents {
 		online[id] = true
 	}
-	s.mu.Unlock()
-	s.mu.Lock()
 	failures := make(map[string]targetFailure, len(s.targetDown))
 	for id, f := range s.targetDown {
 		failures[id] = f
@@ -784,6 +810,9 @@ func (s *Server) Tunnels() []api.Tunnel {
 	}
 	out := make([]api.Tunnel, 0, len(st.Tunnels))
 	for _, t := range st.Tunnels {
+		if ownerID != "" && t.OwnerID != ownerID {
+			continue
+		}
 		nodeName := ""
 		nodeOnline := online[t.NodeID]
 		nodeMissing := false
@@ -796,10 +825,10 @@ func (s *Server) Tunnels() []api.Tunnel {
 			}
 		}
 		v := api.Tunnel{
-			ID: t.ID, Name: t.Name, NodeID: t.NodeID, NodeName: nodeName,
+			ID: t.ID, OwnerID: t.OwnerID, Name: t.Name, NodeID: t.NodeID, NodeName: nodeName,
 			Type: t.Type, Local: t.Local, RemotePort: t.RemotePort, Hosts: t.Hosts,
 			Enabled: t.Enabled, Awaiting: awaiting, Online: nodeOnline, NodeMissing: nodeMissing, PublicHost: publicHost,
-			BandwidthKB: t.BandwidthKB, QuotaMB: t.QuotaMB, UsedBytes: t.UsedBytes, QuotaPaused: t.QuotaPaused,
+			BandwidthKB: t.BandwidthKB, QuotaMB: t.QuotaMB, UsedBytes: t.UsedBytes, QuotaPaused: t.QuotaPaused, QuotaReason: t.QuotaReason,
 			CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		}
 		if m, ok := stats[t.ID]; ok {
@@ -850,8 +879,27 @@ func (s *Server) Tunnel(id string) (api.Tunnel, bool) {
 	return api.Tunnel{}, false
 }
 
+// TunnelForOwner returns one tunnel view only if it belongs to ownerID.
+func (s *Server) TunnelForOwner(ownerID, id string) (api.Tunnel, bool) {
+	for _, t := range s.TunnelsForOwner(ownerID) {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return api.Tunnel{}, false
+}
+
 // Nodes renders every agent.
 func (s *Server) Nodes() []api.Node {
+	return s.nodesFiltered("")
+}
+
+// NodesForOwner renders agents belonging to ownerID.
+func (s *Server) NodesForOwner(ownerID string) []api.Node {
+	return s.nodesFiltered(ownerID)
+}
+
+func (s *Server) nodesFiltered(ownerID string) []api.Node {
 	st := s.st.Snapshot()
 	s.mu.Lock()
 	sess := make(map[string]string, len(s.agents))
@@ -861,8 +909,11 @@ func (s *Server) Nodes() []api.Node {
 	s.mu.Unlock()
 	out := make([]api.Node, 0, len(st.Nodes))
 	for _, n := range st.Nodes {
+		if ownerID != "" && n.OwnerID != ownerID {
+			continue
+		}
 		v := api.Node{
-			ID: n.ID, Name: n.Name, OS: n.OS, Arch: n.Arch, Version: n.Version,
+			ID: n.ID, OwnerID: n.OwnerID, Name: n.Name, OS: n.OS, Arch: n.Arch, Version: n.Version,
 			LastSeen: n.LastSeen, CreatedAt: n.CreatedAt,
 		}
 		for _, t := range st.Tunnels {
@@ -918,9 +969,15 @@ func (s *Server) APIKeys() []api.APIKey {
 // Events exposes the change feed.
 func (s *Server) Events() (<-chan api.Event, func()) { return s.hub.subscribe() }
 
-// notify publishes a change and pushes fresh configuration to every agent.
+// notify publishes a system-wide change and pushes fresh configuration to every agent.
 func (s *Server) notify(msg string) {
 	s.hub.publish(api.Event{Type: "change", At: time.Now().UTC(), Message: msg})
+	s.pushAll()
+}
+
+// notifyOwner publishes a user-scoped change and refreshes connected agents.
+func (s *Server) notifyOwner(ownerID, msg string) {
+	s.hub.publish(api.Event{Type: "change", At: time.Now().UTC(), Message: msg, OwnerID: ownerID})
 	s.pushAll()
 }
 
@@ -937,6 +994,9 @@ func (e *errStatus) Error() string { return e.msg }
 
 func errBad(code, msg string) error {
 	return &errStatus{status: http.StatusBadRequest, code: code, msg: msg}
+}
+func errForbidden(code, msg string) error {
+	return &errStatus{status: http.StatusForbidden, code: code, msg: msg}
 }
 func errConflict(code, msg string) error {
 	return &errStatus{status: http.StatusConflict, code: code, msg: msg}

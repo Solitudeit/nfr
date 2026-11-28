@@ -23,12 +23,18 @@ import (
 // HTTP tunnels share the TCP port space; UDP tunnels listen in their own.
 func (s *Server) reconcile() {
 	st := s.st.Snapshot()
+	disabledUsers := make(map[string]bool)
+	for _, u := range st.Users {
+		if u.Disabled {
+			disabledUsers[u.ID] = true
+		}
+	}
 	s.pruneLimits(st.Tunnels)
-	s.pruneHTTPProxies(st.Tunnels)
+	s.pruneHTTPProxies(&st)
 	desired := make(map[int]store.Tunnel, len(st.Tunnels))
 	udpDesired := make(map[int]store.Tunnel)
 	for _, t := range st.Tunnels {
-		if !t.Enabled || t.RemotePort <= 0 {
+		if !t.Enabled || t.RemotePort <= 0 || disabledUsers[t.OwnerID] {
 			continue
 		}
 		// TCP tunnels always own a port; HTTP tunnels can own one too, which is
@@ -275,6 +281,11 @@ func (s *Server) findHTTPTunnel(host string) (store.Tunnel, bool) {
 			if !t.Enabled || t.Type != store.TunnelHTTP {
 				continue
 			}
+			if t.OwnerID != "" {
+				if u, ok := st.UserByID(t.OwnerID); ok && u.Disabled {
+					continue
+				}
+			}
 			for _, h := range t.Hosts {
 				if strings.EqualFold(h, host) {
 					out, okf = t, true
@@ -368,12 +379,13 @@ func (s *Server) httpProxyFor(t store.Tunnel) (*httpTunnelProxy, error) {
 		return nil, errors.New("node offline")
 	}
 
+	effBW := s.effectiveBandwidthKB(t)
 	s.mu.Lock()
 	if cur := s.httpProxies[t.ID]; cur != nil &&
 		cur.nodeID == t.NodeID &&
 		cur.local == t.Local &&
 		cur.name == t.Name &&
-		cur.bandwidthKB == t.BandwidthKB &&
+		cur.bandwidthKB == effBW &&
 		cur.sess == sess {
 		s.mu.Unlock()
 		return cur, nil
@@ -444,7 +456,7 @@ func (s *Server) httpProxyFor(t store.Tunnel) (*httpTunnelProxy, error) {
 		nodeID:      t.NodeID,
 		local:       t.Local,
 		name:        t.Name,
-		bandwidthKB: t.BandwidthKB,
+		bandwidthKB: effBW,
 		sess:        sess,
 		tr:          tr,
 		rp:          rp,
@@ -460,9 +472,9 @@ func (s *Server) httpProxyFor(t store.Tunnel) (*httpTunnelProxy, error) {
 	return p, nil
 }
 
-func (s *Server) pruneHTTPProxies(tunnels []store.Tunnel) {
-	desired := make(map[string]store.Tunnel, len(tunnels))
-	for _, t := range tunnels {
+func (s *Server) pruneHTTPProxies(st *store.State) {
+	desired := make(map[string]store.Tunnel, len(st.Tunnels))
+	for _, t := range st.Tunnels {
 		if t.Enabled && t.Type == store.TunnelHTTP {
 			desired[t.ID] = t
 		}
@@ -471,7 +483,7 @@ func (s *Server) pruneHTTPProxies(tunnels []store.Tunnel) {
 	s.mu.Lock()
 	for id, p := range s.httpProxies {
 		t, ok := desired[id]
-		if !ok || p.nodeID != t.NodeID || p.local != t.Local || p.name != t.Name || p.bandwidthKB != t.BandwidthKB {
+		if !ok || p.nodeID != t.NodeID || p.local != t.Local || p.name != t.Name || p.bandwidthKB != effectiveBandwidthKBWithState(st, t) {
 			drop = append(drop, p)
 			delete(s.httpProxies, id)
 		}

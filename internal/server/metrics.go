@@ -20,6 +20,22 @@ func (s *Server) RecentRates() []metrics.RatePoint {
 	return s.met.RecentRates()
 }
 
+// RecentRatesForOwner returns up to 60 one-second throughput points aggregated
+// strictly across tunnels owned by ownerID.
+func (s *Server) RecentRatesForOwner(ownerID string) []metrics.RatePoint {
+	if s.met == nil {
+		return []metrics.RatePoint{}
+	}
+	st := s.st.Snapshot()
+	ids := make(map[string]struct{})
+	for _, t := range st.Tunnels {
+		if t.OwnerID == ownerID {
+			ids[t.ID] = struct{}{}
+		}
+	}
+	return s.met.RecentRatesFor(ids)
+}
+
 // buildMetrics serves a small Prometheus text exposition. It reuses the API
 // authentication so tunnel names are not public: enable the API and mint a
 // read key. Without a key the endpoint answers 403.

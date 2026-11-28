@@ -16,6 +16,7 @@ export interface InstanceInfo {
 
 export interface Tunnel {
   id: string
+  owner_id?: string
   name: string
   node_id: string
   node_name?: string
@@ -28,6 +29,7 @@ export interface Tunnel {
   quota_mb?: number
   used_bytes?: number
   quota_paused?: boolean
+  quota_reason?: string
   online: boolean
   node_missing?: boolean
   awaiting?: boolean
@@ -257,4 +259,65 @@ export interface UpdateStatus {
   mirror_used?: string
   mirrors: MirrorNode[]
   upgrade: UpgradeProgress
+}
+
+export interface UserProfile {
+  id: string
+  username: string
+  role: 'admin' | 'user' | string
+  disabled: boolean
+  max_tunnels: number
+  max_bandwidth_kb: number
+  monthly_quota_mb: number
+  used_bytes: number
+  usage_month?: string
+  tunnel_count: number
+  online_tunnels: number
+  has_avatar: boolean
+  avatar_url?: string
+  auth_token?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface UserDetailResponse {
+  user: UserProfile
+  tunnels: Tunnel[]
+  nodes: NodeItem[]
+}
+
+export interface DBStatus {
+  mode: 'file' | 'mysql' | string
+  configured: boolean
+  from_config: boolean
+  mandatory_setup: boolean
+  host?: string
+  port?: number
+  database?: string
+  username?: string
+  has_password?: boolean
+  version?: string
+  error?: string
+}
+
+export interface DBConfigRequest {
+  host: string
+  port: number
+  database: string
+  username: string
+  password: string
+}
+
+export interface DBTestResponse {
+  ok: boolean
+  version?: string
+  message?: string
+}
+
+export interface DBSetupResponse {
+  ok: boolean
+  adopted_existing: boolean
+  reauth_required: boolean
+  status: DBStatus
+  message?: string
 }

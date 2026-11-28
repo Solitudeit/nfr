@@ -262,8 +262,9 @@ def main():
             )
 
         server_log = open(os.path.join(tmp, "server.log"), "wb")
+        srv_env = dict(os.environ, NFR_DISABLE_UPDATE_CHECK="1", NFR_STORAGE="file")
         server = subprocess.Popen(
-            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
+            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT, env=srv_env
         )
         procs.append(server)
         if not wait_port(control):
@@ -820,7 +821,7 @@ def main():
         server_log.close()
         server_log = open(os.path.join(tmp, "server.log"), "ab")
         server = subprocess.Popen(
-            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT
+            [nfrs, "--foreground", "-c", cfg], stdout=server_log, stderr=subprocess.STDOUT, env=srv_env
         )
         procs[0] = server
         check("server restarted", wait_port(control))

@@ -43,10 +43,14 @@ func (s *Server) PanelPasswordHash() string {
 	return hash
 }
 
-// SetPanelPasswordHash stores a new bcrypt hash.
+// SetPanelPasswordHash stores a new bcrypt hash on the admin account.
 func (s *Server) SetPanelPasswordHash(hash string) error {
 	return s.st.Update(func(st *store.State) error {
 		st.PanelPassword = hash
+		if admin, ok := st.AdminUser(); ok {
+			admin.PasswordHash = hash
+			admin.UpdatedAt = time.Now().UTC()
+		}
 		return nil
 	})
 }
@@ -117,11 +121,17 @@ func (s *Server) DeletePanelSession(tokenHash string) error {
 
 // RevokeOtherPanelSessions removes all persisted console sessions except keepHash.
 func (s *Server) RevokeOtherPanelSessions(keepHash string) error {
+	return s.RevokeUserPanelSessions("", keepHash)
+}
+
+// RevokeUserPanelSessions removes persisted console sessions belonging to
+// userID (or all users when userID is empty) except keepHash.
+func (s *Server) RevokeUserPanelSessions(userID, keepHash string) error {
 	_, err := s.st.UpdateIf(func(st *store.State) (bool, error) {
-		kept := make([]store.PanelSession, 0, 1)
+		kept := make([]store.PanelSession, 0, len(st.PanelSessions))
 		changed := false
 		for _, ps := range st.PanelSessions {
-			if keepHash != "" && ps.TokenHash == keepHash {
+			if (keepHash != "" && ps.TokenHash == keepHash) || (userID != "" && ps.UserID != userID) {
 				kept = append(kept, ps)
 				continue
 			}

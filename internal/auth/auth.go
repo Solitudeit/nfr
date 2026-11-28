@@ -99,6 +99,7 @@ func NormalizeJoinCode(code string) string {
 // a specific awaiting tunnel redeemed at join time.
 type JoinCode struct {
 	Code      string     `json:"code"`
+	OwnerID   string     `json:"owner_id,omitempty"`
 	NodeName  string     `json:"node_name"`
 	TunnelID  string     `json:"tunnel_id,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -125,6 +126,7 @@ type Finder interface {
 // APIKey is a credential for the HTTP API.
 type APIKey struct {
 	ID        string     `json:"id"`
+	OwnerID   string     `json:"owner_id,omitempty"`
 	Label     string     `json:"label"`
 	Hash      string     `json:"hash"`
 	Scope     string     `json:"scope"` // read | write | admin

@@ -140,9 +140,41 @@ async function main() {
         NFR_UPDATE_CURRENT_VERSION: 'v0.13.0-preview.2',
         NFR_UPDATE_MANIFEST_URL: `http://127.0.0.1:${manifestPort}/version.json`,
         NFR_DISABLE_UPDATE_CHECK: '1',
+        NFR_STORAGE: 'file',
       },
     })
     procs.push(nfrsProc)
+
+    // Secondary instance without NFR_STORAGE=file to verify mandatory non-closable MySQL setup modal
+    const modalCtlPort = await freePort()
+    const modalDataDir = path.join(tmp, 'modal-data')
+    const modalCfgPath = path.join(tmp, 'modal-server.toml')
+    fs.writeFileSync(
+      modalCfgPath,
+      `control_listen = "127.0.0.1:${modalCtlPort}"\n` +
+      `http_listen = "off"\n` +
+      `https_listen = "off"\n` +
+      `data_dir = "${modalDataDir}"\n` +
+      `port_range = [20000, 29999]\n` +
+      `log_level = "info"\n` +
+      `[panel]\nhttps = false\n`,
+    )
+    const modalLogPath = path.join(tmp, 'modal-server.log')
+    const modalLogFd = fs.openSync(modalLogPath, 'w')
+    const modalEnv = { ...process.env, NFR_DISABLE_UPDATE_CHECK: '1' }
+    delete modalEnv.NFR_STORAGE
+    const modalProc = spawn(NFRS, ['--foreground', '-c', modalCfgPath], {
+      stdio: ['ignore', modalLogFd, modalLogFd],
+      env: modalEnv,
+    })
+    procs.push(modalProc)
+    if (!(await waitPort(modalCtlPort))) throw new Error('modal nfrs did not listen')
+    await new Promise((r) => setTimeout(r, 400))
+    const modalLogText = fs.readFileSync(modalLogPath, 'utf8')
+    const modalPwMatch = modalLogText.match(/密码\s+(\S+)/)
+    if (!modalPwMatch) throw new Error('modal server password not found')
+    const modalPw = modalPwMatch[1]
+    const modalBaseUrl = `http://127.0.0.1:${modalCtlPort}`
 
     if (!(await waitPort(ctlPort))) throw new Error('nfrs did not listen')
     await new Promise((r) => setTimeout(r, 400))
@@ -232,6 +264,27 @@ async function main() {
         `scrollW=${audit.scrollWidth}/${audit.vw} offenders=${JSON.stringify(audit.offenders)}`,
       )
     }
+
+    // 0. Verify mandatory non-closable MySQL setup modal when NFR_STORAGE is unset
+    const modalCtx = await browser.newContext({ viewport: { width: 375, height: 812 } })
+    const modalPage = await modalCtx.newPage()
+    await modalPage.goto(`${modalBaseUrl}/nfr/login`, { waitUntil: 'networkidle' })
+    await modalPage.fill('input[type="password"]', modalPw)
+    await modalPage.click('button[type="submit"]')
+    await modalPage.waitForURL('**/nfr/', { timeout: 10000 })
+    await modalPage.waitForSelector('.db-setup-modal', { timeout: 10000 })
+    const hasCloseBtn = (await modalPage.locator('.db-setup-modal .n-base-close').count()) > 0
+    await modalPage.keyboard.press('Escape')
+    await modalPage.mouse.click(5, 5)
+    await modalPage.waitForTimeout(250)
+    const stillVisible = await modalPage.locator('.db-setup-modal').isVisible()
+    check(
+      'mandatory DB setup modal appears on first admin login and cannot be closed via Esc/backdrop',
+      !hasCloseBtn && stillVisible,
+      `hasClose=${hasCloseBtn} stillVisible=${stillVisible}`,
+    )
+    await modalCtx.close()
+    try { modalProc.kill('SIGTERM') } catch {}
 
     // 1. Login page & default light mode + custom logo image
     for (const [w, h] of [[360, 800], [375, 812], [390, 844], [1440, 900]]) {
@@ -418,17 +471,17 @@ async function main() {
     await page.click('.n-modal .n-base-close')
     await page.waitForSelector('.n-modal', { state: 'detached', timeout: 5000 })
 
-    // 5. All 4 routes across all 4 viewports + 3 settings tabs
+    // 5. All routes across all 4 viewports + all 5 settings tabs
     for (const [w, h] of [[360, 800], [375, 812], [390, 844], [1440, 900]]) {
       await page.setViewportSize({ width: w, height: h })
-      for (const r of ['/nfr/', '/nfr/create', '/nfr/tunnels', '/nfr/settings']) {
+      for (const r of ['/nfr/', '/nfr/create', '/nfr/tunnels', '/nfr/profile', '/nfr/settings']) {
         await page.goto(`${baseUrl}${r}`, { waitUntil: 'networkidle' })
         await assertTrueZeroOverflow(`${r} @${w}px`)
       }
     }
     await page.setViewportSize({ width: 360, height: 800 })
     await page.goto(`${baseUrl}/nfr/settings`, { waitUntil: 'networkidle' })
-    for (const tabLabel of ['基础配置', '安全与接口', '外观偏好']) {
+    for (const tabLabel of ['基础配置', '用户管理', '数据库', '安全与接口', '外观偏好']) {
       await page.click(`.n-tabs-tab:has-text("${tabLabel}")`)
       await assertTrueZeroOverflow(`settings tab ${tabLabel} @360px`)
     }
@@ -493,10 +546,74 @@ async function main() {
     )
 
     await page.setViewportSize({ width: 1440, height: 900 })
-    await page.click('button[aria-label="退出登录"]')
+    await page.goto(`${baseUrl}/nfr/settings?tab=users`, { waitUntil: 'networkidle' })
+
+    // 7b. Admin creates normal user alice, tests avatar micro-dropdown + profile upload + multi-user isolation
+    await page.click('button:has-text("新建用户")')
+    await page.waitForSelector('.n-modal', { timeout: 5000 })
+    await page.locator('.n-modal input[placeholder*="2-32"]').fill('alice')
+    await page.locator('.n-modal input[type="password"]').fill('alice12345')
+    await page.locator('.n-modal button[type="submit"]').click()
+    await page.waitForSelector('.user-row-card:has-text("alice")', { timeout: 10000 })
+    check('admin creates normal user alice from settings', true)
+
+    // Click alice -> opens /nfr/users/:id detail page and verifies zero overflow at 360px
+    await page.click('.user-row-card:has-text("alice")')
+    await page.waitForURL('**/nfr/users/*', { timeout: 10000 })
+    await page.setViewportSize({ width: 360, height: 800 })
+    await assertTrueZeroOverflow('/nfr/users/:id @360px')
+
+    // Test topbar avatar micro-dropdown (compact width, anchored top-right, only 用户资料 & 退出登录)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.click('button[aria-label="用户菜单"]')
+    await page.waitForSelector('.avatar-popover', { timeout: 5000 })
+    const popBox = await page.locator('.avatar-popover').boundingBox()
+    const popText = await page.locator('.avatar-popover').innerText()
+    check(
+      'avatar micro-dropdown is compact and shows 用户资料 & 退出登录',
+      Boolean(popBox && popBox.width >= 120 && popBox.width <= 180 && popText.includes('用户资料') && popText.includes('退出登录')),
+      `box=${JSON.stringify(popBox)} text=${JSON.stringify(popText)}`,
+    )
+    await page.click('.avatar-popover >> text=退出登录')
     await page.waitForURL('**/nfr/login', { timeout: 10000 })
     const afterLogoutPw = await page.locator('input[type="password"]').inputValue()
     check('logout returns to login with empty password input (no JS-stored secret)', afterLogoutPw === '')
+
+    // Sign in as normal user alice: verify no 系统设置 nav, zero admin tunnels visible, local avatar upload works
+    await page.locator('input[autocomplete="username"]').fill('alice')
+    await page.fill('input[type="password"]', 'alice12345')
+    await page.click('button[type="submit"]')
+    await page.waitForURL('**/nfr/', { timeout: 10000 })
+    await page.waitForTimeout(300)
+    const hasSettingsNav = (await page.locator('nav >> text=系统设置').count()) > 0
+    check('normal user alice does NOT see 系统设置 in navigation', !hasSettingsNav)
+
+    await page.goto(`${baseUrl}/nfr/tunnels`, { waitUntil: 'networkidle' })
+    const aliceTunnelsText = await page.locator('main').innerText()
+    check('normal user alice cannot see admin tunnel JiaoShi2', !aliceTunnelsText.includes('JiaoShi2'))
+
+    // Open Profile page via avatar dropdown and upload a valid local PNG avatar
+    await page.click('button[aria-label="用户菜单"]')
+    await page.click('.avatar-popover >> text=用户资料')
+    await page.waitForURL('**/nfr/profile', { timeout: 10000 })
+    const pngPath = path.join(tmp, 'avatar.png')
+    fs.writeFileSync(
+      pngPath,
+      Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+        0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+        0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+        0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d,
+        0xb0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+        0x44, 0xae, 0x42, 0x60, 0x82,
+      ]),
+    )
+    await page.locator('input[type="file"]').setInputFiles(pngPath)
+    await page.waitForSelector('.avatar-trigger img.avatar-img', { timeout: 10000 })
+    check('normal user alice uploads local avatar and header renders image', true)
 
     check('zero JS console errors', consoleErrors.length === 0, consoleErrors.join(' | '))
     check('zero uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '))

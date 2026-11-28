@@ -19,7 +19,19 @@ const router = createRouter({
         { path: '', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { title: '仪表盘' } },
         { path: 'create', name: 'create', component: () => import('@/views/CreateTunnelView.vue'), meta: { title: '创建隧道' } },
         { path: 'tunnels', name: 'tunnels', component: () => import('@/views/TunnelsView.vue'), meta: { title: '隧道管理' } },
-        { path: 'settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { title: '系统设置' } },
+        { path: 'profile', name: 'profile', component: () => import('@/views/ProfileView.vue'), meta: { title: '用户资料' } },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('@/views/SettingsView.vue'),
+          meta: { title: '系统设置', requiresAdmin: true },
+        },
+        {
+          path: 'users/:id',
+          name: 'user-detail',
+          component: () => import('@/views/UserDetailView.vue'),
+          meta: { title: '用户详情', requiresAdmin: true },
+        },
       ],
     },
     {
@@ -48,6 +60,9 @@ router.beforeEach(async (to) => {
   }
   if (!ok) {
     return { name: 'login' }
+  }
+  if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return { name: 'dashboard' }
   }
   return true
 })

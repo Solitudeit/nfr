@@ -87,3 +87,56 @@ func TestRecentRatesTracksDirectCounterIncrements(t *testing.T) {
 		t.Fatalf("Totals = (%d, %d), want (5120, 10240)", tot.In, tot.Out)
 	}
 }
+
+func TestRecentRatesForIsolatesOwners(t *testing.T) {
+	r := New()
+	// Tick 1..3: only user A's tunnel tA has traffic
+	for i := 1; i <= 3; i++ {
+		r.AddBytes("tA", 1000, 2000)
+		r.Sample()
+	}
+	// Tick 4..5: user B's tunnel tB starts sending traffic too
+	for i := 4; i <= 5; i++ {
+		r.AddBytes("tA", 500, 1000)
+		r.AddBytes("tB", 3000, 4000)
+		r.Sample()
+	}
+
+	ratesA := r.RecentRatesFor(map[string]struct{}{"tA": {}})
+	if len(ratesA) != 5 {
+		t.Fatalf("ratesA len = %d, want 5", len(ratesA))
+	}
+	if ratesA[0].InRate != 1000 || ratesA[0].OutRate != 2000 {
+		t.Fatalf("ratesA[0] = %+v, want (1000, 2000)", ratesA[0])
+	}
+	if ratesA[4].InRate != 500 || ratesA[4].OutRate != 1000 {
+		t.Fatalf("ratesA[4] = %+v, want (500, 1000)", ratesA[4])
+	}
+
+	ratesB := r.RecentRatesFor(map[string]struct{}{"tB": {}})
+	if len(ratesB) != 5 {
+		t.Fatalf("ratesB len = %d, want 5", len(ratesB))
+	}
+	// First 3 ticks before tB existed must be 0, NEVER leaking tA's bytes
+	for i := 0; i < 3; i++ {
+		if ratesB[i].InRate != 0 || ratesB[i].OutRate != 0 {
+			t.Fatalf("ratesB[%d] leaked traffic: %+v", i, ratesB[i])
+		}
+	}
+	for i := 3; i < 5; i++ {
+		if ratesB[i].InRate != 3000 || ratesB[i].OutRate != 4000 {
+			t.Fatalf("ratesB[%d] = %+v, want (3000, 4000)", i, ratesB[i])
+		}
+	}
+
+	// Empty set returns zeroed timeline (never leaks other users)
+	ratesEmpty := r.RecentRatesFor(nil)
+	if len(ratesEmpty) != 5 {
+		t.Fatalf("ratesEmpty len = %d, want 5", len(ratesEmpty))
+	}
+	for i, p := range ratesEmpty {
+		if p.InRate != 0 || p.OutRate != 0 {
+			t.Fatalf("ratesEmpty[%d] leaked traffic: %+v", i, p)
+		}
+	}
+}

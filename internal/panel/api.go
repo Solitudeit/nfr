@@ -10,6 +10,7 @@ import (
 
 	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/auth"
+	"github.com/solitudeit/nfr/internal/store"
 )
 
 func (p *Panel) buildAPIMux() *http.ServeMux {
@@ -17,6 +18,14 @@ func (p *Panel) buildAPIMux() *http.ServeMux {
 	mux.HandleFunc("POST /nfr/api/auth/logout", p.apiAuthLogout)
 	mux.HandleFunc("GET /nfr/api/dashboard", p.apiDashboard)
 	mux.HandleFunc("GET /nfr/api/events", p.apiEvents)
+
+	// User profile & avatars (authenticated users)
+	mux.HandleFunc("GET /nfr/api/profile", p.apiGetProfile)
+	mux.HandleFunc("PATCH /nfr/api/profile", p.apiPatchProfile)
+	mux.HandleFunc("POST /nfr/api/profile/auth-token", p.apiRotateProfileAuthToken)
+	mux.HandleFunc("POST /nfr/api/profile/avatar", p.apiUploadAvatar)
+	mux.HandleFunc("DELETE /nfr/api/profile/avatar", p.apiDeleteAvatar)
+	mux.HandleFunc("GET /nfr/api/avatars/{id}", p.apiGetAvatar)
 
 	mux.HandleFunc("GET /nfr/api/tunnels", p.apiListTunnels)
 	mux.HandleFunc("POST /nfr/api/tunnels", p.apiCreateTunnel)
@@ -30,12 +39,13 @@ func (p *Panel) buildAPIMux() *http.ServeMux {
 
 	mux.HandleFunc("GET /nfr/api/downloads", p.apiListDownloads)
 
-	mux.HandleFunc("GET /nfr/api/update", p.apiGetUpdate)
-	mux.HandleFunc("POST /nfr/api/update/check", p.apiCheckUpdate)
-	mux.HandleFunc("POST /nfr/api/update/mirrors", p.apiProbeUpdateMirrors)
-	mux.HandleFunc("PATCH /nfr/api/update/settings", p.apiPatchUpdateSettings)
-	mux.HandleFunc("POST /nfr/api/update/apply", p.apiApplyUpdate)
-	mux.HandleFunc("GET /nfr/api/update/progress", p.apiUpgradeProgress)
+	// Admin-only self-upgrade endpoints
+	mux.HandleFunc("GET /nfr/api/update", p.requireAdmin(p.apiGetUpdate))
+	mux.HandleFunc("POST /nfr/api/update/check", p.requireAdmin(p.apiCheckUpdate))
+	mux.HandleFunc("POST /nfr/api/update/mirrors", p.requireAdmin(p.apiProbeUpdateMirrors))
+	mux.HandleFunc("PATCH /nfr/api/update/settings", p.requireAdmin(p.apiPatchUpdateSettings))
+	mux.HandleFunc("POST /nfr/api/update/apply", p.requireAdmin(p.apiApplyUpdate))
+	mux.HandleFunc("GET /nfr/api/update/progress", p.requireAdmin(p.apiUpgradeProgress))
 
 	mux.HandleFunc("POST /nfr/api/ports/allocate", p.apiAllocatePort)
 
@@ -44,44 +54,74 @@ func (p *Panel) buildAPIMux() *http.ServeMux {
 	mux.HandleFunc("DELETE /nfr/api/nodes/{id}", p.apiDeleteNode)
 	mux.HandleFunc("POST /nfr/api/nodes/join-codes", p.apiCreateJoinCode)
 
-	mux.HandleFunc("GET /nfr/api/configs", p.apiGetConfigs)
+	// Admin-only configs, settings, API keys, users, and database setup
+	mux.HandleFunc("GET /nfr/api/configs", p.requireAdmin(p.apiGetConfigs))
 
-	mux.HandleFunc("GET /nfr/api/settings", p.apiGetSettings)
-	mux.HandleFunc("PATCH /nfr/api/settings", p.apiPatchSettings)
-	mux.HandleFunc("POST /nfr/api/settings/auth-token", p.apiSetAuthToken)
-	mux.HandleFunc("POST /nfr/api/settings/api-toggle", p.apiToggleRESTAPI)
-	mux.HandleFunc("POST /nfr/api/settings/password", p.apiChangePassword)
+	mux.HandleFunc("GET /nfr/api/settings", p.requireAdmin(p.apiGetSettings))
+	mux.HandleFunc("PATCH /nfr/api/settings", p.requireAdmin(p.apiPatchSettings))
+	mux.HandleFunc("POST /nfr/api/settings/auth-token", p.requireAdmin(p.apiSetAuthToken))
+	mux.HandleFunc("POST /nfr/api/settings/api-toggle", p.requireAdmin(p.apiToggleRESTAPI))
+	mux.HandleFunc("POST /nfr/api/settings/password", p.requireAdmin(p.apiChangePassword))
 
-	mux.HandleFunc("GET /nfr/api/api-keys", p.apiListKeys)
-	mux.HandleFunc("POST /nfr/api/api-keys", p.apiCreateKey)
-	mux.HandleFunc("DELETE /nfr/api/api-keys/{id}", p.apiDeleteKey)
+	mux.HandleFunc("GET /nfr/api/api-keys", p.requireAdmin(p.apiListKeys))
+	mux.HandleFunc("POST /nfr/api/api-keys", p.requireAdmin(p.apiCreateKey))
+	mux.HandleFunc("DELETE /nfr/api/api-keys/{id}", p.requireAdmin(p.apiDeleteKey))
+
+	mux.HandleFunc("GET /nfr/api/users", p.requireAdmin(p.apiListUsers))
+	mux.HandleFunc("POST /nfr/api/users", p.requireAdmin(p.apiCreateUser))
+	mux.HandleFunc("GET /nfr/api/users/{id}", p.requireAdmin(p.apiGetUserDetail))
+	mux.HandleFunc("PATCH /nfr/api/users/{id}", p.requireAdmin(p.apiUpdateUser))
+	mux.HandleFunc("DELETE /nfr/api/users/{id}", p.requireAdmin(p.apiDeleteUser))
+	mux.HandleFunc("POST /nfr/api/users/{id}/reset-password", p.requireAdmin(p.apiResetUserPassword))
+	mux.HandleFunc("POST /nfr/api/users/{id}/tunnels/{tid}/toggle", p.requireAdmin(p.apiAdminToggleUserTunnel))
+	mux.HandleFunc("POST /nfr/api/users/{id}/tunnels/{tid}/kick", p.requireAdmin(p.apiAdminKickUserTunnel))
+	mux.HandleFunc("DELETE /nfr/api/users/{id}/tunnels/{tid}", p.requireAdmin(p.apiAdminDeleteUserTunnel))
+
+	mux.HandleFunc("GET /nfr/api/db", p.requireAdmin(p.apiGetDB))
+	mux.HandleFunc("POST /nfr/api/db/test", p.requireAdmin(p.apiTestDB))
+	mux.HandleFunc("POST /nfr/api/db/setup", p.requireAdmin(p.apiSetupDB))
 
 	return mux
 }
 
 func (p *Panel) apiDashboard(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	uid := sess.userID
+	isAdmin := sess.role == store.RoleAdmin
+
 	info := p.srv.Info()
-	tunnels := p.srv.Tunnels()
+	tunnels := p.srv.TunnelsForOwner(uid)
 	if tunnels == nil {
 		tunnels = []api.Tunnel{}
 	}
-	nodes := p.srv.Nodes()
+	nodes := p.srv.NodesForOwner(uid)
 	if nodes == nil {
 		nodes = []api.Node{}
 	}
-	events := p.srv.RecentEvents()
+	onlineNodes := 0
+	for _, n := range nodes {
+		if n.Online {
+			onlineNodes++
+		}
+	}
+	info.Nodes = onlineNodes
+	info.Tunnels = len(tunnels)
+
+	events := p.srv.RecentEventsForOwner(uid, isAdmin)
 	if events == nil {
 		events = []api.Event{}
 	}
 	set := p.srv.Settings()
 	eff := p.srv.EffectiveConfig()
+	user, _ := p.srv.UserProfile(uid)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"info":    info,
+		"user":    user,
 		"tunnels": tunnels,
 		"nodes":   nodes,
 		"events":  events,
-		"rates":   p.srv.RecentRates(),
+		"rates":   p.srv.RecentRatesForOwner(uid),
 		"settings": map[string]any{
 			"domain":      set.Domain,
 			"public_host": set.PublicHost,
@@ -93,6 +133,10 @@ func (p *Panel) apiDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiEvents(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	uid := sess.userID
+	isAdmin := sess.role == store.RoleAdmin
+
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
@@ -102,7 +146,13 @@ func (p *Panel) apiEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	visible := func(ev api.Event) bool {
+		return ev.OwnerID == uid || (isAdmin && ev.OwnerID == "")
+	}
 	send := func(ev api.Event) bool {
+		if !visible(ev) {
+			return true
+		}
 		b, err := json.Marshal(ev)
 		if err != nil {
 			return true
@@ -117,7 +167,7 @@ func (p *Panel) apiEvents(w http.ResponseWriter, r *http.Request) {
 	ch, unsub := p.srv.SubscribeEvents()
 	defer unsub()
 
-	for _, ev := range p.srv.RecentEvents() {
+	for _, ev := range p.srv.RecentEventsForOwner(uid, isAdmin) {
 		if !send(ev) {
 			return
 		}
@@ -148,19 +198,21 @@ func (p *Panel) apiEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiListTunnels(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tunnels": p.srv.Tunnels(),
+		"tunnels": p.srv.TunnelsForOwner(uid),
 	})
 }
 
 func (p *Panel) apiCreateTunnel(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	var req api.TunnelRequest
 	if !readJSON(w, r, &req) {
 		return
 	}
 	nodeID := strings.TrimSpace(req.NodeID)
 	if nodeID == "" {
-		tun, err := p.srv.CreateStandaloneTunnel(req)
+		tun, err := p.srv.CreateStandaloneTunnelForOwner(uid, req)
 		if err != nil {
 			writeSrvErr(w, err)
 			return
@@ -169,7 +221,7 @@ func (p *Panel) apiCreateTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if nodeID == "new" {
-		tun, jc, err := p.srv.CreateTunnelAwaiting(req, 30*time.Minute)
+		tun, jc, err := p.srv.CreateTunnelAwaitingForOwner(uid, req, 30*time.Minute)
 		if err != nil {
 			writeSrvErr(w, err)
 			return
@@ -182,7 +234,7 @@ func (p *Panel) apiCreateTunnel(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	tun, err := p.srv.CreateTunnel(req)
+	tun, err := p.srv.CreateTunnelForOwner(uid, req)
 	if err != nil {
 		writeSrvErr(w, err)
 		return
@@ -191,8 +243,9 @@ func (p *Panel) apiCreateTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiTunnelConfig(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
-	tun, ok := p.srv.Tunnel(id)
+	tun, ok := p.srv.TunnelForOwner(uid, id)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "隧道不存在"})
 		return
@@ -201,8 +254,9 @@ func (p *Panel) apiTunnelConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiKickTunnel(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
-	kicked, err := p.srv.KickTunnel(id)
+	kicked, err := p.srv.KickTunnelForOwner(uid, id)
 	if err != nil {
 		writeSrvErr(w, err)
 		return
@@ -219,12 +273,13 @@ func (p *Panel) apiKickTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiUpdateTunnel(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
 	var req api.TunnelRequest
 	if !readJSON(w, r, &req) {
 		return
 	}
-	tun, err := p.srv.UpdateTunnel(id, req)
+	tun, err := p.srv.UpdateTunnelForOwner(uid, id, req)
 	if err != nil {
 		writeSrvErr(w, err)
 		return
@@ -233,8 +288,9 @@ func (p *Panel) apiUpdateTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiDeleteTunnel(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
-	if err := p.srv.DeleteTunnel(id); err != nil {
+	if err := p.srv.DeleteTunnelForOwner(uid, id); err != nil {
 		writeSrvErr(w, err)
 		return
 	}
@@ -242,8 +298,9 @@ func (p *Panel) apiDeleteTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiToggleTunnel(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
-	cur, ok := p.srv.Tunnel(id)
+	cur, ok := p.srv.TunnelForOwner(uid, id)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "tunnel not found"})
 		return
@@ -260,17 +317,18 @@ func (p *Panel) apiToggleTunnel(w http.ResponseWriter, r *http.Request) {
 	if body.Enabled != nil {
 		nextEnabled = *body.Enabled
 	}
-	if err := p.srv.SetTunnelEnabled(id, nextEnabled); err != nil {
+	if err := p.srv.SetTunnelEnabledForOwner(uid, id, nextEnabled); err != nil {
 		writeSrvErr(w, err)
 		return
 	}
-	updated, _ := p.srv.Tunnel(id)
+	updated, _ := p.srv.TunnelForOwner(uid, id)
 	writeJSON(w, http.StatusOK, map[string]any{"tunnel": updated})
 }
 
 func (p *Panel) apiProbeTunnel(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
-	res, err := p.srv.ProbeTunnel(r.Context(), id)
+	res, err := p.srv.ProbeTunnelForOwner(r.Context(), uid, id)
 	if err != nil && res.Status == "" {
 		writeSrvErr(w, err)
 		return
@@ -279,7 +337,8 @@ func (p *Panel) apiProbeTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiProbeAllTunnels(w http.ResponseWriter, r *http.Request) {
-	results := p.srv.ProbeAllTunnels(r.Context())
+	uid := sessionFrom(r).userID
+	results := p.srv.ProbeAllTunnelsForOwner(r.Context(), uid)
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
@@ -310,11 +369,13 @@ func (p *Panel) apiAllocatePort(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiListNodes(w http.ResponseWriter, r *http.Request) {
-	nodes := p.srv.Nodes()
+	uid := sessionFrom(r).userID
+	nodes := p.srv.NodesForOwner(uid)
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
 }
 
 func (p *Panel) apiRenameNode(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
 	var req struct {
 		Name string `json:"name"`
@@ -322,11 +383,11 @@ func (p *Panel) apiRenameNode(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if err := p.srv.SetNodeName(id, req.Name); err != nil {
+	if err := p.srv.SetNodeNameForOwner(uid, id, req.Name); err != nil {
 		writeSrvErr(w, err)
 		return
 	}
-	nodes := p.srv.Nodes()
+	nodes := p.srv.NodesForOwner(uid)
 	for _, n := range nodes {
 		if n.ID == id {
 			writeJSON(w, http.StatusOK, map[string]any{"node": n})
@@ -337,8 +398,9 @@ func (p *Panel) apiRenameNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiDeleteNode(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	id := r.PathValue("id")
-	if err := p.srv.RemoveNode(id); err != nil {
+	if err := p.srv.RemoveNodeForOwner(uid, id); err != nil {
 		writeSrvErr(w, err)
 		return
 	}
@@ -346,13 +408,14 @@ func (p *Panel) apiDeleteNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Panel) apiCreateJoinCode(w http.ResponseWriter, r *http.Request) {
+	uid := sessionFrom(r).userID
 	var req api.JoinCodeRequest
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求 JSON 格式无效"})
 		return
 	}
-	resp, err := p.srv.CreateJoinCode(req)
+	resp, err := p.srv.CreateJoinCodeForOwner(uid, req)
 	if err != nil {
 		writeSrvErr(w, err)
 		return
@@ -602,10 +665,12 @@ func writeSrvErr(w http.ResponseWriter, err error) {
 	low := strings.ToLower(msg)
 	status := http.StatusBadRequest
 	switch {
-	case strings.Contains(low, "not found"), strings.Contains(low, "unknown"):
+	case strings.Contains(low, "not found"), strings.Contains(low, "unknown"), strings.Contains(msg, "不存在"):
 		status = http.StatusNotFound
-	case strings.Contains(low, "already"), strings.Contains(low, "in use"), strings.Contains(low, "conflict"):
+	case strings.Contains(low, "already"), strings.Contains(low, "in use"), strings.Contains(low, "conflict"), strings.Contains(msg, "已存在"), strings.Contains(msg, "已占用"):
 		status = http.StatusConflict
+	case strings.Contains(msg, "停用"), strings.Contains(low, "forbidden"):
+		status = http.StatusForbidden
 	}
 	writeJSON(w, status, map[string]string{"error": msg})
 }

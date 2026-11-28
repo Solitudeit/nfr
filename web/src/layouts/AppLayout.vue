@@ -16,6 +16,7 @@ import {
   AddCircleOutline,
   LogOutOutline,
   MoonOutline,
+  PersonOutline,
   SettingsOutline,
   SpeedometerOutline,
   SunnyOutline,
@@ -26,6 +27,7 @@ import { useDashboardStore } from '@/stores/dashboard'
 import { useThemeStore } from '@/stores/theme'
 import { useUpdateStore } from '@/stores/update'
 import UpdateModal from '@/components/UpdateModal.vue'
+import DbSetupModal from '@/components/DbSetupModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,22 +41,50 @@ const collapsed = ref(false)
 const winWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
 const isDesktop = computed(() => winWidth.value >= 1024)
 
+const avatarMenuOpen = ref(false)
+const avatarWrapRef = ref<HTMLElement | null>(null)
+
+const userInitial = computed(() => {
+  const name = authStore.user?.username?.trim() || 'U'
+  return name.slice(0, 1).toUpperCase()
+})
+
 function onResize() {
   winWidth.value = window.innerWidth
 }
 
+function onDocumentClick(ev: MouseEvent) {
+  if (!avatarMenuOpen.value) return
+  const target = ev.target as Node | null
+  if (avatarWrapRef.value && target && !avatarWrapRef.value.contains(target)) {
+    avatarMenuOpen.value = false
+  }
+}
+
+function onKeyDown(ev: KeyboardEvent) {
+  if (ev.key === 'Escape' && avatarMenuOpen.value) {
+    avatarMenuOpen.value = false
+  }
+}
+
 onMounted(() => {
   window.addEventListener('resize', onResize, { passive: true })
+  document.addEventListener('click', onDocumentClick)
+  document.addEventListener('keydown', onKeyDown)
   dashStore.startRealtime()
-  void updateStore.fetchStatus(true)
-  const upgradedVer = updateStore.consumeUpgradedNotice()
-  if (upgradedVer) {
-    message.success(`更新完毕，当前版本 ${upgradedVer}`, { duration: 4000 })
+  if (authStore.isAdmin) {
+    void updateStore.fetchStatus(true)
+    const upgradedVer = updateStore.consumeUpgradedNotice()
+    if (upgradedVer) {
+      message.success(`更新完毕，当前版本 ${upgradedVer}`, { duration: 4000 })
+    }
   }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
+  document.removeEventListener('click', onDocumentClick)
+  document.removeEventListener('keydown', onKeyDown)
   dashStore.stopRealtime()
 })
 
@@ -62,29 +92,43 @@ function renderIcon(comp: unknown) {
   return () => h(NIcon, null, { default: () => h(comp as never) })
 }
 
-const menuOptions = computed<MenuOption[]>(() => [
-  { label: '仪表盘', key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
-  { label: '创建隧道', key: 'create', icon: renderIcon(AddCircleOutline) },
-  { label: '隧道管理', key: 'tunnels', icon: renderIcon(SwapHorizontalOutline) },
-  {
-    label: () =>
-      h('span', { class: 'menu-label-wrap' }, [
-        h('span', null, '系统设置'),
-        updateStore.hasUpdate ? h('span', { class: 'nav-update-dot', title: '发现新版本' }) : null,
-      ]),
-    key: 'settings',
-    icon: renderIcon(SettingsOutline),
-  },
-])
+const menuOptions = computed<MenuOption[]>(() => {
+  const items: MenuOption[] = [
+    { label: '仪表盘', key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
+    { label: '创建隧道', key: 'create', icon: renderIcon(AddCircleOutline) },
+    { label: '隧道管理', key: 'tunnels', icon: renderIcon(SwapHorizontalOutline) },
+  ]
+  if (authStore.isAdmin) {
+    items.push({
+      label: () =>
+        h('span', { class: 'menu-label-wrap' }, [
+          h('span', null, '系统设置'),
+          updateStore.hasUpdate ? h('span', { class: 'nav-update-dot', title: '发现新版本' }) : null,
+        ]),
+      key: 'settings',
+      icon: renderIcon(SettingsOutline),
+    })
+  }
+  return items
+})
 
-const bottomNavItems = [
-  { key: 'dashboard', label: '仪表盘', icon: SpeedometerOutline },
-  { key: 'create', label: '创建隧道', icon: AddCircleOutline },
-  { key: 'tunnels', label: '隧道管理', icon: SwapHorizontalOutline },
-  { key: 'settings', label: '系统设置', icon: SettingsOutline },
-]
+const bottomNavItems = computed(() => {
+  const items = [
+    { key: 'dashboard', label: '仪表盘', icon: SpeedometerOutline },
+    { key: 'create', label: '创建隧道', icon: AddCircleOutline },
+    { key: 'tunnels', label: '隧道管理', icon: SwapHorizontalOutline },
+  ]
+  if (authStore.isAdmin) {
+    items.push({ key: 'settings', label: '系统设置', icon: SettingsOutline })
+  }
+  return items
+})
 
-const activeKey = computed(() => String(route.name || 'dashboard'))
+const activeKey = computed(() => {
+  const name = String(route.name || 'dashboard')
+  if (name === 'user-detail') return 'settings'
+  return name
+})
 const pageTitle = computed(() => String(route.meta.title || '仪表盘'))
 
 function handleSelectNav(key: string) {
@@ -93,8 +137,20 @@ function handleSelectNav(key: string) {
   }
 }
 
+function toggleAvatarMenu() {
+  avatarMenuOpen.value = !avatarMenuOpen.value
+}
+
+function goProfile() {
+  avatarMenuOpen.value = false
+  if (route.name !== 'profile') {
+    void router.push({ name: 'profile' })
+  }
+}
+
 async function handleLogout() {
-  dashStore.stopRealtime()
+  avatarMenuOpen.value = false
+  dashStore.reset()
   await authStore.logout()
   message.success('已退出登录')
   await router.replace({ name: 'login' })
@@ -152,7 +208,7 @@ async function handleLogout() {
             <NButton
               quaternary
               circle
-              class="icon-btn"
+              class="icon-btn theme-shift-btn"
               :aria-label="themeStore.isDark ? '切换为浅色模式' : '切换为深色模式'"
               @click="themeStore.toggleDark()"
             >
@@ -166,18 +222,54 @@ async function handleLogout() {
               </template>
             </NButton>
 
-            <NButton
-              v-if="isDesktop"
-              quaternary
-              size="small"
-              aria-label="退出登录"
-              @click="handleLogout"
-            >
-              <template #icon>
-                <NIcon><LogOutOutline /></NIcon>
-              </template>
-              退出
-            </NButton>
+            <div ref="avatarWrapRef" class="avatar-menu-wrap">
+              <button
+                type="button"
+                class="avatar-trigger"
+                :class="{ active: avatarMenuOpen }"
+                aria-label="用户菜单"
+                :aria-expanded="avatarMenuOpen"
+                aria-haspopup="menu"
+                @click.stop="toggleAvatarMenu"
+              >
+                <img
+                  v-if="authStore.user?.has_avatar && authStore.user?.avatar_url"
+                  :src="authStore.user.avatar_url"
+                  :alt="authStore.user.username"
+                  class="avatar-img"
+                />
+                <span v-else class="avatar-fallback">{{ userInitial }}</span>
+              </button>
+
+              <Transition name="nfr-avatar-pop">
+                <div
+                  v-if="avatarMenuOpen"
+                  class="avatar-popover"
+                  role="menu"
+                  aria-label="账号选项"
+                >
+                  <button
+                    type="button"
+                    class="avatar-pop-item"
+                    role="menuitem"
+                    @click="goProfile"
+                  >
+                    <NIcon :size="16"><PersonOutline /></NIcon>
+                    <span>用户资料</span>
+                  </button>
+                  <div class="avatar-pop-sep" />
+                  <button
+                    type="button"
+                    class="avatar-pop-item danger"
+                    role="menuitem"
+                    @click="handleLogout"
+                  >
+                    <NIcon :size="16"><LogOutOutline /></NIcon>
+                    <span>退出登录</span>
+                  </button>
+                </div>
+              </Transition>
+            </div>
           </div>
         </header>
       </NLayoutHeader>
@@ -193,7 +285,12 @@ async function handleLogout() {
       </NLayoutContent>
     </NLayout>
 
-    <nav v-if="!isDesktop" class="mobile-bottom-nav" aria-label="底部导航">
+    <nav
+      v-if="!isDesktop"
+      class="mobile-bottom-nav"
+      :style="{ gridTemplateColumns: `repeat(${bottomNavItems.length}, minmax(0, 1fr))` }"
+      aria-label="底部导航"
+    >
       <button
         v-for="item in bottomNavItems"
         :key="item.key"
@@ -217,7 +314,8 @@ async function handleLogout() {
       </button>
     </nav>
 
-    <UpdateModal />
+    <UpdateModal v-if="authStore.isAdmin" />
+    <DbSetupModal />
   </NLayout>
 </template>
 
@@ -303,7 +401,7 @@ async function handleLogout() {
 .app-header {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 25;
   height: 56px;
   padding: 0 24px;
   background: var(--nfr-surface);
@@ -341,13 +439,130 @@ async function handleLogout() {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
 .icon-btn {
   width: 36px;
   height: 36px;
+}
+
+.theme-shift-btn {
+  margin-right: 2px;
+}
+
+.avatar-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.avatar-trigger {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--nfr-border);
+  background: var(--nfr-primary-soft);
+  color: var(--nfr-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 160ms ease;
+}
+
+.avatar-trigger:hover,
+.avatar-trigger.active {
+  border-color: var(--nfr-primary);
+  box-shadow: 0 0 0 3px var(--nfr-primary-soft);
+}
+
+.avatar-trigger:active {
+  transform: scale(0.94);
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-fallback {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Compact top-right anchored micro-dropdown expanding subtly down-left */
+.avatar-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 152px;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--nfr-border);
+  background: var(--nfr-surface);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  transform-origin: top right;
+  z-index: 60;
+}
+
+.avatar-pop-item {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--nfr-text);
+  font-size: 13.5px;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.avatar-pop-item:hover {
+  background: var(--nfr-subtle);
+}
+
+.avatar-pop-item.danger {
+  color: #dc2626;
+}
+
+.avatar-pop-item.danger:hover {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.avatar-pop-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--nfr-border);
+}
+
+.nfr-avatar-pop-enter-active,
+.nfr-avatar-pop-leave-active {
+  transition:
+    opacity 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.nfr-avatar-pop-enter-from,
+.nfr-avatar-pop-leave-to {
+  opacity: 0;
+  transform: scale(0.9) translate(4px, -6px);
 }
 
 .app-content {

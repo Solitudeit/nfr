@@ -25,6 +25,7 @@ type Info struct {
 // Tunnel is the console's view of a published service.
 type Tunnel struct {
 	ID          string   `json:"id"`
+	OwnerID     string   `json:"owner_id,omitempty"`
 	Name        string   `json:"name"`
 	NodeID      string   `json:"node_id"`
 	NodeName    string   `json:"node_name,omitempty"`
@@ -37,6 +38,7 @@ type Tunnel struct {
 	QuotaMB     int64    `json:"quota_mb,omitempty"`
 	UsedBytes   int64    `json:"used_bytes,omitempty"`
 	QuotaPaused bool     `json:"quota_paused,omitempty"`
+	QuotaReason string   `json:"quota_reason,omitempty"`
 	Online      bool     `json:"online"`
 	// NodeMissing marks a tunnel whose node no longer exists in the registry.
 	NodeMissing bool `json:"node_missing,omitempty"`
@@ -69,6 +71,7 @@ type Tunnel struct {
 // Node is an edge agent as seen by the console.
 type Node struct {
 	ID         string     `json:"id"`
+	OwnerID    string     `json:"owner_id,omitempty"`
 	Name       string     `json:"name"`
 	OS         string     `json:"os,omitempty"`
 	Arch       string     `json:"arch,omitempty"`
@@ -196,6 +199,7 @@ type Event struct {
 	Type    string    `json:"type"`
 	At      time.Time `json:"at"`
 	Message string    `json:"message,omitempty"`
+	OwnerID string    `json:"-"`
 }
 
 // MirrorNode describes one GitHub Release acceleration mirror.
@@ -244,4 +248,97 @@ type UpdateStatus struct {
 	MirrorUsed         string             `json:"mirror_used,omitempty"`
 	Mirrors            []MirrorNode       `json:"mirrors"`
 	Upgrade            UpgradeProgress    `json:"upgrade"`
+}
+
+// User is the panel's view of an account. AuthToken is only populated on self
+// profile responses.
+type User struct {
+	ID             string    `json:"id"`
+	Username       string    `json:"username"`
+	Role           string    `json:"role"` // "admin" | "user"
+	Disabled       bool      `json:"disabled"`
+	MaxTunnels     int       `json:"max_tunnels"`
+	MaxBandwidthKB int       `json:"max_bandwidth_kb"`
+	MonthlyQuotaMB int64     `json:"monthly_quota_mb"`
+	UsedBytes      int64     `json:"used_bytes"`
+	UsageMonth     string    `json:"usage_month,omitempty"`
+	TunnelCount    int       `json:"tunnel_count"`
+	OnlineTunnels  int       `json:"online_tunnels"`
+	HasAvatar      bool      `json:"has_avatar"`
+	AvatarURL      string    `json:"avatar_url,omitempty"`
+	AuthToken      string    `json:"auth_token,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// CreateUserRequest creates a new standard user account.
+type CreateUserRequest struct {
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	MaxTunnels     int    `json:"max_tunnels"`
+	MaxBandwidthKB int    `json:"max_bandwidth_kb"`
+	MonthlyQuotaMB int64  `json:"monthly_quota_mb"`
+}
+
+// UpdateUserRequest modifies a user's quotas or disabled state.
+type UpdateUserRequest struct {
+	Disabled       *bool  `json:"disabled,omitempty"`
+	MaxTunnels     *int   `json:"max_tunnels,omitempty"`
+	MaxBandwidthKB *int   `json:"max_bandwidth_kb,omitempty"`
+	MonthlyQuotaMB *int64 `json:"monthly_quota_mb,omitempty"`
+}
+
+// UserDetail returns one user together with their tunnels and nodes for the
+// admin detail view.
+type UserDetail struct {
+	User    User     `json:"user"`
+	Tunnels []Tunnel `json:"tunnels"`
+	Nodes   []Node   `json:"nodes"`
+}
+
+// ProfileUpdateRequest edits the signed-in user's username and/or password.
+type ProfileUpdateRequest struct {
+	Username    string `json:"username,omitempty"`
+	OldPassword string `json:"old_password,omitempty"`
+	NewPassword string `json:"new_password,omitempty"`
+}
+
+// DBStatus describes the active persistence backend for admin setup & settings.
+type DBStatus struct {
+	Mode           string `json:"mode"` // "file" | "mysql"
+	Configured     bool   `json:"configured"`
+	FromConfig     bool   `json:"from_config"`
+	MandatorySetup bool   `json:"mandatory_setup"`
+	Host           string `json:"host,omitempty"`
+	Port           int    `json:"port,omitempty"`
+	Database       string `json:"database,omitempty"`
+	Username       string `json:"username,omitempty"`
+	HasPassword    bool   `json:"has_password,omitempty"`
+	Version        string `json:"version,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// DBConfigRequest supplies MySQL connection details from the admin panel.
+type DBConfigRequest struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Database string `json:"database"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// DBTestResponse reports whether a MySQL connectivity & privilege probe passed.
+type DBTestResponse struct {
+	OK      bool   `json:"ok"`
+	Version string `json:"version,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// DBSetupResponse reports the outcome of switching to MySQL storage.
+type DBSetupResponse struct {
+	OK              bool     `json:"ok"`
+	AdoptedExisting bool     `json:"adopted_existing"`
+	ReauthRequired  bool     `json:"reauth_required"`
+	Status          DBStatus `json:"status"`
+	Message         string   `json:"message,omitempty"`
 }

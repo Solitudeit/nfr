@@ -16,15 +16,52 @@ import (
 	"github.com/solitudeit/nfr/internal/transport"
 )
 
-// CreateTunnel validates and stores a new tunnel, then tells the agent.
+func defaultOwnerID(st *store.State, ownerID string) string {
+	if ownerID != "" {
+		return ownerID
+	}
+	if admin, ok := st.AdminUser(); ok {
+		return admin.ID
+	}
+	return ""
+}
+
+func checkUserMonthlyQuota(st *store.State, ownerID string, now time.Time) error {
+	u, ok := st.UserByID(ownerID)
+	if !ok || u.Role == store.RoleAdmin {
+		return nil
+	}
+	if u.Disabled {
+		return errForbidden("user_disabled", "该账号已被管理员停用")
+	}
+	month := now.Format("2006-01")
+	if u.MonthlyQuotaMB > 0 && u.UsageMonth == month && u.UsedBytes > u.MonthlyQuotaMB<<20 {
+		return errBad("quota_exceeded", "账号本月流量配额已用尽，请联系管理员提升配额或等待下月重置")
+	}
+	return nil
+}
+
+// CreateTunnel validates and stores a new tunnel owned by the default admin.
 func (s *Server) CreateTunnel(req api.TunnelRequest) (api.Tunnel, error) {
+	return s.CreateTunnelForOwner("", req)
+}
+
+// CreateTunnelForOwner validates and stores a new tunnel owned by ownerID.
+func (s *Server) CreateTunnelForOwner(ownerID string, req api.TunnelRequest) (api.Tunnel, error) {
 	var created store.Tunnel
 	err := s.st.Update(func(st *store.State) error {
-		t, err := buildTunnel(st, req, nil, st.Settings.Domain, false)
+		oid := defaultOwnerID(st, ownerID)
+		t, err := buildTunnel(st, oid, req, nil, st.Settings.Domain, false)
 		if err != nil {
 			return err
 		}
+		if t.Enabled {
+			if err := checkUserMonthlyQuota(st, oid, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		t.ID = store.NewID()
+		t.OwnerID = oid
 		t.CreatedAt = time.Now().UTC()
 		t.UpdatedAt = t.CreatedAt
 		st.Tunnels = append(st.Tunnels, *t)
@@ -35,7 +72,7 @@ func (s *Server) CreateTunnel(req api.TunnelRequest) (api.Tunnel, error) {
 		return api.Tunnel{}, err
 	}
 	s.reconcile()
-	s.notify("tunnel created: " + created.Name)
+	s.notifyOwner(created.OwnerID, "tunnel created: "+created.Name)
 	if v, ok := s.Tunnel(created.ID); ok {
 		return v, nil
 	}
@@ -43,17 +80,29 @@ func (s *Server) CreateTunnel(req api.TunnelRequest) (api.Tunnel, error) {
 }
 
 // CreateStandaloneTunnel creates a panel-owned tunnel directly on this control
-// node without requiring a pre-registered edge node. The tunnel stays offline
-// until a client connects using its generated per-tunnel config (name "t-<id>").
+// node owned by the default admin.
 func (s *Server) CreateStandaloneTunnel(req api.TunnelRequest) (api.Tunnel, error) {
+	return s.CreateStandaloneTunnelForOwner("", req)
+}
+
+// CreateStandaloneTunnelForOwner creates a panel-owned tunnel owned by ownerID
+// without requiring a pre-registered edge node.
+func (s *Server) CreateStandaloneTunnelForOwner(ownerID string, req api.TunnelRequest) (api.Tunnel, error) {
 	req.NodeID = ""
 	var created store.Tunnel
 	err := s.st.Update(func(st *store.State) error {
-		t, err := buildTunnel(st, req, nil, st.Settings.Domain, true)
+		oid := defaultOwnerID(st, ownerID)
+		t, err := buildTunnel(st, oid, req, nil, st.Settings.Domain, true)
 		if err != nil {
 			return err
 		}
+		if t.Enabled {
+			if err := checkUserMonthlyQuota(st, oid, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		t.ID = store.NewID()
+		t.OwnerID = oid
 		t.ManagedByConfig = false
 		t.CreatedAt = time.Now().UTC()
 		t.UpdatedAt = t.CreatedAt
@@ -65,19 +114,24 @@ func (s *Server) CreateStandaloneTunnel(req api.TunnelRequest) (api.Tunnel, erro
 		return api.Tunnel{}, err
 	}
 	s.reconcile()
-	s.notify("tunnel created: " + created.Name)
+	s.notifyOwner(created.OwnerID, "tunnel created: "+created.Name)
 	if v, ok := s.Tunnel(created.ID); ok {
 		return v, nil
 	}
 	return api.Tunnel{}, nil
 }
 
-// KickTunnel sends a kick control frame to the active client carrying tunnel id
-// so nfrc exits cleanly and stays offline until manually restarted.
+// KickTunnel sends a kick control frame to the active client carrying tunnel id.
 func (s *Server) KickTunnel(id string) (bool, error) {
+	return s.KickTunnelForOwner("", id)
+}
+
+// KickTunnelForOwner kicks the active client carrying tunnel id if owned by
+// ownerID (or any tunnel when ownerID is empty).
+func (s *Server) KickTunnelForOwner(ownerID, id string) (bool, error) {
 	st := s.st.Snapshot()
 	t, ok := st.TunnelByID(id)
-	if !ok {
+	if !ok || (ownerID != "" && t.OwnerID != ownerID) {
 		return false, errNotFound("tunnel not found")
 	}
 	if t.NodeID == "" {
@@ -88,7 +142,7 @@ func (s *Server) KickTunnel(id string) (bool, error) {
 		return false, nil
 	}
 	a.kick("强制下线")
-	s.notify("tunnel kicked: " + t.Name)
+	s.notifyOwner(t.OwnerID, "tunnel kicked: "+t.Name)
 	return true, nil
 }
 
@@ -107,10 +161,13 @@ func (s *Server) ClientsDir() string {
 }
 
 // CreateTunnelAwaiting creates a tunnel that has no node yet and mints a join
-// code bound to it, all inside one store update. The device that redeems the
-// code becomes the tunnel's node. NodeID "new" selects this flow; the name is
-// left empty, one is generated from the assigned port.
+// code bound to it for the default admin.
 func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) (api.Tunnel, api.JoinCodeResponse, error) {
+	return s.CreateTunnelAwaitingForOwner("", req, ttl)
+}
+
+// CreateTunnelAwaitingForOwner creates an awaiting tunnel + join code owned by ownerID.
+func (s *Server) CreateTunnelAwaitingForOwner(ownerID string, req api.TunnelRequest, ttl time.Duration) (api.Tunnel, api.JoinCodeResponse, error) {
 	if strings.TrimSpace(req.NodeID) != "new" {
 		return api.Tunnel{}, api.JoinCodeResponse{}, errBad("node_id", "awaiting tunnels are created with node_id \"new\"")
 	}
@@ -125,13 +182,8 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 	var code string
 	var expiresAt time.Time
 	err := s.st.Update(func(st *store.State) error {
-		// The auto name is derived from the remote port, so a port must exist
-		// before buildTunnel validates the name. Without an explicit port one
-		// is picked here and buildTunnel binds exactly that port.
+		oid := defaultOwnerID(st, ownerID)
 		if req.RemotePort == 0 {
-			// Pick in the tunnel's own space: a UDP tunnel must not receive a
-			// port another UDP tunnel already owns just because it is free
-			// for TCP.
 			port, err := pickPort(st, "", store.TunnelNetwork(req.Type))
 			if err != nil {
 				return err
@@ -141,35 +193,37 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 		if strings.TrimSpace(req.Name) == "" {
 			name := fmt.Sprintf("tunnel-%d", req.RemotePort)
 			for _, o := range st.Tunnels {
-				if strings.EqualFold(o.Name, name) {
+				if o.OwnerID == oid && strings.EqualFold(o.Name, name) {
 					name = fmt.Sprintf("tunnel-%d-%s", req.RemotePort, store.NewID()[:4])
 					break
 				}
 			}
 			req.Name = name
 		}
-		// The tunnel has no node yet: clear the marker and let buildTunnel
-		// skip the node check. The ordinary API passes false and can never
-		// quietly create a nodeless tunnel.
 		req.NodeID = ""
-		t, err := buildTunnel(st, req, nil, st.Settings.Domain, true)
+		t, err := buildTunnel(st, oid, req, nil, st.Settings.Domain, true)
 		if err != nil {
 			return err
 		}
+		if t.Enabled {
+			if err := checkUserMonthlyQuota(st, oid, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		t.ID = store.NewID()
+		t.OwnerID = oid
 		t.CreatedAt = time.Now().UTC()
 		t.UpdatedAt = t.CreatedAt
 		st.Tunnels = append(st.Tunnels, *t)
 		created = *t
 
-		// Mint the bound code in the same update: a tunnel without its code
-		// would wait forever.
 		now := time.Now().UTC()
 		code = auth.NewJoinCode()
 		expiresAt = now.Add(ttl)
 		st.PruneJoins(now)
 		st.Joins = append(st.Joins, auth.JoinCode{
 			Code:      code,
+			OwnerID:   oid,
 			NodeName:  t.Name,
 			TunnelID:  t.ID,
 			CreatedAt: now,
@@ -180,7 +234,6 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 	if err != nil {
 		return api.Tunnel{}, api.JoinCodeResponse{}, err
 	}
-	// joinHost reads the store, so it must run after Update released its lock.
 	host, warning := s.joinHost()
 	resp := api.JoinCodeResponse{
 		Code:      code,
@@ -189,7 +242,7 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 		Warning:   warning,
 	}
 	s.reconcile()
-	s.notify("awaiting tunnel created: " + created.Name)
+	s.notifyOwner(created.OwnerID, "awaiting tunnel created: "+created.Name)
 	if v, ok := s.Tunnel(created.ID); ok {
 		return v, resp, nil
 	}
@@ -198,15 +251,28 @@ func (s *Server) CreateTunnelAwaiting(req api.TunnelRequest, ttl time.Duration) 
 
 // UpdateTunnel replaces the editable fields of a tunnel.
 func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, error) {
+	return s.UpdateTunnelForOwner("", id, req)
+}
+
+// UpdateTunnelForOwner replaces editable fields of a tunnel owned by ownerID
+// (or any tunnel when ownerID is empty).
+func (s *Server) UpdateTunnelForOwner(ownerID, id string, req api.TunnelRequest) (api.Tunnel, error) {
+	var tunOwner string
 	err := s.st.Update(func(st *store.State) error {
 		cur, ok := st.TunnelByID(id)
-		if !ok {
+		if !ok || (ownerID != "" && cur.OwnerID != ownerID) {
 			return errNotFound("tunnel not found")
 		}
+		tunOwner = cur.OwnerID
 		allowNoNode := cur.NodeID == "" && strings.TrimSpace(req.NodeID) == ""
-		next, err := buildTunnel(st, req, cur, st.Settings.Domain, allowNoNode)
+		next, err := buildTunnel(st, cur.OwnerID, req, cur, st.Settings.Domain, allowNoNode)
 		if err != nil {
 			return err
+		}
+		if next.Enabled && !cur.Enabled {
+			if err := checkUserMonthlyQuota(st, cur.OwnerID, time.Now().UTC()); err != nil {
+				return err
+			}
 		}
 		cur.Name = next.Name
 		cur.NodeID = next.NodeID
@@ -224,8 +290,9 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 		return api.Tunnel{}, err
 	}
 	s.clearTargetDown(id)
+	s.clearLimitBucket(id)
 	s.reconcile()
-	s.notify("tunnel updated: " + id)
+	s.notifyOwner(tunOwner, "tunnel updated: "+id)
 	if v, ok := s.Tunnel(id); ok {
 		return v, nil
 	}
@@ -235,13 +302,28 @@ func (s *Server) UpdateTunnel(id string, req api.TunnelRequest) (api.Tunnel, err
 // DeleteTunnel removes a tunnel, closes its public port, and cleans up any
 // synthetic per-tunnel client node ("t-<id>") bound exclusively to it.
 func (s *Server) DeleteTunnel(id string) error {
+	return s.DeleteTunnelForOwner("", id)
+}
+
+// DeleteTunnelForOwner removes a tunnel owned by ownerID (or any tunnel when
+// ownerID is empty).
+func (s *Server) DeleteTunnelForOwner(ownerID, id string) error {
+	// Fold any unflushed bytes into User.UsedBytes BEFORE removing the tunnel
+	// and dropping its metrics counter so users cannot bypass monthly quotas
+	// by deleting tunnels inside the 30-second flush interval.
+	s.flushQuotas()
 	s.clearTargetDown(id)
 	var name string
+	var tunOwner string
 	var kickNodeID string
 	err := s.st.Update(func(st *store.State) error {
 		for i := range st.Tunnels {
 			if st.Tunnels[i].ID == id {
+				if ownerID != "" && st.Tunnels[i].OwnerID != ownerID {
+					return errNotFound("tunnel not found")
+				}
 				name = st.Tunnels[i].Name
+				tunOwner = st.Tunnels[i].OwnerID
 				boundNodeID := st.Tunnels[i].NodeID
 				st.Tunnels = append(st.Tunnels[:i], st.Tunnels[i+1:]...)
 				leases := st.Leases[:0]
@@ -251,11 +333,7 @@ func (s *Server) DeleteTunnel(id string) error {
 					}
 				}
 				st.Leases = leases
-				// Revocation: a deleted awaiting tunnel's command must never
-				// work again, so its bound codes die with it.
 				store.DeleteJoinsByTunnel(st, id)
-				// Clean up the synthetic per-tunnel node ("t-<id>") so deleted
-				// tunnels never leave orphan nodes or resurrect on reconnect.
 				if boundNodeID != "" {
 					for ni := range st.Nodes {
 						if st.Nodes[ni].ID == boundNodeID && st.Nodes[ni].Name == "t-"+id {
@@ -281,25 +359,27 @@ func (s *Server) DeleteTunnel(id string) error {
 	s.met.Drop(id)
 	s.dropLimit(id)
 	s.reconcile()
-	s.notify("tunnel deleted: " + name)
+	s.notifyOwner(tunOwner, "tunnel deleted: "+name)
 	return nil
 }
 
-// RegenerateTunnelCode replaces the join code bound to an awaiting tunnel:
-// the old code is revoked and a fresh one minted in the same update, so at
-// most one live bound code exists per tunnel. TTL is fixed at 30 minutes.
+// RegenerateTunnelCode replaces the join code bound to an awaiting tunnel.
 func (s *Server) RegenerateTunnelCode(id string) (api.JoinCodeResponse, error) {
+	return s.RegenerateTunnelCodeForOwner("", id)
+}
+
+// RegenerateTunnelCodeForOwner replaces the join code bound to an awaiting tunnel owned by ownerID.
+func (s *Server) RegenerateTunnelCodeForOwner(ownerID, id string) (api.JoinCodeResponse, error) {
 	var code string
 	var expiresAt time.Time
 	err := s.st.Update(func(st *store.State) error {
 		t, ok := st.TunnelByID(id)
-		if !ok {
+		if !ok || (ownerID != "" && t.OwnerID != ownerID) {
 			return errNotFound("tunnel not found")
 		}
 		if t.NodeID != "" {
 			return errConflict("already_joined", "this tunnel already has a node")
 		}
-		// One live bound code per tunnel: drop the old before minting.
 		store.DeleteJoinsByTunnel(st, id)
 		now := time.Now().UTC()
 		st.PruneJoins(now)
@@ -307,6 +387,7 @@ func (s *Server) RegenerateTunnelCode(id string) (api.JoinCodeResponse, error) {
 		expiresAt = now.Add(30 * time.Minute)
 		st.Joins = append(st.Joins, auth.JoinCode{
 			Code:      code,
+			OwnerID:   t.OwnerID,
 			NodeName:  t.Name,
 			TunnelID:  t.ID,
 			CreatedAt: now,
@@ -317,7 +398,6 @@ func (s *Server) RegenerateTunnelCode(id string) (api.JoinCodeResponse, error) {
 	if err != nil {
 		return api.JoinCodeResponse{}, err
 	}
-	// joinHost reads the store, so it must run after Update released its lock.
 	host, warning := s.joinHost()
 	return api.JoinCodeResponse{
 		Code:      code,
@@ -327,15 +407,24 @@ func (s *Server) RegenerateTunnelCode(id string) (api.JoinCodeResponse, error) {
 	}, nil
 }
 
-// TunnelJoinCode returns the live join code bound to an awaiting tunnel, so
-// the panel can render the command a new device must run. Read-only.
+// TunnelJoinCode returns the live join code bound to an awaiting tunnel.
 func (s *Server) TunnelJoinCode(id string) (api.JoinCodeResponse, bool) {
+	return s.TunnelJoinCodeForOwner("", id)
+}
+
+// TunnelJoinCodeForOwner returns the live join code bound to an awaiting tunnel owned by ownerID.
+func (s *Server) TunnelJoinCodeForOwner(ownerID, id string) (api.JoinCodeResponse, bool) {
 	st := s.st.Snapshot()
+	if ownerID != "" {
+		t, ok := st.TunnelByID(id)
+		if !ok || t.OwnerID != ownerID {
+			return api.JoinCodeResponse{}, false
+		}
+	}
 	jc, ok := store.FindJoinCodeByTunnel(&st, id)
 	if !ok {
 		return api.JoinCodeResponse{}, false
 	}
-	// joinHost reads the store, so it must run after Snapshot returned.
 	host, warning := s.joinHost()
 	return api.JoinCodeResponse{
 		Code:      jc.Code,
@@ -347,15 +436,30 @@ func (s *Server) TunnelJoinCode(id string) (api.JoinCodeResponse, bool) {
 
 // SetTunnelEnabled flips the enabled switch.
 func (s *Server) SetTunnelEnabled(id string, on bool) error {
+	return s.SetTunnelEnabledForOwner("", id, on)
+}
+
+// SetTunnelEnabledForOwner flips the enabled switch for a tunnel owned by
+// ownerID (or any tunnel when ownerID is empty), enforcing non-bypassable
+// monthly user quotas when re-enabling.
+func (s *Server) SetTunnelEnabledForOwner(ownerID, id string, on bool) error {
 	s.clearTargetDown(id)
+	var tunOwner string
 	err := s.st.Update(func(st *store.State) error {
 		t, ok := st.TunnelByID(id)
-		if !ok {
+		if !ok || (ownerID != "" && t.OwnerID != ownerID) {
 			return errNotFound("tunnel not found")
 		}
+		if on {
+			if err := checkUserMonthlyQuota(st, t.OwnerID, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
+		tunOwner = t.OwnerID
 		t.Enabled = on
 		if on {
 			t.QuotaPaused = false
+			t.QuotaReason = ""
 		}
 		t.UpdatedAt = time.Now().UTC()
 		return nil
@@ -364,20 +468,36 @@ func (s *Server) SetTunnelEnabled(id string, on bool) error {
 		return err
 	}
 	s.reconcile()
-	s.notify("tunnel toggled: " + id)
+	s.notifyOwner(tunOwner, "tunnel toggled: "+id)
 	return nil
 }
 
 // buildTunnel normalises and validates a tunnel description. It mutates the
 // lease list only when a valid lease is supplied.
-func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel, domain string, allowAwaiting bool) (*store.Tunnel, error) {
-	t := &store.Tunnel{Enabled: true}
+func buildTunnel(st *store.State, ownerID string, req api.TunnelRequest, existing *store.Tunnel, domain string, allowAwaiting bool) (*store.Tunnel, error) {
+	t := &store.Tunnel{Enabled: true, OwnerID: ownerID}
 	name := strings.TrimSpace(req.Name)
 	nodeID := strings.TrimSpace(req.NodeID)
 	typ := strings.TrimSpace(req.Type)
 	local := strings.TrimSpace(req.Local)
 	port := req.RemotePort
 	hosts := req.Hosts
+
+	var owner *store.User
+	if ownerID != "" {
+		owner, _ = st.UserByID(ownerID)
+	}
+	if existing == nil && owner != nil && owner.Role != store.RoleAdmin && owner.MaxTunnels > 0 {
+		count := 0
+		for _, o := range st.Tunnels {
+			if o.OwnerID == ownerID {
+				count++
+			}
+		}
+		if count >= owner.MaxTunnels {
+			return nil, errBad("quota_tunnels", fmt.Sprintf("已达到账号隧道数量上限 (%d 条)", owner.MaxTunnels))
+		}
+	}
 
 	if existing != nil {
 		t.ID = existing.ID
@@ -425,6 +545,9 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 	if quota < 0 || quota > 10<<20 {
 		return nil, errBad("quota_mb", "quota must be between 0 and 10485760 MB")
 	}
+	if owner != nil && owner.Role != store.RoleAdmin && owner.MaxBandwidthKB > 0 && bw > owner.MaxBandwidthKB {
+		return nil, errBad("quota_bandwidth", fmt.Sprintf("带宽上限不能超过账号配额 (%d KB/s)", owner.MaxBandwidthKB))
+	}
 	t.BandwidthKB = bw
 	t.QuotaMB = quota
 
@@ -441,12 +564,12 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 		}
 	}
 	if allowAwaiting && nodeID == "" {
-		// The awaiting flow: the tunnel is created before any node exists and
-		// waits for a device to redeem the join code minted alongside it. The
-		// ordinary API never gets here (allowAwaiting stays false), so a
-		// normal create cannot quietly produce a nodeless tunnel.
-	} else if _, ok := st.NodeByID(nodeID); !ok {
-		return nil, errBad("node_id", "choose a node that has joined")
+		// The awaiting flow: the tunnel is created before any node exists.
+	} else {
+		n, ok := st.NodeByID(nodeID)
+		if !ok || (ownerID != "" && n.OwnerID != "" && n.OwnerID != ownerID) {
+			return nil, errBad("node_id", "choose a node that has joined")
+		}
 	}
 	if typ == "" {
 		typ = store.TunnelTCP
@@ -462,6 +585,9 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 
 	for _, o := range st.Tunnels {
 		if existing != nil && o.ID == existing.ID {
+			continue
+		}
+		if ownerID != "" && o.OwnerID != ownerID {
 			continue
 		}
 		if strings.EqualFold(o.Name, name) {
@@ -510,6 +636,9 @@ func buildTunnel(st *store.State, req api.TunnelRequest, existing *store.Tunnel,
 			for _, oh := range o.Hosts {
 				for _, nh := range norm {
 					if strings.EqualFold(oh, nh) {
+						if ownerID != "" && o.OwnerID != ownerID {
+							return nil, errConflict("host_taken", "hostname "+nh+" is already in use")
+						}
 						return nil, errConflict("host_taken", "hostname "+nh+" is already routed to "+o.Name)
 					}
 				}
@@ -562,7 +691,7 @@ func bindPort(st *store.State, port int, existing *store.Tunnel, leaseID, networ
 		// TCP/HTTP and UDP listen in independent spaces, so a clash only
 		// matters within the same protocol.
 		if o.RemotePort == port && store.TunnelNetwork(o.Type) == network {
-			return 0, errConflict("port_taken", fmt.Sprintf("port %d is already used by %s", port, o.Name))
+			return 0, errConflict("port_taken", fmt.Sprintf("port %d is already in use", port))
 		}
 	}
 	samePort := existing != nil && existing.RemotePort == port
@@ -597,8 +726,13 @@ func normalizeHosts(in []string) []string {
 	return out
 }
 
-// CreateJoinCode mints a six character invitation.
+// CreateJoinCode mints a six character invitation for the default admin.
 func (s *Server) CreateJoinCode(req api.JoinCodeRequest) (api.JoinCodeResponse, error) {
+	return s.CreateJoinCodeForOwner("", req)
+}
+
+// CreateJoinCodeForOwner mints a six character invitation owned by ownerID.
+func (s *Server) CreateJoinCodeForOwner(ownerID string, req api.JoinCodeRequest) (api.JoinCodeResponse, error) {
 	ttl := req.TTLSeconds
 	if ttl <= 0 {
 		ttl = 300
@@ -609,9 +743,11 @@ func (s *Server) CreateJoinCode(req api.JoinCodeRequest) (api.JoinCodeResponse, 
 	now := time.Now().UTC()
 	code := auth.NewJoinCode()
 	err := s.st.Update(func(st *store.State) error {
+		oid := defaultOwnerID(st, ownerID)
 		st.PruneJoins(now)
 		st.Joins = append(st.Joins, auth.JoinCode{
 			Code:      code,
+			OwnerID:   oid,
 			NodeName:  req.Name,
 			CreatedAt: now,
 			ExpiresAt: now.Add(time.Duration(ttl) * time.Second),
@@ -905,13 +1041,24 @@ func (s *Server) SetInstanceName(name string) error {
 
 // RemoveNode forgets an agent, disconnects any live session, and drops its tunnels.
 func (s *Server) RemoveNode(id string) error {
+	return s.RemoveNodeForOwner("", id)
+}
+
+// RemoveNodeForOwner forgets an agent owned by ownerID (or any node when ownerID is empty).
+func (s *Server) RemoveNodeForOwner(ownerID, id string) error {
+	s.flushQuotas()
 	var removedTunnels []string
+	var nodeOwner string
 	err := s.st.Update(func(st *store.State) error {
 		found := false
 		nodes := make([]store.Node, 0, len(st.Nodes))
 		for _, n := range st.Nodes {
 			if n.ID == id {
+				if ownerID != "" && n.OwnerID != ownerID {
+					return errNotFound("node not found")
+				}
 				found = true
+				nodeOwner = n.OwnerID
 				continue
 			}
 			nodes = append(nodes, n)
@@ -955,27 +1102,33 @@ func (s *Server) RemoveNode(id string) error {
 		s.dropLimit(tid)
 	}
 	s.reconcile()
-	s.notify("node removed")
+	s.notifyOwner(nodeOwner, "node removed")
 	return nil
 }
 
-// SetNodeName renames an agent node. The name is cosmetic: it only shows up in
-// the panel and the tunnel list, so agents do not need to be reconfigured.
+// SetNodeName renames an agent node.
 func (s *Server) SetNodeName(id, name string) error {
+	return s.SetNodeNameForOwner("", id, name)
+}
+
+// SetNodeNameForOwner renames an agent node owned by ownerID (or any node when ownerID is empty).
+func (s *Server) SetNodeNameForOwner(ownerID, id, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errBad("name", "name is required")
 	}
+	var nodeOwner string
 	err := s.st.Update(func(st *store.State) error {
 		n, ok := st.NodeByID(id)
-		if !ok {
+		if !ok || (ownerID != "" && n.OwnerID != ownerID) {
 			return errNotFound("node not found")
 		}
+		nodeOwner = n.OwnerID
 		n.Name = name
 		return nil
 	})
 	if err == nil {
-		s.notify("node renamed")
+		s.notifyOwner(nodeOwner, "node renamed")
 	}
 	return err
 }

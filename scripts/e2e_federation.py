@@ -174,7 +174,8 @@ def start_server(nfrs, tmp, name):
             'log_level = "debug"\n' % (control, ingress, os.path.join(base, "data"))
         )
     log = open(os.path.join(base, "server.log"), "wb")
-    proc = subprocess.Popen([nfrs, "--foreground", "-c", cfg], stdout=log, stderr=subprocess.STDOUT)
+    env = dict(os.environ, NFR_DISABLE_UPDATE_CHECK="1", NFR_STORAGE="file")
+    proc = subprocess.Popen([nfrs, "--foreground", "-c", cfg], stdout=log, stderr=subprocess.STDOUT, env=env)
     if not wait_port(control):
         raise RuntimeError("server " + name + " never listened on " + str(control))
     m = None

@@ -7,6 +7,7 @@ package panel
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -25,6 +26,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/solitudeit/nfr/internal/api"
 	"github.com/solitudeit/nfr/internal/auth"
 	"github.com/solitudeit/nfr/internal/server"
 	"github.com/solitudeit/nfr/internal/store"
@@ -43,9 +45,15 @@ const (
 	maxJSONBody        = 1 << 20 // 1 MiB cap for panel JSON API payloads
 )
 
+type ctxKey int
+
+const ctxSessionKey ctxKey = 1
+
 type session struct {
-	csrf string
-	exp  time.Time
+	userID string
+	role   string
+	csrf   string
+	exp    time.Time
 }
 
 type failState struct {
@@ -87,12 +95,62 @@ func New(srv *server.Server, lg *slog.Logger) *Panel {
 		gzCache:  map[string][]byte{},
 	}
 	if srv != nil {
-		for _, ps := range srv.PanelSessions() {
-			p.sessions[ps.TokenHash] = &session{csrf: ps.CSRF, exp: ps.ExpiresAt}
-		}
+		p.loadPersistedSessions()
+		srv.SetOnStateReload(p.ReloadSessions)
+		srv.SetOnUserRevoke(p.RevokeUserSessions)
 	}
 	p.apiMux = p.buildAPIMux()
 	return p
+}
+
+func (p *Panel) loadPersistedSessions() {
+	if p.srv == nil {
+		return
+	}
+	adminID := ""
+	if admin, ok := p.srv.AdminUser(); ok {
+		adminID = admin.ID
+	}
+	next := make(map[string]*session)
+	for _, ps := range p.srv.PanelSessions() {
+		uid := ps.UserID
+		if uid == "" {
+			uid = adminID
+		}
+		role := store.RoleUser
+		if u, ok := p.srv.UserByID(uid); ok {
+			if u.Disabled {
+				continue
+			}
+			role = u.Role
+		} else {
+			continue
+		}
+		next[ps.TokenHash] = &session{userID: uid, role: role, csrf: ps.CSRF, exp: ps.ExpiresAt}
+	}
+	p.mu.Lock()
+	p.sessions = next
+	p.mu.Unlock()
+}
+
+// ReloadSessions reloads persisted console sessions after switching storage to
+// an already-populated MySQL database.
+func (p *Panel) ReloadSessions() {
+	p.loadPersistedSessions()
+}
+
+// RevokeUserSessions drops every active in-memory console session for userID.
+func (p *Panel) RevokeUserSessions(userID string) {
+	if userID == "" {
+		return
+	}
+	p.mu.Lock()
+	for k, s := range p.sessions {
+		if s.userID == userID {
+			delete(p.sessions, k)
+		}
+	}
+	p.mu.Unlock()
 }
 
 // ServeHTTP routes /nfr/api/* to the JSON API and all other /nfr/* paths to
@@ -132,7 +190,24 @@ func (p *Panel) serveAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.apiMux.ServeHTTP(w, r)
+	ctx := context.WithValue(r.Context(), ctxSessionKey, sess)
+	p.apiMux.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func sessionFrom(r *http.Request) *session {
+	s, _ := r.Context().Value(ctxSessionKey).(*session)
+	return s
+}
+
+func (p *Panel) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess := sessionFrom(r)
+		if sess == nil || sess.role != store.RoleAdmin {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "仅管理员可访问此功能"})
+			return
+		}
+		next(w, r)
+	}
 }
 
 func isStateChanging(method string) bool {
@@ -278,12 +353,30 @@ func (p *Panel) current(r *http.Request) *session {
 	key := auth.Hash(c.Value)
 	now := time.Now()
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.pruneLocked(now)
 	s, ok := p.sessions[key]
 	if !ok || now.After(s.exp) {
 		delete(p.sessions, key)
+		p.mu.Unlock()
 		return nil
+	}
+	uid := s.userID
+	p.mu.Unlock()
+
+	if p.srv != nil {
+		u, found := p.srv.UserByID(uid)
+		if !found || u.Disabled {
+			p.mu.Lock()
+			delete(p.sessions, key)
+			p.mu.Unlock()
+			return nil
+		}
+		p.mu.Lock()
+		if cur, still := p.sessions[key]; still {
+			cur.role = u.Role
+			s = cur
+		}
+		p.mu.Unlock()
 	}
 	return s
 }
@@ -310,6 +403,37 @@ func (p *Panel) checkCSRF(r *http.Request, s *session) bool {
 	return token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.csrf)) == 1
 }
 
+func (p *Panel) dbStatusForRole(role string) api.DBStatus {
+	st := p.srv.DBStatus()
+	if role != store.RoleAdmin {
+		st.MandatorySetup = false
+		st.Host = ""
+		st.Port = 0
+		st.Database = ""
+		st.Username = ""
+		st.HasPassword = false
+		st.Error = ""
+	}
+	return st
+}
+
+func (p *Panel) infoForUser(uid, role string) api.Info {
+	info := p.srv.Info()
+	if role != store.RoleAdmin {
+		tunnels := p.srv.TunnelsForOwner(uid)
+		nodes := p.srv.NodesForOwner(uid)
+		online := 0
+		for _, n := range nodes {
+			if n.Online {
+				online++
+			}
+		}
+		info.Nodes = online
+		info.Tunnels = len(tunnels)
+	}
+	return info
+}
+
 func (p *Panel) apiAuthMe(w http.ResponseWriter, r *http.Request) {
 	sess := p.current(r)
 	if sess == nil {
@@ -319,10 +443,13 @@ func (p *Panel) apiAuthMe(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	user, _ := p.srv.UserProfile(sess.userID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"csrf":          sess.csrf,
-		"info":          p.srv.Info(),
+		"user":          user,
+		"db":            p.dbStatusForRole(sess.role),
+		"info":          p.infoForUser(sess.userID, sess.role),
 		"version":       version.Version,
 	})
 }
@@ -338,6 +465,7 @@ func (p *Panel) apiAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 		Remember bool   `json:"remember"`
 	}
@@ -345,16 +473,23 @@ func (p *Panel) apiAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash := p.srv.PanelPasswordHash()
-	if hash == "" || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
+	user, err := p.srv.AuthenticatePanel(req.Username, req.Password)
+	if err != nil {
+		low := strings.ToLower(err.Error())
+		if strings.Contains(low, "停用") || strings.Contains(low, "disabled") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
 		p.failed(ip)
-		p.lg.Warn("console login failed", "remote", ip)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "密码错误"})
+		p.lg.Warn("console login failed", "remote", ip, "username", strings.TrimSpace(req.Username))
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Clear the one-time plaintext initial password once the operator signs in.
-	p.srv.ClearInitialPassword()
+	// Clear the one-time plaintext initial password once the admin signs in.
+	if user.Role == store.RoleAdmin {
+		p.srv.ClearInitialPassword()
+	}
 
 	ttl := sessionTTL
 	if req.Remember {
@@ -363,7 +498,7 @@ func (p *Panel) apiAuthLogin(w http.ResponseWriter, r *http.Request) {
 	id := randomToken()
 	key := auth.Hash(id)
 	exp := time.Now().UTC().Add(ttl)
-	s := &session{csrf: randomToken(), exp: exp}
+	s := &session{userID: user.ID, role: user.Role, csrf: randomToken(), exp: exp}
 	p.mu.Lock()
 	p.sessions[key] = s
 	p.fails[ip] = &failState{}
@@ -371,6 +506,7 @@ func (p *Panel) apiAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if req.Remember {
 		if err := p.srv.SavePanelSession(store.PanelSession{
 			TokenHash: key,
+			UserID:    user.ID,
 			CSRF:      s.csrf,
 			ExpiresAt: exp,
 		}); err != nil {
@@ -388,10 +524,13 @@ func (p *Panel) apiAuthLogin(w http.ResponseWriter, r *http.Request) {
 		Expires:  s.exp,
 		MaxAge:   int(ttl.Seconds()),
 	})
+	prof, _ := p.srv.UserProfile(user.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"csrf":          s.csrf,
-		"info":          p.srv.Info(),
+		"user":          prof,
+		"db":            p.dbStatusForRole(user.Role),
+		"info":          p.infoForUser(user.ID, user.Role),
 		"version":       version.Version,
 	})
 }
@@ -416,22 +555,26 @@ func (p *Panel) apiAuthLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// revokeOtherSessions invalidates every console session except the caller's
-// current cookie (used when rotating the admin password so stolen or old
-// 30-day sessions cannot outlive a password change).
+// revokeOtherSessions invalidates every console session of the calling user
+// except the caller's current cookie.
 func (p *Panel) revokeOtherSessions(r *http.Request) {
+	sess := sessionFrom(r)
+	userID := ""
+	if sess != nil {
+		userID = sess.userID
+	}
 	keep := ""
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		keep = auth.Hash(c.Value)
 	}
 	p.mu.Lock()
-	for id := range p.sessions {
-		if id != keep {
+	for id, s := range p.sessions {
+		if id != keep && (userID == "" || s.userID == userID) {
 			delete(p.sessions, id)
 		}
 	}
 	p.mu.Unlock()
-	_ = p.srv.RevokeOtherPanelSessions(keep)
+	_ = p.srv.RevokeUserPanelSessions(userID, keep)
 }
 
 func isHTTPS(r *http.Request) bool {

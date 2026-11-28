@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -18,9 +19,23 @@ const (
 	encPrefix     = "enc:v1:"
 )
 
-// loadOrCreateKey reads the 32-byte AES-256 key from dir/secret.key, creating
-// one with mode 0600 on first run.
+// KeyFingerprint returns a deterministic SHA-256 hex digest of the local
+// encryption key so a MySQL database can detect secret.key mismatches safely.
+func KeyFingerprint(key []byte) string {
+	sum := sha256.Sum256(key)
+	return hex.EncodeToString(sum[:])
+}
+
+// loadOrCreateKey reads the 32-byte AES-256 key from NFR_SECRET_KEY (if set) or
+// dir/secret.key, creating one with mode 0600 on first run.
 func loadOrCreateKey(dir string) ([]byte, error) {
+	if envHex := strings.TrimSpace(os.Getenv("NFR_SECRET_KEY")); envHex != "" {
+		key, err := hex.DecodeString(envHex)
+		if err != nil || len(key) != 32 {
+			return nil, errors.New("invalid NFR_SECRET_KEY: expected 64-char hex (32 bytes)")
+		}
+		return key, nil
+	}
 	path := filepath.Join(dir, secretKeyFile)
 	raw, err := os.ReadFile(path)
 	if err == nil {

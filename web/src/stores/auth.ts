@@ -1,11 +1,13 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { apiRequest, setCSRFToken } from '@/api/client'
-import type { InstanceInfo } from '@/types/api'
+import type { DBStatus, InstanceInfo, UserProfile } from '@/types/api'
 
 interface AuthResponse {
   authenticated: boolean
   csrf?: string
+  user?: UserProfile
+  db?: DBStatus
   info?: InstanceInfo
   version?: string
 }
@@ -46,8 +48,15 @@ export function setRememberPreference(remember: boolean): void {
 export const useAuthStore = defineStore('auth', () => {
   const checked = ref(false)
   const authenticated = ref(false)
+  const user = ref<UserProfile | null>(null)
+  const dbStatus = ref<DBStatus | null>(null)
   const info = ref<InstanceInfo | null>(null)
   const version = ref('')
+
+  const isAdmin = computed(() => user.value?.role === 'admin')
+  const requiresDbSetup = computed(
+    () => authenticated.value && isAdmin.value && !!dbStatus.value?.mandatory_setup,
+  )
 
   async function checkAuth(): Promise<boolean> {
     try {
@@ -56,14 +65,20 @@ export const useAuthStore = defineStore('auth', () => {
       version.value = res.version || ''
       if (res.authenticated) {
         setCSRFToken(res.csrf || '')
+        user.value = res.user || null
+        dbStatus.value = res.db || null
         info.value = res.info || null
       } else {
         setCSRFToken('')
+        user.value = null
+        dbStatus.value = null
         info.value = null
       }
     } catch {
       authenticated.value = false
       setCSRFToken('')
+      user.value = null
+      dbStatus.value = null
     } finally {
       checked.value = true
     }
@@ -75,17 +90,29 @@ export const useAuthStore = defineStore('auth', () => {
     return checkAuth()
   }
 
-  async function login(password: string, remember = false): Promise<void> {
+  async function login(username: string, password: string, remember = false): Promise<void> {
     const res = await apiRequest<AuthResponse>('/auth/login', {
       method: 'POST',
-      body: { password, remember },
+      body: { username: username.trim(), password, remember },
       skipAuthRedirect: true,
     })
     authenticated.value = !!res.authenticated
     setCSRFToken(res.csrf || '')
+    user.value = res.user || null
+    dbStatus.value = res.db || null
     info.value = res.info || null
     version.value = res.version || ''
     checked.value = true
+  }
+
+  async function refreshProfile(): Promise<void> {
+    if (!authenticated.value) return
+    const res = await apiRequest<{ user: UserProfile }>('/profile')
+    user.value = res.user
+  }
+
+  function setDBStatus(next: DBStatus) {
+    dbStatus.value = next
   }
 
   async function logout(): Promise<void> {
@@ -99,17 +126,25 @@ export const useAuthStore = defineStore('auth', () => {
   function clearSession() {
     authenticated.value = false
     setCSRFToken('')
+    user.value = null
+    dbStatus.value = null
     info.value = null
   }
 
   return {
     checked,
     authenticated,
+    user,
+    isAdmin,
+    dbStatus,
+    requiresDbSetup,
     info,
     version,
     checkAuth,
     ensureChecked,
     login,
+    refreshProfile,
+    setDBStatus,
     logout,
     clearSession,
   }

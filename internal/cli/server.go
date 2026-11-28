@@ -235,12 +235,18 @@ func cmdResetPassword(args []string) {
 	if err != nil {
 		fatal("hash password: %v", err)
 	}
-	st, err := store.Open(cfg.DataDir)
+	st, err := store.OpenWithDB(cfg.DataDir, cfg.Database)
 	if err != nil {
 		fatal("open state: %v", err)
 	}
+	defer st.Close()
 	if err := st.Update(func(s *store.State) error {
 		s.PanelPassword = hash
+		s.NormalizeLegacyUsers()
+		if admin, ok := s.AdminUser(); ok {
+			admin.PasswordHash = hash
+			admin.UpdatedAt = time.Now().UTC()
+		}
 		return nil
 	}); err != nil {
 		fatal("save password: %v", err)
@@ -406,10 +412,11 @@ func runServer(cfgPath string, cfg config.Server, existed bool, child bool) {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		fatal("create data directory: %v", err)
 	}
-	st, err := store.Open(cfg.DataDir)
+	st, err := store.OpenWithDB(cfg.DataDir, cfg.Database)
 	if err != nil {
 		fatal("open state: %v", err)
 	}
+	defer st.Close()
 	srv, generated, err := server.New(server.Options{Config: cfg, Store: st, Logger: lg})
 	if err != nil {
 		fatal("start node: %v", err)
@@ -467,6 +474,7 @@ func serverBanner(cfg config.Server, generated, authToken, pin string) string {
 		}
 	}
 	if generated != "" {
+		b.WriteString("  账号      admin\n")
 		b.WriteString("  密码      " + generated + "\n")
 	}
 	if authToken != "" {

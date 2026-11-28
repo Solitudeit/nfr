@@ -91,6 +91,16 @@ func (s *Server) ProbeTunnel(ctx context.Context, tunnelID string) (api.ProbeRes
 	return s.probeTunnelWithTimeout(ctx, tunnelID, defaultProbeTimeout)
 }
 
+// ProbeTunnelForOwner probes one tunnel only if it belongs to ownerID.
+func (s *Server) ProbeTunnelForOwner(ctx context.Context, ownerID, tunnelID string) (api.ProbeResult, error) {
+	st := s.st.Snapshot()
+	t, ok := st.TunnelByID(tunnelID)
+	if !ok || (ownerID != "" && t.OwnerID != ownerID) {
+		return api.ProbeResult{}, errNotFound("tunnel")
+	}
+	return s.probeTunnelWithTimeout(ctx, tunnelID, defaultProbeTimeout)
+}
+
 func (s *Server) probeTunnelWithTimeout(ctx context.Context, tunnelID string, timeout time.Duration) (api.ProbeResult, error) {
 	st := s.st.Snapshot()
 	t, ok := st.TunnelByID(tunnelID)
@@ -301,9 +311,21 @@ func (s *Server) executeProbe(ctx context.Context, a *agentSession, t store.Tunn
 // ProbeAllTunnels probes every configured tunnel with bounded per-node
 // concurrency (max probeMaxPerNode per node), returning results in tunnel order.
 func (s *Server) ProbeAllTunnels(ctx context.Context) []api.ProbeResult {
+	return s.ProbeAllTunnelsForOwner(ctx, "")
+}
+
+// ProbeAllTunnelsForOwner probes all tunnels owned by ownerID (or all tunnels
+// when ownerID is empty).
+func (s *Server) ProbeAllTunnelsForOwner(ctx context.Context, ownerID string) []api.ProbeResult {
 	st := s.st.Snapshot()
-	results := make([]api.ProbeResult, len(st.Tunnels))
-	if len(st.Tunnels) == 0 {
+	var list []store.Tunnel
+	for _, t := range st.Tunnels {
+		if ownerID == "" || t.OwnerID == ownerID {
+			list = append(list, t)
+		}
+	}
+	results := make([]api.ProbeResult, len(list))
+	if len(list) == 0 {
 		return results
 	}
 
@@ -324,7 +346,7 @@ func (s *Server) ProbeAllTunnels(ctx context.Context) []api.ProbeResult {
 	}
 
 	var wg sync.WaitGroup
-	for i, tun := range st.Tunnels {
+	for i, tun := range list {
 		wg.Add(1)
 		go func(idx int, t store.Tunnel) {
 			defer wg.Done()

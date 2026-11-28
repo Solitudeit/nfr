@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NAlert,
   NButton,
@@ -9,6 +9,7 @@ import {
   NIcon,
   NInput,
   NInputNumber,
+  NModal,
   NRadioButton,
   NRadioGroup,
   NSelect,
@@ -21,10 +22,12 @@ import {
   useMessage,
 } from 'naive-ui'
 import {
+  ChevronForwardOutline,
   CloudDownloadOutline,
   CopyOutline,
   KeyOutline,
   LogOutOutline,
+  PersonAddOutline,
   RefreshOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
@@ -33,9 +36,16 @@ import { useAuthStore } from '@/stores/auth'
 import { useDashboardStore } from '@/stores/dashboard'
 import { PRIMARY_PRESETS, useThemeStore } from '@/stores/theme'
 import { useUpdateStore } from '@/stores/update'
-import type { SettingsPayload } from '@/types/api'
-import { copyToClipboard, formatRelativeTime } from '@/utils/format'
+import type {
+  DBSetupResponse,
+  DBStatus,
+  DBTestResponse,
+  SettingsPayload,
+  UserProfile,
+} from '@/types/api'
+import { copyToClipboard, formatBytes, formatRelativeTime } from '@/utils/format'
 
+const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
@@ -43,6 +53,8 @@ const authStore = useAuthStore()
 const dashStore = useDashboardStore()
 const themeStore = useThemeStore()
 const updateStore = useUpdateStore()
+
+const activeTab = ref(String(route.query.tab || 'basic'))
 
 const loading = ref(true)
 const savingBasic = ref(false)
@@ -53,6 +65,32 @@ const changingPw = ref(false)
 
 const settings = ref<SettingsPayload | null>(null)
 const newlyCreatedKey = ref('')
+
+// Users management state
+const users = ref<UserProfile[]>([])
+const loadingUsers = ref(false)
+const createUserOpen = ref(false)
+const creatingUser = ref(false)
+const createUserForm = reactive({
+  username: '',
+  password: '',
+  max_tunnels: 0,
+  max_bandwidth_kb: 0,
+  monthly_quota_mb: 0,
+})
+
+// Database config state
+const dbStatus = ref<DBStatus | null>(null)
+const dbForm = reactive({
+  host: '127.0.0.1',
+  port: 3306,
+  database: '',
+  username: '',
+  password: '',
+})
+const testingDB = ref(false)
+const savingDB = ref(false)
+const dbFeedback = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 
 const basicForm = reactive({
   name: '',
@@ -101,10 +139,145 @@ async function fetchSettings() {
   }
 }
 
+async function fetchUsers() {
+  loadingUsers.value = true
+  try {
+    const res = await apiRequest<{ users: UserProfile[] }>('/users')
+    users.value = res.users || []
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '加载用户列表失败')
+  } finally {
+    loadingUsers.value = false
+  }
+}
+
+async function fetchDBStatus() {
+  try {
+    const res = await apiRequest<DBStatus>('/db')
+    dbStatus.value = res
+    if (res.host) dbForm.host = res.host
+    if (res.port) dbForm.port = res.port
+    if (res.database) dbForm.database = res.database
+    if (res.username) dbForm.username = res.username
+  } catch {
+    // ignore
+  }
+}
+
 onMounted(() => {
   void fetchSettings()
+  void fetchUsers()
+  void fetchDBStatus()
   void updateStore.fetchStatus(false)
 })
+
+async function handleCreateUser() {
+  if (!createUserForm.username.trim() || createUserForm.password.length < 6) {
+    message.warning('请填写用户名与至少 6 位初始密码')
+    return
+  }
+  creatingUser.value = true
+  try {
+    await apiRequest('/users', {
+      method: 'POST',
+      body: {
+        username: createUserForm.username.trim(),
+        password: createUserForm.password,
+        max_tunnels: createUserForm.max_tunnels || 0,
+        max_bandwidth_kb: createUserForm.max_bandwidth_kb || 0,
+        monthly_quota_mb: createUserForm.monthly_quota_mb || 0,
+      },
+    })
+    createUserOpen.value = false
+    createUserForm.username = ''
+    createUserForm.password = ''
+    createUserForm.max_tunnels = 0
+    createUserForm.max_bandwidth_kb = 0
+    createUserForm.monthly_quota_mb = 0
+    message.success('普通用户已创建')
+    await fetchUsers()
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '创建用户失败')
+  } finally {
+    creatingUser.value = false
+  }
+}
+
+function openUserDetail(id: string) {
+  void router.push({ name: 'user-detail', params: { id } })
+}
+
+async function handleTestDB() {
+  if (!dbForm.host.trim() || !dbForm.database.trim() || !dbForm.username.trim()) {
+    dbFeedback.value = { type: 'error', text: '请先填写数据库主机、库名和用户名' }
+    return
+  }
+  testingDB.value = true
+  dbFeedback.value = null
+  try {
+    const res = await apiRequest<DBTestResponse>('/db/test', {
+      method: 'POST',
+      body: {
+        host: dbForm.host.trim(),
+        port: dbForm.port || 3306,
+        database: dbForm.database.trim(),
+        username: dbForm.username.trim(),
+        password: dbForm.password,
+      },
+    })
+    dbFeedback.value = {
+      type: 'success',
+      text: `${res.message || '连接成功'}${res.version ? `（MySQL ${res.version}）` : ''}`,
+    }
+  } catch (err) {
+    dbFeedback.value = {
+      type: 'error',
+      text: err instanceof Error ? err.message : '连接测试失败',
+    }
+  } finally {
+    testingDB.value = false
+  }
+}
+
+async function handleSaveDB() {
+  if (!dbForm.host.trim() || !dbForm.database.trim() || !dbForm.username.trim()) {
+    dbFeedback.value = { type: 'error', text: '请先填写数据库主机、库名和用户名' }
+    return
+  }
+  savingDB.value = true
+  dbFeedback.value = null
+  try {
+    const res = await apiRequest<DBSetupResponse>('/db/setup', {
+      method: 'POST',
+      body: {
+        host: dbForm.host.trim(),
+        port: dbForm.port || 3306,
+        database: dbForm.database.trim(),
+        username: dbForm.username.trim(),
+        password: dbForm.password,
+      },
+    })
+    dbStatus.value = res.status
+    authStore.setDBStatus(res.status)
+    dbForm.password = ''
+    dbFeedback.value = { type: 'success', text: res.message || '数据库已连接并生效' }
+    message.success(res.message || '数据库配置已生效')
+    if (res.reauth_required) {
+      authStore.clearSession()
+      await router.replace({ name: 'login' })
+      return
+    }
+    await fetchUsers()
+    await dashStore.fetchDashboard(true)
+  } catch (err) {
+    dbFeedback.value = {
+      type: 'error',
+      text: err instanceof Error ? err.message : '切换数据库失败',
+    }
+  } finally {
+    savingDB.value = false
+  }
+}
 
 async function handleCheckUpdate() {
   try {
@@ -266,7 +439,7 @@ async function handleCopy(val: string, tip: string) {
 }
 
 async function handleLogout() {
-  dashStore.stopRealtime()
+  dashStore.reset()
   await authStore.logout()
   message.success('已退出登录')
   await router.replace({ name: 'login' })
@@ -280,7 +453,7 @@ async function handleLogout() {
     </section>
 
     <section v-else-if="settings" class="nfr-card settings-card">
-      <NTabs type="line" animated>
+      <NTabs v-model:value="activeTab" type="line" animated>
         <!-- Tab 1: Basic Node Settings -->
         <NTabPane name="basic" tab="基础配置">
           <div class="tab-body">
@@ -320,7 +493,7 @@ async function handleLogout() {
             <div class="divider" />
 
             <div class="sub-block">
-              <div class="sub-title">客户端连接密钥（auth_token）</div>
+              <div class="sub-title">管理员客户端连接密钥（auth_token）</div>
               <p class="sub-desc">生成启动配置时自动写入该密钥；如由配置文件锁定则需在 server.toml 中修改。</p>
               <div class="token-row">
                 <NInput
@@ -446,7 +619,147 @@ async function handleLogout() {
           </div>
         </NTabPane>
 
-        <!-- Tab 2: Security & API -->
+        <!-- Tab 2: Users Management -->
+        <NTabPane name="users" tab="用户管理">
+          <div class="tab-body">
+            <div class="api-head">
+              <div>
+                <div class="sub-title">多用户账号与配额</div>
+                <div class="sub-desc">点击任意用户进入详情页，可查看并管理其名下隧道、调整配额或停用账号</div>
+              </div>
+              <NButton type="primary" size="small" @click="createUserOpen = true">
+                <template #icon><NIcon><PersonAddOutline /></NIcon></template>
+                新建用户
+              </NButton>
+            </div>
+
+            <NSkeleton v-if="loadingUsers && users.length === 0" text :repeat="4" />
+
+            <div v-else class="user-list">
+              <button
+                v-for="u in users"
+                :key="u.id"
+                type="button"
+                class="user-row-card"
+                @click="openUserDetail(u.id)"
+              >
+                <div class="user-row-left">
+                  <span class="user-mini-avatar">
+                    <img v-if="u.has_avatar && u.avatar_url" :src="u.avatar_url" :alt="u.username" />
+                    <span v-else>{{ u.username.slice(0, 1).toUpperCase() }}</span>
+                  </span>
+                  <div class="user-row-info">
+                    <div class="user-row-name">
+                      <span>{{ u.username }}</span>
+                      <NTag size="tiny" :type="u.role === 'admin' ? 'info' : 'default'" :bordered="false">
+                        {{ u.role === 'admin' ? '管理员' : '普通用户' }}
+                      </NTag>
+                      <NTag v-if="u.disabled" size="tiny" type="error" :bordered="false">已停用</NTag>
+                    </div>
+                    <div class="user-row-meta nfr-mono">
+                      隧道 {{ u.tunnel_count }}{{ u.max_tunnels > 0 ? `/${u.max_tunnels}` : '' }}
+                      · 流量 {{ formatBytes(u.used_bytes) }}{{ u.monthly_quota_mb > 0 ? `/${u.monthly_quota_mb} MB` : '' }}
+                      <template v-if="u.max_bandwidth_kb > 0">
+                        · 限速 {{ u.max_bandwidth_kb }} KB/s
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <NIcon :size="18" class="user-row-arrow"><ChevronForwardOutline /></NIcon>
+              </button>
+            </div>
+          </div>
+        </NTabPane>
+
+        <!-- Tab 3: Database -->
+        <NTabPane name="database" tab="数据库">
+          <div class="tab-body">
+            <div class="api-head">
+              <div>
+                <div class="sub-title">MySQL 数据库存储</div>
+                <div class="sub-desc">
+                  当前模式：
+                  <strong class="nfr-mono">{{ dbStatus?.mode === 'mysql' ? 'MySQL' : '本地 JSON (file)' }}</strong>
+                  <template v-if="dbStatus?.version"> · MySQL {{ dbStatus.version }}</template>
+                </div>
+              </div>
+              <NTag
+                size="small"
+                :type="dbStatus?.mode === 'mysql' ? 'success' : 'warning'"
+                :bordered="false"
+              >
+                {{ dbStatus?.mode === 'mysql' ? '已连接 MySQL' : '未配置 MySQL' }}
+              </NTag>
+            </div>
+
+            <NAlert v-if="dbStatus?.from_config" type="info" :bordered="false">
+              当前数据库连接参数由服务端配置文件（server.toml）或环境变量锁定，如需变更请修改配置后重启服务。
+            </NAlert>
+
+            <NAlert v-if="dbFeedback" :type="dbFeedback.type" :bordered="false">
+              {{ dbFeedback.text }}
+            </NAlert>
+
+            <NForm label-placement="top" @submit.prevent="handleSaveDB">
+              <div class="two-col">
+                <NFormItem label="数据库主机">
+                  <NInput v-model:value="dbForm.host" :disabled="dbStatus?.from_config" placeholder="127.0.0.1" />
+                </NFormItem>
+                <NFormItem label="端口">
+                  <NInputNumber
+                    v-model:value="dbForm.port"
+                    :disabled="dbStatus?.from_config"
+                    :min="1"
+                    :max="65535"
+                    class="full-w"
+                  />
+                </NFormItem>
+              </div>
+
+              <div class="two-col">
+                <NFormItem label="数据库名">
+                  <NInput v-model:value="dbForm.database" :disabled="dbStatus?.from_config" placeholder="如 nfr" />
+                </NFormItem>
+                <NFormItem label="用户名">
+                  <NInput v-model:value="dbForm.username" :disabled="dbStatus?.from_config" placeholder="数据库用户名" />
+                </NFormItem>
+              </div>
+
+              <NFormItem label="数据库密码">
+                <NInput
+                  v-model:value="dbForm.password"
+                  :disabled="dbStatus?.from_config"
+                  type="password"
+                  show-password-on="click"
+                  :placeholder="dbStatus?.has_password ? '已加密保存，修改连接时请重新输入密码' : '请输入数据库密码'"
+                />
+              </NFormItem>
+
+              <div class="upd-btn-row">
+                <NButton
+                  secondary
+                  :disabled="dbStatus?.from_config || savingDB"
+                  :loading="testingDB"
+                  class="nfr-touch-btn"
+                  @click="handleTestDB"
+                >
+                  测试连接
+                </NButton>
+                <NButton
+                  type="primary"
+                  attr-type="submit"
+                  :disabled="dbStatus?.from_config || testingDB"
+                  :loading="savingDB"
+                  class="nfr-touch-btn"
+                >
+                  保存并应用数据库配置
+                </NButton>
+              </div>
+            </NForm>
+          </div>
+        </NTabPane>
+
+        <!-- Tab 4: Security & API -->
         <NTabPane name="security" tab="安全与接口">
           <div class="tab-body">
             <div class="sub-block">
@@ -526,7 +839,7 @@ async function handleLogout() {
           </div>
         </NTabPane>
 
-        <!-- Tab 3: Appearance -->
+        <!-- Tab 5: Appearance -->
         <NTabPane name="appearance" tab="外观偏好">
           <div class="tab-body">
             <div class="pref-row">
@@ -577,12 +890,44 @@ async function handleLogout() {
         </NTabPane>
       </NTabs>
     </section>
+
+    <!-- Create User Modal -->
+    <NModal
+      v-model:show="createUserOpen"
+      preset="card"
+      title="新建普通用户"
+      :style="{ width: '440px', maxWidth: 'calc(100vw - 24px)' }"
+    >
+      <NForm label-placement="top" @submit.prevent="handleCreateUser">
+        <NFormItem label="用户名">
+          <NInput v-model:value="createUserForm.username" placeholder="2-32 位字母/数字/点/下划线/短横线" />
+        </NFormItem>
+        <NFormItem label="初始密码（至少 6 位）">
+          <NInput v-model:value="createUserForm.password" type="password" show-password-on="click" placeholder="输入初始登录密码" />
+        </NFormItem>
+        <div class="two-col">
+          <NFormItem label="最大隧道数（0=不限）">
+            <NInputNumber v-model:value="createUserForm.max_tunnels" :min="0" :max="10000" class="full-w" />
+          </NFormItem>
+          <NFormItem label="单隧道限速 KB/s（0=不限）">
+            <NInputNumber v-model:value="createUserForm.max_bandwidth_kb" :min="0" :max="4194304" class="full-w" />
+          </NFormItem>
+        </div>
+        <NFormItem label="月流量配额 MB（0=不限）">
+          <NInputNumber v-model:value="createUserForm.monthly_quota_mb" :min="0" :max="10485760" class="full-w" />
+        </NFormItem>
+        <div class="modal-foot">
+          <NButton quaternary @click="createUserOpen = false">取消</NButton>
+          <NButton type="primary" attr-type="submit" :loading="creatingUser">确认创建</NButton>
+        </div>
+      </NForm>
+    </NModal>
   </div>
 </template>
 
 <style scoped>
 .settings-wrap {
-  max-width: 760px;
+  max-width: 780px;
   margin: 0 auto;
   width: 100%;
 }
@@ -641,6 +986,97 @@ async function handleLogout() {
   flex: 1 1 220px;
 }
 
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-row-card {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--nfr-border);
+  background: var(--nfr-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.user-row-card:hover {
+  border-color: var(--nfr-primary);
+  background: var(--nfr-surface);
+}
+
+.user-row-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.user-mini-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--nfr-border);
+  background: var(--nfr-primary-soft);
+  color: var(--nfr-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.user-mini-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.user-row-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.user-row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nfr-text);
+}
+
+.user-row-meta {
+  font-size: 12px;
+  color: var(--nfr-text-secondary);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.user-row-arrow {
+  color: var(--nfr-text-secondary);
+  flex-shrink: 0;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .upd-row {
   display: flex;
   align-items: center;
@@ -688,6 +1124,7 @@ async function handleLogout() {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+  flex-wrap: wrap;
 }
 
 .new-key-row {
@@ -799,18 +1236,13 @@ async function handleLogout() {
   transform: scale(1.18);
 }
 
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .settings-card {
     padding: 12px 14px 18px;
   }
-
   .two-col,
   .preset-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .key-scope-in {
-    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

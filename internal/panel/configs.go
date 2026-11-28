@@ -86,9 +86,13 @@ func (p *Panel) buildConfigsPayload() configsPayload {
 				QuotaMB:     t.QuotaMB,
 			})
 		}
+		nodeTok := p.srv.UserAuthToken(n.OwnerID)
+		if nodeTok == "" {
+			nodeTok = token
+		}
 		ag := config.Agent{
 			ServerAddr: serverAddr,
-			AuthToken:  token,
+			AuthToken:  nodeTok,
 			Name:       n.Name,
 			Pin:        pin,
 			CA:         useCA,
@@ -136,7 +140,10 @@ func (p *Panel) buildTunnelConfigPayload(t api.Tunnel) tunnelConfigPayload {
 	cert := p.srv.CertSummary()
 	useCA := cert.Source == "acme"
 	serverAddr := p.srv.JoinAddr()
-	token := p.srv.AuthToken()
+	token := p.srv.UserAuthToken(t.OwnerID)
+	if token == "" {
+		token = p.srv.AuthToken()
+	}
 	pin := ""
 	if !useCA {
 		pin = p.srv.Pin()

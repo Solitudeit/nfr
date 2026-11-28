@@ -81,17 +81,45 @@ type tunnelLimit struct {
 	down   *bucket // origin -> visitor (traffic out)
 }
 
+// effectiveBandwidthKBWithState computes the effective KB/s cap for tunnel t
+// considering both t.BandwidthKB and its owner's MaxBandwidthKB quota.
+func effectiveBandwidthKBWithState(st *store.State, t store.Tunnel) int {
+	rateKB := t.BandwidthKB
+	if t.OwnerID != "" && st != nil {
+		if u, ok := st.UserByID(t.OwnerID); ok && u.Role != store.RoleAdmin && u.MaxBandwidthKB > 0 {
+			if rateKB <= 0 || u.MaxBandwidthKB < rateKB {
+				rateKB = u.MaxBandwidthKB
+			}
+		}
+	}
+	return rateKB
+}
+
+// effectiveBandwidthKB returns the effective KB/s cap for tunnel t.
+func (s *Server) effectiveBandwidthKB(t store.Tunnel) int {
+	rateKB := t.BandwidthKB
+	if t.OwnerID != "" && s.st != nil {
+		_ = s.st.View(func(st *store.State) error {
+			rateKB = effectiveBandwidthKBWithState(st, t)
+			return nil
+		})
+	}
+	return rateKB
+}
+
 // limiterFor returns the tunnel's limiter, creating or rebuilding it when the
-// configured rate changed. It returns nil for unlimited tunnels.
+// configured rate (or the tunnel owner's bandwidth quota cap) changed. It
+// returns nil for unlimited tunnels.
 func (s *Server) limiterFor(t store.Tunnel) *tunnelLimit {
-	if t.BandwidthKB <= 0 {
+	rateKB := s.effectiveBandwidthKB(t)
+	if rateKB <= 0 {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l := s.limits[t.ID]
-	if l == nil || l.rateKB != t.BandwidthKB {
-		l = &tunnelLimit{rateKB: t.BandwidthKB, up: newBucket(t.BandwidthKB), down: newBucket(t.BandwidthKB)}
+	if l == nil || l.rateKB != rateKB {
+		l = &tunnelLimit{rateKB: rateKB, up: newBucket(rateKB), down: newBucket(rateKB)}
 		s.limits[t.ID] = l
 	}
 	return l

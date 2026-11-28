@@ -257,6 +257,44 @@ func (r *Registry) RecentRates() []RatePoint {
 	return out
 }
 
+// RecentRatesFor returns up to 60 one-second throughput points aggregated only
+// across the given set of tunnel IDs, sharing the exact timestamps of
+// RecentRates so each user's live chart is isolated from all other users.
+func (r *Registry) RecentRatesFor(tunnelIDs map[string]struct{}) []RatePoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.rateCount == 0 {
+		return []RatePoint{}
+	}
+	out := make([]RatePoint, r.rateCount)
+	start := 0
+	if r.rateCount == rateWindow {
+		start = r.rateIdx
+	}
+	for i := 0; i < r.rateCount; i++ {
+		out[i].TS = r.rateRing[(start+i)%rateWindow].TS
+	}
+	if len(tunnelIDs) == 0 {
+		return out
+	}
+	for id := range tunnelIDs {
+		h := r.hist[id]
+		if h == nil || h.ticks <= 0 {
+			continue
+		}
+		for i := 0; i < r.rateCount; i++ {
+			age := r.rateCount - 1 - i
+			if int64(age) >= h.ticks {
+				continue
+			}
+			slot := (h.secI + secWindow - 1 - age) % secWindow
+			out[i].InRate += h.sec[slot].In
+			out[i].OutRate += h.sec[slot].Out
+		}
+	}
+	return out
+}
+
 func (h *hist) secondsOrdered() []Point {
 	out := make([]Point, 0, secWindow)
 	for i := 0; i < secWindow; i++ {

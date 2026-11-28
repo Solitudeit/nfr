@@ -32,11 +32,28 @@ type Server struct {
 	// are set they replace the self-signed certificate generated on first run.
 	TLSCert   string `toml:"tls_cert" yaml:"tls_cert"`
 	TLSKey    string `toml:"tls_key" yaml:"tls_key"`
-	PortRange [2]int `toml:"port_range" yaml:"port_range"`
-	Panel     Panel  `toml:"panel" yaml:"panel"`
-	ACME      ACME   `toml:"acme" yaml:"acme"`
-	LogLevel  string `toml:"log_level" yaml:"log_level"`
-	LogFile   string `toml:"log_file" yaml:"log_file"`
+	PortRange [2]int   `toml:"port_range" yaml:"port_range"`
+	Panel     Panel    `toml:"panel" yaml:"panel"`
+	ACME      ACME     `toml:"acme" yaml:"acme"`
+	Database  Database `toml:"database,omitempty" yaml:"database,omitempty"`
+	LogLevel  string   `toml:"log_level" yaml:"log_level"`
+	LogFile   string   `toml:"log_file" yaml:"log_file"`
+}
+
+// Database holds optional MySQL connection settings. When Host and Name are set
+// in server.toml / server.yaml or via NFR_DB_* env vars, nfrs connects directly
+// to MySQL without prompting for database setup in the panel.
+type Database struct {
+	Host     string `toml:"host,omitempty" yaml:"host,omitempty"`
+	Port     int    `toml:"port,omitempty" yaml:"port,omitempty"`
+	Name     string `toml:"name,omitempty" yaml:"name,omitempty"`
+	User     string `toml:"user,omitempty" yaml:"user,omitempty"`
+	Password string `toml:"password,omitempty" yaml:"password,omitempty"`
+}
+
+// Configured reports whether external MySQL settings are specified.
+func (d Database) Configured() bool {
+	return strings.TrimSpace(d.Host) != "" && strings.TrimSpace(d.Name) != ""
 }
 
 // Panel holds the built-in web console settings.
@@ -339,6 +356,11 @@ func HashPassword(plain string) (string, error) {
 	return string(b), err
 }
 
+// CheckPassword reports whether plain matches a bcrypt hash.
+func CheckPassword(hash, plain string) bool {
+	return hash != "" && bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
+}
+
 // IsBcryptHash reports whether s looks like an encoded bcrypt hash.
 func IsBcryptHash(s string) bool {
 	return strings.HasPrefix(s, "$2a$") || strings.HasPrefix(s, "$2b$") || strings.HasPrefix(s, "$2y$")
@@ -409,6 +431,23 @@ func (c *Server) ApplyEnv() {
 	}
 	if v := strings.TrimSpace(os.Getenv("NFR_LOG_FILE")); v != "" {
 		c.LogFile = v
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_DB_HOST")); v != "" {
+		c.Database.Host = v
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_DB_PORT")); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 && p <= 65535 {
+			c.Database.Port = p
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_DB_NAME")); v != "" {
+		c.Database.Name = v
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_DB_USER")); v != "" {
+		c.Database.User = v
+	}
+	if v := strings.TrimSpace(os.Getenv("NFR_DB_PASSWORD")); v != "" {
+		c.Database.Password = v
 	}
 }
 

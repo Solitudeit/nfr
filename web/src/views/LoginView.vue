@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { NAlert, NButton, NCheckbox, NForm, NFormItem, NIcon, NInput, useMessage } from 'naive-ui'
-import { LockClosedOutline, MoonOutline, SunnyOutline } from '@vicons/ionicons5'
+import { LockClosedOutline, MoonOutline, PersonOutline, SunnyOutline } from '@vicons/ionicons5'
 import { APIError } from '@/api/client'
 import {
   getRememberPreference,
@@ -16,6 +16,7 @@ const message = useMessage()
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
 
+const username = ref('admin')
 const password = ref('')
 const remember = ref(getRememberPreference())
 const loading = ref(false)
@@ -27,14 +28,18 @@ watch(remember, (checked) => {
 
 async function handleSubmit() {
   if (loading.value) return
+  if (!username.value.trim()) {
+    errMsg.value = '请输入账号用户名'
+    return
+  }
   if (!password.value) {
-    errMsg.value = '请输入控制台密码'
+    errMsg.value = '请输入登录密码'
     return
   }
   errMsg.value = ''
   loading.value = true
   try {
-    await authStore.login(password.value, remember.value)
+    await authStore.login(username.value.trim(), password.value, remember.value)
     setRememberPreference(remember.value)
     message.success('欢迎回来')
     await router.replace({ name: 'dashboard' })
@@ -78,7 +83,7 @@ async function handleSubmit() {
         </div>
         <div>
           <h1 class="login-title">NFR 控制台</h1>
-          <p class="login-sub">单机反向穿透控制面</p>
+          <p class="login-sub">多用户反向穿透控制面</p>
         </div>
       </div>
 
@@ -87,22 +92,25 @@ async function handleSubmit() {
       </NAlert>
 
       <NForm label-placement="top" @submit.prevent="handleSubmit">
-        <input
-          type="text"
-          name="username"
-          value="admin"
-          autocomplete="username"
-          tabindex="-1"
-          aria-hidden="true"
-          class="sr-only-user"
-        />
-        <NFormItem label="管理员密码" class="pw-item">
+        <NFormItem label="账号" class="field-item">
+          <NInput
+            v-model:value="username"
+            placeholder="默认管理员账号为 admin"
+            :input-props="{ autocomplete: 'username' }"
+          >
+            <template #prefix>
+              <NIcon><PersonOutline /></NIcon>
+            </template>
+          </NInput>
+        </NFormItem>
+
+        <NFormItem label="密码" class="pw-item">
           <NInput
             v-model:value="password"
             type="password"
             show-password-on="click"
-            placeholder="请输入终端打印的初始密码或已设密码"
-            autocomplete="current-password"
+            placeholder="请输入终端打印的初始密码或账号密码"
+            :input-props="{ autocomplete: 'current-password' }"
             autofocus
           >
             <template #prefix>
@@ -128,7 +136,9 @@ async function handleSubmit() {
       </NForm>
 
       <div class="login-foot">
-        <span>首次部署密码可在启动终端或</span>
+        <span>首次部署管理员账号</span>
+        <span class="nfr-mono">admin</span>
+        <span>，密码可在终端或</span>
         <span class="nfr-mono">initial-password.txt</span>
         <span>查看</span>
       </div>
@@ -187,16 +197,8 @@ async function handleSubmit() {
   display: block;
 }
 
-.sr-only-user {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+.field-item {
+  margin-bottom: 2px;
 }
 
 .pw-item {
